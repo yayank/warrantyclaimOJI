@@ -442,12 +442,42 @@ a{color:inherit}
   font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;color:var(--ink-3);
   display:flex;flex-wrap:wrap;gap:6px 24px;
 }
+/* role comparison + edit mode */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:0}
+@media(max-width:900px){.compare{grid-template-columns:1fr}}
+.compare>.panel{border-left:1px solid var(--line);background:var(--surface)}
+.compare>.panel:first-child{border-left:0}
+.role-cap{
+  padding:8px 16px;border-bottom:1px solid var(--line);background:var(--surface-2);
+  font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;
+  color:var(--ink-3);display:flex;align-items:center;gap:8px;
+}
+.role-cap b{color:var(--ink);font-weight:600;letter-spacing:.04em}
+.editbar{
+  display:flex;align-items:center;gap:8px;padding:8px 16px;
+  background:var(--accent-soft);color:var(--accent-ink);
+  font-size:12px;font-weight:500;border-bottom:1px solid var(--line);
+}
+.inp.edit{border-color:var(--accent)}
+.inp.need{border-color:var(--warn);background:var(--warn-soft)}
+.was{font-size:11.5px;color:var(--ink-3)}
+.was s{opacity:.7}
+
+/* master data */
+.md-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.swt{width:28px;height:16px;border-radius:9px;background:var(--ok);position:relative;flex:none;display:inline-block}
+.swt::after{content:"";position:absolute;top:2px;right:2px;width:12px;height:12px;border-radius:50%;background:var(--surface)}
+.swt.off{background:var(--line)}
+.swt.off::after{right:auto;left:2px}
+.act{display:flex;gap:6px}
+.count-note{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 
 <header class="deck-head">
   <div class="deck-head-in">
-    <div class="eyebrow">Design Review · Draft 1</div>
+    <div class="eyebrow">Design Review · Draft 2</div>
     <h1>Warranty Claim Portal</h1>
     <p class="deck-lede">Mockup seluruh layar yang sudah kita sepakati, untuk mesin hemodialisis Sansin dan Oneject. Antarmuka aplikasi berbahasa Inggris formal sesuai keputusan; catatan di bawah tiap layar berbahasa Indonesia — itu komentar saya kepada Anda, bukan bagian dari produk. Data yang tampil diambil dari file klaim Anda yang sebenarnya.</p>
     <div class="deck-meta">
@@ -471,6 +501,8 @@ a{color:inherit}
       <li><a href="#s7"><span>07</span>Principal Review</a></li>
       <li><a href="#s8"><span>08</span>Forward Order</a></li>
       <li><a href="#s9"><span>09</span>Tester Mode</a></li>
+      <li><a href="#s10"><span>10</span>Edit Mode by Role</a></li>
+      <li><a href="#s11"><span>11</span>Master Data</a></li>
     </ol>
   </nav>
 
@@ -1033,10 +1065,181 @@ a{color:inherit}
       </div>
     </section>
 
+
+    <!-- 10 EDIT MODE -->
+    <section class="shot" id="s10">
+      <div class="shot-label">Screen 10 — Administrator &amp; Principal</div>
+      <h2>Edit Mode by Role</h2>
+      <p class="shot-note">Klaim yang sama, panel yang sama, dua peran berbeda — inilah maksud poin 9. Di kiri Administrator dalam mode ubah: field yang boleh disentuh berubah jadi isian bergaris teal, sisanya tetap teks. Mengganti serial number memaksa kolom alasan terisi karena itu mengubah dasar perhitungan garansi. Di kanan Principal: seluruh isi klaim hanya baca, dan satu-satunya yang bisa mereka sentuh adalah keputusan per sparepart. Panel selalu terbuka dalam keadaan baca; <code>Edit</code> harus ditekan lebih dulu, supaya tidak ada perubahan karena salah klik.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="compare">
+
+            <aside class="panel">
+              <div class="role-cap">Signed in as <b>Administrator</b></div>
+              <div class="editbar">✎ Edit mode — changes are recorded in the audit log and the requester is notified</div>
+              <div class="panel-head">
+                <h3>CLM-260826-0007</h3>
+                <div class="claim-line"><span class="pill p-sub">Submitted</span><span class="tiny">submitted 4 days ago by Dewi Anggraini</span></div>
+              </div>
+              <div class="panel-sec">
+                <h4>Unit</h4>
+                <div class="inp edit"><span class="stack"><span class="lab">Customer</span>RSUD dr. Yulidin Away Tapaktuan</span><span class="dim">▾</span></div>
+                <div class="inp edit"><span class="stack"><span class="lab">Serial number</span><span class="mono">XT2410057</span></span></div>
+                <div class="was">Was <s class="mono">XT2410O57</s> — changed 30 Aug 2026</div>
+                <div class="inp need"><span class="stack"><span class="lab">Reason for change <span class="req">*</span></span><span class="dim">Required — the serial number determines the warranty result</span></span></div>
+              </div>
+              <div class="panel-sec">
+                <h4>Fault</h4>
+                <div class="inp edit"><span class="stack"><span class="lab">Problem description</span>The machine is not turning on after transport.</span></div>
+              </div>
+              <div class="panel-sec">
+                <h4>Spare parts</h4>
+                <div class="partrow">
+                  <span class="idx">1</span><span>Air Detector</span><span class="mono">1 pcs</span>
+                  <span class="file has">✓ part-01.jpg</span><span class="dim">✕</span>
+                </div>
+                <div class="addrow">+ Add spare part</div>
+              </div>
+              <div class="panel-sec">
+                <h4>Work order</h4>
+                <div class="inp edit"><span class="mono">WO-2608-0043</span></div>
+              </div>
+              <div class="panel-foot">
+                <button class="btn">Cancel</button>
+                <span class="spacer"></span>
+                <button class="btn pri off">Save Changes</button>
+              </div>
+            </aside>
+
+            <aside class="panel">
+              <div class="role-cap">Signed in as <b>Principal</b></div>
+              <div class="panel-head">
+                <h3>CLM-260826-0007</h3>
+                <div class="claim-line"><span class="pill p-rev">In Review</span><span class="tiny">forwarded 30 Aug 2026</span></div>
+              </div>
+              <div class="panel-sec">
+                <h4>Unit</h4>
+                <div class="claim-line"><span>RSUD dr. Yulidin Away Tapaktuan</span></div>
+                <div class="claim-line"><span class="mono">XT2410057</span><span class="tiny">Sansin Hemodialysis Machine AKL</span></div>
+                <div class="calc">assembled Oct 2024 &nbsp;+&nbsp; 22 months = <b>Aug 2026</b></div>
+                <div class="claim-line"><span class="pill p-ok">Principal Warranty</span><span class="mono tiny">WO-2608-0043</span></div>
+              </div>
+              <div class="panel-sec">
+                <h4>Fault</h4>
+                <div class="tiny">“The machine is not turning on after transport.”</div>
+                <button class="btn sm">View Evidence</button>
+              </div>
+              <div class="panel-sec">
+                <h4>Decision</h4>
+                <div class="itemrow">
+                  <span class="nm">Air Detector</span><span class="mono tiny">1 pcs</span>
+                  <button class="btn sm ok">Approve</button><button class="btn sm no">Reject</button>
+                </div>
+                <div class="tiny">Claim details are read-only for this role.</div>
+              </div>
+              <div class="panel-foot"><span class="tiny">Rejecting a part requires a written reason.</span></div>
+            </aside>
+
+          </div>
+        </div>
+      </div>
+      <p class="shot-note">Kalau dua orang membuka klaim yang sama, yang menyimpan belakangan tidak menimpa diam-diam — dia dihadang selisihnya lebih dulu:</p>
+      <div class="frame">
+        <div class="modal-stage">
+          <div class="modal" style="max-width:430px">
+            <div class="modal-head"><h3>This claim was changed by someone else</h3></div>
+            <div class="modal-body" style="gap:11px">
+              <div class="tiny">Yayan Arifin saved a change to this claim 2 minutes ago, after you opened it.</div>
+              <div class="shipgrp" style="border-left-color:var(--warn);flex-direction:column;align-items:flex-start;gap:4px">
+                <div><b>Work order</b></div>
+                <div class="was">Yours <span class="mono">WO-2608-0043</span> &nbsp;·&nbsp; Theirs <span class="mono">WO-2608-0051</span></div>
+              </div>
+            </div>
+            <div class="modal-foot"><button class="btn">Discard Mine</button><span class="spacer"></span><button class="btn">Reload</button><button class="btn pri">Keep Mine</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11 MASTER DATA -->
+    <section class="shot" id="s11">
+      <div class="shot-label">Screen 11 — Administrator</div>
+      <h2>Master Data</h2>
+      <p class="shot-note">Lima tab, hanya untuk Administrator. Kolom <em>ID</em> paling kiri adalah inti perbaikannya: klaim menyimpan <code>PartID</code>, bukan teks nama — itu yang mencegah terulangnya nama yatim di sheet <code>Log</code> Anda. Kolom <em>Used in claims</em> memperingatkan sebelum sesuatu dinonaktifkan. Tidak ada tombol hapus; hanya sakelar aktif, sehingga entri lama tetap terbaca di klaim lama. Tab <em>Units</em> berisi 2.610 unit dari principal dan sengaja dibuat hanya-baca — pembaruannya lewat impor Excel dengan pratinjau, bukan diketik baris per baris.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s11">Claims</a><a href="#s11">Orders</a><a href="#s11" class="on">Master Data</a><a href="#s11">Audit Log</a></nav>
+            <div class="app-user"><span>Yayan Arifin · Administrator</span><span class="avatar">YA</span></div>
+          </div>
+          <div class="app-body">
+            <div class="tabs">
+              <button>Users</button><button>Customers</button>
+              <button class="on">Spare Parts</button><button>Recipients</button><button>Units</button>
+            </div>
+            <div class="md-toolbar">
+              <div class="field grow">⌕ Search spare part name…</div>
+              <span class="count-note">82 items · 78 active</span>
+              <span class="spacer"></span>
+              <button class="btn pri">Add Spare Part</button>
+            </div>
+            <table class="tbl">
+              <thead><tr>
+                <th style="width:96px">ID</th><th>Name</th><th style="width:84px">Active</th>
+                <th style="width:130px">Used in claims</th><th style="width:150px">Actions</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td class="mono">PART-014</td><td>Electrical Mainboard</td>
+                  <td><span class="swt"></span></td><td class="num">4</td>
+                  <td class="act"><button class="btn sm">Rename</button><button class="btn sm">Deactivate</button></td>
+                </tr>
+                <tr>
+                  <td class="mono">PART-081</td>
+                  <td class="twoline"><span>Wheel (New Version)</span><span class="was">renamed from <s>Wheel</s> · 12 Aug 2026</span></td>
+                  <td><span class="swt"></span></td><td class="num">4</td>
+                  <td class="act"><button class="btn sm">Rename</button><button class="btn sm">Deactivate</button></td>
+                </tr>
+                <tr>
+                  <td class="mono">PART-058</td><td>Power supply</td>
+                  <td><span class="swt"></span></td><td class="num">1</td>
+                  <td class="act"><button class="btn sm">Rename</button><button class="btn sm">Deactivate</button></td>
+                </tr>
+                <tr>
+                  <td class="mono">PART-022</td><td>Balancing chamber without solenoid valve</td>
+                  <td><span class="swt"></span></td><td class="num dim">0</td>
+                  <td class="act"><button class="btn sm">Rename</button><button class="btn sm">Deactivate</button></td>
+                </tr>
+                <tr>
+                  <td class="mono dimmer">PART-077</td>
+                  <td class="twoline"><span class="dimmer">battery</span><span class="was">hidden from selection lists</span></td>
+                  <td><span class="swt off"></span></td><td class="num">1</td>
+                  <td class="act"><button class="btn sm">Rename</button><button class="btn sm">Reactivate</button></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="modal-stage" style="background:transparent;padding:6px 0 0">
+              <div class="modal" style="max-width:440px">
+                <div class="modal-head"><h3>Rename Spare Part</h3><span class="mono tiny">PART-058</span></div>
+                <div class="modal-body" style="gap:11px">
+                  <div class="inp edit"><span class="stack"><span class="lab">Name</span>Power supply unit (v2)</span></div>
+                  <div class="was">Current name <s>Power supply</s></div>
+                  <div class="notice">⚠ 1 existing claim keeps the name it was submitted with. New claims will use the new name.</div>
+                </div>
+                <div class="modal-foot"><span class="spacer"></span><button class="btn">Cancel</button><button class="btn pri">Save</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div class="deck-foot">
-      <span>Draft 1 · 30 Aug 2026</span>
+      <span>Draft 2 · 30 Aug 2026</span>
       <span>Data contoh diambil dari claim_Warranty_sansin_1.xlsx</span>
-      <span>Belum termasuk: Edit Menu, Master Data</span>
+      <span>Seluruh modul yang disepakati sudah tercakup</span>
     </div>
 
   </main>

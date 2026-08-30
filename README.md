@@ -21,6 +21,8 @@ GitHub tidak merender HTML langsung dari repo. Untuk melihatnya: unduh berkasnya
 | 07 | Batch Review — Principal |
 | 08 | Forward Order & Availability — Administrator |
 | 09 | Role Simulation — Tester |
+| 10 | Edit Mode by Role — Administrator vs Principal |
+| 11 | Master Data — Administrator |
 
 ## Keputusan rancangan
 
@@ -52,6 +54,10 @@ Draft → Submitted → (verifikasi Admin)
 
 **Struktur sheet.** `Claims` · `ClaimItems` · `Attachments` · `AuditLog` · `EmailLog` · `users` · `Customer` · `sparepart` · `Recipients` · `warranty` · `Population`.
 
+Master data dirujuk lewat ID, bukan teks. `Claims` menyimpan `CustomerID` beserta salinan nama saat pengajuan, `ClaimItems` menyimpan `PartID` beserta salinan namanya. Layar menampilkan nama terkini; ekspor audit menampilkan keduanya bila berbeda.
+
+**Hak ubah** ditentukan oleh peran dan status. Requester hanya dapat mengubah klaim yang berstatus `Draft` atau `Returned`. Administrator dapat memperbaiki klaim `Submitted` — setiap perubahan tercatat dan Requester diberi tahu; penggantian serial number memerlukan alasan tertulis karena mengubah dasar perhitungan garansi. Principal hanya dapat mengubah keputusan per sparepart.
+
 **Berkas Drive** disimpan per bulk dan per klaim, dengan subfolder per kategori:
 
 ```
@@ -59,7 +65,7 @@ Klaim/CW300826/CLM-260826-0004/01-PART/
   CW300826_CLM-260826-0004_XT2410090_PART-01_ELECTRICAL-MAINBOARD.jpg
 ```
 
-**Email** — enam jenis, seluruhnya diarsipkan di `EmailLog` sebagai bukti audit:
+**Email** — tujuh jenis, seluruhnya diarsipkan di `EmailLog` sebagai bukti audit:
 
 | | Pemicu | Penerima |
 |---|---|---|
@@ -69,10 +75,10 @@ Klaim/CW300826/CLM-260826-0004/01-PART/
 | 4 | Keputusan principal | Administrator |
 | 5 | Pesanan disetujui diteruskan | daftar `Recipients` |
 | 6 | Klaim dikembalikan | Requester |
+| 7 | Klaim diubah Administrator | Requester |
 
 **Ketentuan lain.** Antarmuka aplikasi berbahasa Inggris formal. Data tidak pernah dihapus permanen, hanya ditandai. Setiap perubahan tercatat di `AuditLog` dengan identitas asli pelakunya. Zona waktu `Asia/Jakarta`.
 
-## Belum dibahas
+## Berikutnya
 
-- Edit Menu — hak ubah per field per peran
-- Master Data — CRUD `users`, `Customer`, `sparepart`, `Recipients`
+Menyusun dokumen spesifikasi: struktur sheet lengkap dengan nama kolom, state machine, matriks hak akses per field, isi ketujuh email, dan mekanisme verifikasi login.
