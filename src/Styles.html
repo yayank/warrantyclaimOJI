@@ -286,6 +286,8 @@ table.data tr.sub td:first-child{padding-left:30px}
 .step.now{font-weight:600;color:var(--ink)}
 .step.now .dot{border-color:var(--accent);border-right-color:transparent;
   animation:spin .8s linear infinite}
+.step.bad .dot{background:var(--crit);border-color:var(--crit)}
+.step.bad{color:var(--crit);font-weight:600}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.step.now .dot{animation:none}}
 .bar{height:4px;border-radius:3px;background:var(--mute-soft);overflow:hidden;flex:1;max-width:150px}

@@ -686,15 +686,7 @@ function renderClaimPanel(c) {
     '</div>'
   );
 
-  if (c.attachments.length) {
-    sec.push('<div class="panel-sec"><h3>Evidence</h3><div class="gallery">' +
-      c.attachments.map(function (a) {
-        return '<figure data-att="' + h(a.attachmentId) + '">' +
-          '<div style="height:82px;display:grid;place-items:center;color:var(--ink-3);font-size:11px">' +
-            h(a.kind) + '</div>' +
-          '<figcaption>' + h(a.fileName) + '</figcaption></figure>';
-      }).join('') + '</div></div>');
-  }
+  sec.push(evidenceSection(c));
 
   if (c.audit && c.audit.length) {
     sec.push('<div class="panel-sec"><h3>History</h3><div class="audit">' +
@@ -726,6 +718,68 @@ function renderClaimPanel(c) {
   el('panelHost').querySelectorAll('[data-att]').forEach(function (fig) {
     fig.addEventListener('click', function () { showAttachment(fig.dataset.att); });
   });
+}
+
+/**
+ * Every file a claim is meant to carry, attached or not.
+ *
+ * Listing only what was uploaded hid the more useful half: a claim with nothing
+ * attached showed no section at all, which reads as "this screen does not show
+ * files" rather than "there are no files". A claim cannot be submitted without
+ * all of these, so the gaps are worth as much as the files.
+ */
+function evidenceSection(c) {
+  const slots = [
+    { kind: 'FAULT', label: 'Fault photo' },
+    { kind: 'REPORT', label: 'Service report' }
+  ].concat(c.items.map(function (i) {
+    return { kind: 'PART', itemId: i.itemId, label: 'Photo — ' + i.partName };
+  }));
+
+  const taken = {};
+  const rows = slots.map(function (slot) {
+    const found = c.attachments.filter(function (a) {
+      return a.kind === slot.kind && (slot.kind !== 'PART' || a.itemId === slot.itemId);
+    })[0];
+    if (found) taken[found.attachmentId] = true;
+    return evidenceRow(slot.label, found);
+  });
+
+  // Anything that matches no slot — a photo whose part row was removed — is
+  // still listed rather than quietly dropped.
+  c.attachments.forEach(function (a) {
+    if (!taken[a.attachmentId]) rows.push(evidenceRow(a.kind, a));
+  });
+
+  const missing = c.attachments.length === 0;
+  return '<div class="panel-sec"><h3>Evidence</h3>' + rows.join('') +
+    (missing
+      ? '<div class="tiny">No file has been uploaded for this claim yet. ' +
+        'Use Edit claim to attach them — all of them are required before it can be submitted.</div>'
+      : '') +
+    '</div>';
+}
+
+function evidenceRow(label, file) {
+  if (!file) {
+    return '<div class="itemrow" style="opacity:.75"><span class="nm">' + h(label) + '</span>' +
+      '<span class="pill flat p-no">not attached</span></div>';
+  }
+  return '<div class="itemrow click" data-att="' + h(file.attachmentId) + '" ' +
+    'style="cursor:pointer" title="Open ' + h(file.fileName) + '">' +
+    '<span class="nm">' + h(label) + '</span>' +
+    '<span class="tiny mono">' + h(file.fileName) + '</span>' +
+    (Number(file.version) > 1 ? '<span class="pill flat p-draft">v' + h(file.version) + '</span>' : '') +
+    '<span class="tiny">' + h(fileSize(file.sizeBytes)) + '</span>' +
+    '</div>';
+}
+
+function fileSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!n) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 function kv(label, value) {
@@ -1652,6 +1706,7 @@ function saveForm(thenSubmit) {
       toast(thenSubmit
         ? result.claim.claimId + ' submitted.'
         : 'Draft saved as ' + result.claim.claimId + '.', 'ok');
+      reportUploadFailures();
       if (thenSubmit) showSubmitted(result.claim);
       loadClaims();
     })
@@ -1659,6 +1714,7 @@ function saveForm(thenSubmit) {
       if (e.kind === 'stale') { showConflict(e); return; }
       closeModal();
       fail(e);
+      reportUploadFailures();
       if (claim) openClaimPanel(claim.claimId);
       loadClaims();
     });
@@ -1703,6 +1759,10 @@ function completeStep(index) {
   const node = document.querySelector('[data-step="' + index + '"]');
   if (node) { node.classList.remove('now'); node.classList.add('done'); }
 }
+function failStep(index) {
+  const node = document.querySelector('[data-step="' + index + '"]');
+  if (node) { node.classList.remove('now'); node.classList.add('bad'); }
+}
 function stepProgress(index, pct) {
   const node = document.querySelector('[data-step="' + index + '"] .bar');
   if (!node) return;
@@ -1728,6 +1788,11 @@ function uploadAll(claim, startStep) {
   let step = startStep;
   let chain = Promise.resolve();
 
+  // A file that fails does not abandon the ones after it, and it is never
+  // silent: the claim is saved either way, so a lost upload would otherwise
+  // leave a claim that looks complete and cannot be submitted.
+  UPLOAD_FAILURES.length = 0;
+
   jobs.forEach(function (job) {
     const at = step++;
     chain = chain.then(function () {
@@ -1738,10 +1803,26 @@ function uploadAll(claim, startStep) {
         claimId: claim.claimId, kind: job.kind, itemId: job.itemId,
         data: prepared.data, fileName: prepared.name, mimeType: prepared.mimeType
       });
-    }).then(function () { completeStep(at); });
+    }).then(function () { completeStep(at); })
+      .catch(function (e) {
+        failStep(at);
+        UPLOAD_FAILURES.push(job.file.name + ' — ' + (e && e.message ? e.message : 'upload failed'));
+      });
   });
 
   return chain.then(function () { return step; });
+}
+
+const UPLOAD_FAILURES = [];
+
+/** Says which files did not make it, and stays on screen until dismissed. */
+function reportUploadFailures() {
+  if (!UPLOAD_FAILURES.length) return;
+  const list = UPLOAD_FAILURES.slice();
+  UPLOAD_FAILURES.length = 0;
+  toast(list.length + ' file' + (list.length === 1 ? '' : 's') + ' could not be uploaded: ' +
+    list.join('; ') + '. The claim was saved — open it and attach ' +
+    (list.length === 1 ? 'it' : 'them') + ' again.', 'err');
 }
 
 /**

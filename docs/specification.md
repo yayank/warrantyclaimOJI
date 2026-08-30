@@ -441,6 +441,12 @@ Untuk Requester dan Production, kolom bertanda ✓ hanya dapat diubah selama sta
 
 > **Draft dan penomoran bulk.** Draft yang dibuat 30 Agustus tetapi baru diajukan 2 September masuk bulk `CW020926`, bukan `CW300826`.
 
+### Yang terlihat di panel klaim
+
+Bagian **Evidence** selalu tampil, berisi setiap berkas yang seharusnya ada — foto kerusakan, service report, dan satu foto per baris sparepart — beserta berkas yang sudah terunggah atau penanda *not attached*. Menampilkan hanya yang sudah terunggah menyembunyikan separuh yang lebih berguna: klaim tanpa lampiran tidak memunculkan bagian apa pun, dan itu terbaca sebagai "layar ini tidak menampilkan berkas", bukan "belum ada berkas". Lampiran yang tidak cocok dengan slot mana pun — misalnya foto milik baris sparepart yang sudah dihapus — tetap ikut terdaftar.
+
+Unggahan yang gagal tidak menghentikan berkas berikutnya dan tidak pernah senyap: klaimnya tetap tersimpan, jadi berkas yang hilang tanpa pemberitahuan akan meninggalkan klaim yang tampak lengkap tetapi tidak bisa di-submit. Nama berkas yang gagal disebutkan, dan langkahnya ditandai merah di jendela penyimpanan.
+
 ## 14. Berkas Drive
 
 ```
