@@ -35,13 +35,19 @@ Apa pun caranya, lanjutkan dengan **Project Settings → Script Properties** →
 
 > Yang disunting selalu `src/`. Setelah berubah, jalankan `node tools/bundle.js` untuk membangun ulang `dist/` — jangan menyunting `dist/` langsung, isinya akan tertimpa.
 
-## 3. Aktifkan layanan Drive
+## 3. Pastikan layanan Drive terbaca
 
-Di panel kiri editor, cari **Services** → klik **+** → pilih **Drive API**, versi **v2** → **Add**. Identifier-nya harus tetap `Drive`.
+Tidak ada yang perlu ditambahkan. `appsscript.json` sudah mendeklarasikan layanan Drive; setelah manifest tersimpan, `Drive` muncul dengan sendirinya di panel **Services** di kiri.
 
-Manifest sudah menyebut layanan ini, tetapi menambahkannya lewat menu memastikan API-nya benar-benar aktif di proyek Cloud yang menaungi skrip.
+> **Jangan menambahkannya lagi lewat Services → +.** Panel Services hanyalah tampilan dari isi `appsscript.json`, bukan tempat penyimpanan terpisah. Menambah dari menu berarti menulis entri kedua ke manifest yang sama, dan editor menolaknya dengan:
+>
+> ```
+> "appsscript.json" has errors: Found a service identifier used more than once: Drive
+> ```
+>
+> Kalau ini terlanjur terjadi, buka `appsscript.json` dan hapus salah satu blok `Drive` sehingga tersisa satu.
 
-Dipakai oleh fitur impor data unit dari Excel. Kalau langkah ini dilewati, seluruh aplikasi tetap berjalan — hanya tombol **Import from Excel** di Master Data → Units yang akan gagal.
+Layanan ini dipakai oleh fitur impor data unit dari Excel.
 
 ## 4. Jalankan `setUp()`
 
@@ -148,7 +154,8 @@ node tools/bundle.js                        # membangun ulang dist/
 | Gejala | Penyebab |
 |---|---|
 | Halaman berhenti di layar masuk | `GoogleClientId` belum diisi, atau origin `https://script.google.com` belum didaftarkan |
-| `Drive is not defined` saat impor unit | Layanan Drive API belum ditambahkan lewat **Services** (langkah 3) |
+| `Found a service identifier used more than once: Drive` | Layanan Drive tercatat dua kali di `appsscript.json` — hapus salah satu bloknya (langkah 3) |
+| `Drive is not defined` saat impor unit | `appsscript.json` belum tersimpan dengan blok `enabledAdvancedServices` |
 | `Sheet not found` pada tiap aksi | `setUp()` belum dijalankan, atau `SPREADSHEET_ID` menunjuk berkas yang keliru |
 | "not registered for this portal" | email belum ada di sheet `users`, atau `Active` bukan `TRUE` |
 | Tombol *Forward Order* menolak | sheet `Recipients` kosong atau semuanya tidak aktif |
