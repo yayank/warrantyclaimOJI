@@ -125,7 +125,7 @@ Daftar unit diambil sekali per sesi lewat `claims.units`, bukan ikut dalam paylo
 
 ## 5. Sparepart talangan
 
-Di lapangan, mesin sering tidak bisa menunggu keputusan principal. Sparepart diambil dari stok lokal supaya alat kembali jalan, sementara klaim tetap berjalan.
+Di lapangan, mesin sering tidak bisa menunggu keputusan principal. Sparepart dikirim dari stok lokal supaya alat kembali jalan, sementara klaim tetap berjalan.
 
 Aplikasi mengakomodasi ini **tanpa mengubah alur klaim sama sekali.** Yang ditambahkan hanya penanda pada baris sparepart:
 
@@ -133,8 +133,8 @@ Aplikasi mengakomodasi ini **tanpa mengubah alur klaim sama sekali.** Yang ditam
 ClaimItems
   AdvanceIssued     TRUE
   AdvanceIssuedAt   2026-08-30T09:15:00
-  AdvanceIssuedBy   rian@rs.co.id
-  AdvanceNote       Diserahkan langsung ke RSUD Koja, 30 Agu pagi
+  AdvanceIssuedBy   admin@oneject.co.id
+  AdvanceNote       Dikirim dari stok, 30 Agu pagi
 ```
 
 Apa yang berubah karenanya:
@@ -146,10 +146,9 @@ Apa yang berubah karenanya:
 | Yang dilihat principal | daftar part biasa | ditandai *already supplied from local stock* |
 | Kalau ditolak principal | rumah sakit belum terima apa-apa | **biaya sudah tertanggung di sisi Anda** — terlihat jelas di ringkasan dan ekspor |
 
-Siapa yang mencatat:
+**Yang mencatat hanya Administrator**, kapan saja sebelum klaim ditutup, lewat tombol *Record advance issue* di panel detail; penandanya bisa dicabut lagi dari tempat yang sama. Stoknya milik Administrator dan hanya dia yang tahu apakah ada part yang keluar dari sana — Requester meminta part dan tidak pernah melihat penanda ini di formulir.
 
-- **Requester** — saat mengisi form, mencentang *"Part already supplied from local stock"* pada baris sparepart yang bersangkutan.
-- **Administrator** — kapan saja sebelum klaim ditutup, lewat tombol *Record advance issue* di panel detail. Bisa juga mencabut penandanya.
+Karena itu `claims.save` tidak pernah menyentuh penanda ini: Requester boleh menyunting klaimnya selama masih Draft atau Returned, dan suntingan itu tidak boleh mengubah catatan apa yang sudah dikirim dari stok. Satu-satunya jalan masuk adalah `claims.advanceIssue`, yang hanya menerima Administrator.
 
 Setiap perubahan penanda ini tercatat di `AuditLog` sebagai aksi `AdvanceIssue`, sehingga selalu jelas kapan part berpindah dan atas keputusan siapa.
 
@@ -408,7 +407,7 @@ Kolom Status pada tabel menampilkan **posisi alur**; hasil keputusan tampil terp
 | Baris sparepart & qty | ✓ | ✓ | ✓ | ○ |
 | Foto part per baris | ✓ | ✓ | ✓ | ○ |
 | Foto kerusakan · Service Report | ✓ | ✓ | ✓ | ○ |
-| **Advance issue** | ✓ (Draft/Returned) | ✓ | ✓ (s/d Closed) | ○ |
+| **Advance issue** | — | — | ✓ (s/d Closed) | ○ |
 | **Principal klaim** | ○ | ○ | ✓ | ○ |
 | Status garansi | ○ | ○ | ✓ **R** | ○ |
 | Work Order | — | — | ✓ **R** | ○ |

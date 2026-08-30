@@ -346,9 +346,6 @@ function syncItems_(session, claim, wanted) {
       ? existing.filter(function (i) { return i.ItemID === w.itemId; })[0]
       : null;
 
-    const advance = !!w.advanceIssued;
-    const advanceNote = String(w.advanceNote || '').trim();
-
     if (current) {
       keep[current.ItemID] = true;
       const changes = [];
@@ -363,16 +360,11 @@ function syncItems_(session, claim, wanted) {
         PartID: part.PartID, PartName: part.Name, Qty: qty,
         UpdatedAt: nowIso_(), UpdatedBy: session.email
       };
-      if (advance !== isTrue_(current.AdvanceIssued)) {
-        changes.push({ field: 'AdvanceIssued', oldValue: isTrue_(current.AdvanceIssued),
-          newValue: advance, itemId: current.ItemID });
-        patch.AdvanceIssued = advance;
-        patch.AdvanceIssuedAt = advance ? nowIso_() : '';
-        patch.AdvanceIssuedBy = advance ? session.email : '';
-      }
-      if (advanceNote !== String(current.AdvanceNote || '')) patch.AdvanceNote = advanceNote;
 
-      if (changes.length || patch.AdvanceNote !== undefined) {
+      // The advance-issue flag is deliberately not touched here. It records
+      // what the administrator shipped from local stock, and editing the claim
+      // — which a requester may do while it is theirs — must not disturb it.
+      if (changes.length) {
         update_(SHEET.ITEMS, 'ItemID', current.ItemID, patch);
         auditChanges_(session, 'SaveDraft', claim.ClaimID, changes, '', isTrue_(claim.IsTest));
       }
@@ -385,10 +377,8 @@ function syncItems_(session, claim, wanted) {
         PartName: part.Name,
         Qty: qty,
         ItemStatus: ITEM_STATUS.PENDING,
-        AdvanceIssued: advance,
-        AdvanceIssuedAt: advance ? nowIso_() : '',
-        AdvanceIssuedBy: advance ? session.email : '',
-        AdvanceNote: advanceNote,
+        AdvanceIssued: false,
+        AdvanceIssuedAt: '', AdvanceIssuedBy: '', AdvanceNote: '',
         DecisionBy: '', DecisionAt: '', DecisionReason: '',
         AvailabilityDate: '', DocumentRefNo: '',
         ForwardedAt: '', ForwardedTo: '', ShippedAt: '', ShippedBy: '',
@@ -944,8 +934,12 @@ function markShipped_(session, payload) {
 }
 
 /**
- * Records that a part was handed over from local stock before the principal
- * decided, because the machine could not wait.
+ * Records that a part was shipped from local stock before the principal decided,
+ * because the machine could not wait.
+ *
+ * This is the administrator's decision alone: the stock is theirs, and only they
+ * know whether a part went out of it. The requester asks for a part and never
+ * sees this flag on the form — they have no way of knowing what was on the shelf.
  *
  * The claim itself carries on unchanged — the flag says the customer already has
  * the part, so what eventually arrives from the principal replenishes stock
@@ -953,7 +947,7 @@ function markShipped_(session, payload) {
  * the claim is later rejected.
  */
 function setAdvanceIssue_(session, payload) {
-  requireRole_(session, [ROLE.ADMIN, ROLE.REQUESTER, ROLE.PRODUCTION]);
+  requireRole_(session, [ROLE.ADMIN]);
 
   return withLock_(function () {
     const items = readLive_(SHEET.ITEMS).filter(function (i) {
@@ -968,16 +962,7 @@ function setAdvanceIssue_(session, payload) {
       const claim = findBy_(SHEET.CLAIMS, 'ClaimID', item.ClaimID);
       guardTestScope_(session, claim);
 
-      if (session.role !== ROLE.ADMIN) {
-        // The requester may only record it on a claim of their own that is still
-        // in their hands; afterwards the administrator does it.
-        if (String(claim.RequesterEmail).toLowerCase() !== session.email ||
-          [STATUS.DRAFT, STATUS.RETURNED].indexOf(claim.Status) === -1) {
-          throw forbid_('Ask the administrator to record this on a submitted claim.');
-        }
-      } else if (claim.Status === STATUS.CLOSED) {
-        throw forbid_('This claim is already closed.');
-      }
+      if (claim.Status === STATUS.CLOSED) throw forbid_('This claim is already closed.');
 
       update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
         AdvanceIssued: issued,

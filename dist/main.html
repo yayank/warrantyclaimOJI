@@ -1174,10 +1174,6 @@ function renderPanelActions(c) {
     }
   }
 
-  if (isRequester && owner && (c.status === STATUS.DRAFT || c.status === STATUS.RETURNED)) {
-    buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
-  }
-
   if (s.role === ROLE.ADMIN) {
     if (c.status !== STATUS.CLOSED) {
       buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
@@ -1372,8 +1368,7 @@ function promptPrincipal(c) {
           claimId: c.claimId, rowVersion: c.rowVersion, customerId: c.customerId,
           serialNumber: c.serialNumber, problem: c.problem, principal: el('prn').value,
           items: c.items.map(function (i) {
-            return { itemId: i.itemId, partId: i.partId, qty: i.qty,
-              advanceIssued: i.advanceIssued, advanceNote: i.advanceNote };
+            return { itemId: i.itemId, partId: i.partId, qty: i.qty };
           })
         }).then(function () { close(); toast('Principal assigned.', 'ok'); reopen(c.claimId); })
           .catch(fail);
@@ -1709,14 +1704,12 @@ function openClaimForm(existing) {
     ? existing.items.map(function (i) {
         return {
           itemId: i.itemId, partId: i.partId, partName: i.partName, qty: i.qty, file: null,
-          advanceIssued: !!i.advanceIssued, advanceNote: i.advanceNote || '',
           hasPhoto: (existing.attachments || []).some(function (a) {
             return a.kind === 'PART' && a.itemId === i.itemId;
           })
         };
       })
-    : [{ itemId: null, partId: '', partName: '', qty: 1, file: null, hasPhoto: false,
-        advanceIssued: false, advanceNote: '' }];
+    : [{ itemId: null, partId: '', partName: '', qty: 1, file: null, hasPhoto: false }];
   FORM.files = {
     FAULT: { file: null, has: existing ? (existing.attachments || []).some(function (a) { return a.kind === 'FAULT'; }) : false },
     REPORT: { file: null, has: existing ? (existing.attachments || []).some(function (a) { return a.kind === 'REPORT'; }) : false }
@@ -1853,14 +1846,6 @@ function partRows() {
       (warn ? '<div class="notice crit" style="grid-column:1/-1">⚠ This part is already requested on ' +
         '<span class="mono">' + h(warn.claimId) + '</span> (' + h(warn.status) + ') and not yet resolved.' +
         '</div>' : '') +
-      '<label class="row" style="grid-column:1/-1;gap:7px;font-size:12px;color:var(--ink-3)">' +
-        '<input type="checkbox" class="pAdv"' + (item.advanceIssued ? ' checked' : '') + '>' +
-        '<span>Part already supplied from local stock to keep the machine running</span>' +
-      '</label>' +
-      (item.advanceIssued
-        ? '<input type="text" class="pAdvNote" style="grid-column:1/-1" placeholder="Note — when it was handed over, by whom" value="' +
-          h(item.advanceNote) + '">'
-        : '') +
     '</div>';
   }).join('');
 }
@@ -1889,7 +1874,7 @@ function wireClaimForm() {
   const add = el('addPart');
   if (add) add.addEventListener('click', function () {
     FORM.items.push({ itemId: null, partId: '', partName: '', qty: 1, file: null,
-      hasPhoto: false, advanceIssued: false, advanceNote: '' });
+      hasPhoto: false });
     refreshPartRows();
   });
   wirePartRows();
@@ -1912,15 +1897,6 @@ function wirePartRows() {
     row.querySelector('.pFile').addEventListener('change', function () {
       FORM.items[index].file = this.files[0] || null;
       refreshPartRows();
-    });
-    const adv = row.querySelector('.pAdv');
-    if (adv) adv.addEventListener('change', function () {
-      FORM.items[index].advanceIssued = this.checked;
-      refreshPartRows();
-    });
-    const advNote = row.querySelector('.pAdvNote');
-    if (advNote) advNote.addEventListener('input', function () {
-      FORM.items[index].advanceNote = this.value;
     });
     row.querySelector('.pDel').addEventListener('click', function () {
       if (FORM.items.length === 1) { toast('A claim needs at least one spare part.', 'err'); return; }
@@ -2068,10 +2044,7 @@ function saveForm(thenSubmit) {
     problem: problem,
     reason: reason,
     items: FORM.items.map(function (i) {
-      return {
-        itemId: i.itemId, partId: i.partId, qty: i.qty,
-        advanceIssued: !!i.advanceIssued, advanceNote: i.advanceNote || ''
-      };
+      return { itemId: i.itemId, partId: i.partId, qty: i.qty };
     })
   };
 
