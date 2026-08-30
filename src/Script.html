@@ -160,11 +160,14 @@ function showSignIn(message) {
 }
 
 window.onGoogleLibraryLoad = function () {
-  const clientId = String(window.APP_CLIENT_ID || '').trim();
+  // Quotes get pasted along with the value often enough to be worth stripping
+  // rather than reporting as invalid.
+  const clientId = String(window.APP_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '').trim();
 
   if (!clientId) {
-    showSignIn('This portal has not been configured yet: no Google Client ID is set in the ' +
-      'Settings sheet.');
+    showSignIn('This portal is not configured yet: Settings!GoogleClientId is empty. Create an ' +
+      'OAuth client ID in Google Cloud Console, paste it into that cell, then run clearCache() ' +
+      'from the Apps Script editor.');
     return;
   }
 

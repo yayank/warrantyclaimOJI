@@ -391,8 +391,12 @@ input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:po
   <div id="toastHost" class="toast-host"></div>
 
   <script>
-    window.APP_CLIENT_ID = <?= JSON.stringify(clientId) ?>;
-    window.APP_DEEP_LINK = <?= deepLink ?>;
+    // These use the force-print scriptlet on purpose. The escaping form turns
+    // the quotes of a JavaScript string literal into &quot;, which browsers do
+    // not decode inside a script tag, so the value arrives mangled. Both are
+    // already JSON, so emitting them unescaped is safe.
+    window.APP_CLIENT_ID = <?!= JSON.stringify(clientId) ?>;
+    window.APP_DEEP_LINK = <?!= deepLink ?>;
   </script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
@@ -557,11 +561,14 @@ function showSignIn(message) {
 }
 
 window.onGoogleLibraryLoad = function () {
-  const clientId = String(window.APP_CLIENT_ID || '').trim();
+  // Quotes get pasted along with the value often enough to be worth stripping
+  // rather than reporting as invalid.
+  const clientId = String(window.APP_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '').trim();
 
   if (!clientId) {
-    showSignIn('This portal has not been configured yet: no Google Client ID is set in the ' +
-      'Settings sheet.');
+    showSignIn('This portal is not configured yet: Settings!GoogleClientId is empty. Create an ' +
+      'OAuth client ID in Google Cloud Console, paste it into that cell, then run clearCache() ' +
+      'from the Apps Script editor.');
     return;
   }
 

@@ -169,6 +169,7 @@ node tools/bundle.js                        # membangun ulang dist/
 
 | Gejala | Penyebab |
 |---|---|
+| Pesan *"Settings!GoogleClientId is empty"* | Selnya memang belum diisi — kerjakan langkah 6 |
 | `Error 401: invalid_client` di halaman Google | `Settings!GoogleClientId` bukan Client ID yang sah. Jalankan `clearCache()` — ia menampilkan nilai yang sedang terbaca |
 | Sudah diperbaiki tapi error yang sama muncul lagi | Cache Settings bertahan lima menit. Jalankan `clearCache()` |
 | Halaman berhenti di layar masuk | `GoogleClientId` belum diisi, atau origin `https://script.google.com` belum didaftarkan |

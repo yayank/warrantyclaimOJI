@@ -76,7 +76,10 @@ let page = read('index.html')
   .replace(/[ \t]*<\?!= include\('Styles'\); \?>/, styles)
   .replace(/[ \t]*<\?!= include\('Script'\); \?>/, script);
 
-if (/<\?!=/.test(page)) {
+// Only the include scriptlets are resolved here. The two that inject the client
+// ID and the deep link must survive into the bundle — Apps Script evaluates them
+// when it serves the page.
+if (/include\s*\(/.test(page)) {
   console.error('An include scriptlet was left unresolved in index.html.');
   process.exit(1);
 }
