@@ -453,6 +453,12 @@ Untuk Requester dan Production, kolom bertanda ✓ hanya dapat diubah selama sta
 
 > **Draft dan penomoran bulk.** Draft yang dibuat 30 Agustus tetapi baru diajukan 2 September masuk bulk `CW020926`, bukan `CW300826`.
 
+### Kelengkapan diperiksa sebelum disimpan
+
+`submitClaim_` menolak klaim yang belum lengkap — foto kerusakan, service report, dan satu foto per baris sparepart — dan memang seharusnya begitu: principal tidak bisa menilai kerusakan yang tidak bisa mereka lihat. Tetapi penolakannya terjadi **di akhir**, setelah klaim tersimpan dan berkasnya terunggah. Akibatnya klaim itu ada, berhenti di `Draft`, dan satu-satunya keterangan hanyalah toast yang lewat di balik panel.
+
+Formulir kini memeriksa hal yang sama lebih dulu, sebelum apa pun disimpan, dan menuliskan kekurangannya di bagian atas formulir itu sendiri — bukan sebagai toast. Tombol **Save Draft** tetap menyimpan semuanya. Aturan di server tidak berubah; yang berubah hanyalah kapan pengguna diberi tahu.
+
 ### Yang terlihat di panel klaim
 
 Bagian **Evidence** selalu tampil, berisi setiap berkas yang seharusnya ada — foto kerusakan, service report, dan satu foto per baris sparepart — beserta berkas yang sudah terunggah atau penanda *not attached*. Menampilkan hanya yang sudah terunggah menyembunyikan separuh yang lebih berguna: klaim tanpa lampiran tidak memunculkan bagian apa pun, dan itu terbaca sebagai "layar ini tidak menampilkan berkas", bukan "belum ada berkas". Lampiran yang tidak cocok dengan slot mana pun — misalnya foto milik baris sparepart yang sudah dihapus — tetap ikut terdaftar.

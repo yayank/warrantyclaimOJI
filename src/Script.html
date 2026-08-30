@@ -871,15 +871,38 @@ function btn(label, cls, onClick) {
 
 function reopen(claimId) { openClaimPanel(claimId); loadClaims(); }
 
+/**
+ * Opens one attachment.
+ *
+ * A photo comes back as a data URI built from the file itself, which takes a
+ * few seconds. Without something on screen the click looked like it had done
+ * nothing, so the box opens straight away and fills in when the file arrives.
+ */
 function showAttachment(attachmentId) {
+  const box = document.createElement('div');
+  box.className = 'lightbox';
+  box.innerHTML = '<div class="loading"><span class="spinner"></span>Opening…</div>';
+  box.addEventListener('click', function () { box.remove(); });
+  document.body.appendChild(box);
+
   api('claims.attachment', { attachmentId: attachmentId }).then(function (a) {
-    if (a.kind === 'pdf') { window.open(a.url, '_blank'); return; }
-    const box = document.createElement('div');
-    box.className = 'lightbox';
-    box.innerHTML = '<img src="' + a.dataUri + '" alt="' + h(a.name) + '">';
-    box.addEventListener('click', function () { box.remove(); });
-    document.body.appendChild(box);
-  }).catch(fail);
+    if (!box.isConnected) return;   // closed while it was loading
+    if (a.kind === 'pdf') { box.remove(); window.open(a.url, '_blank'); return; }
+    const img = new Image();
+    img.alt = a.name;
+    img.onload = function () {
+      if (!box.isConnected) return;
+      box.innerHTML = '';
+      box.appendChild(img);
+    };
+    img.onerror = function () {
+      box.innerHTML = '<div class="loading">' + h(a.name) + ' could not be shown.</div>';
+    };
+    img.src = a.dataUri;
+  }).catch(function (e) {
+    box.remove();
+    fail(e);
+  });
 }
 
 /* ---------------------------------------------------------- prompts */
@@ -1634,6 +1657,48 @@ function monthLabel(key) {
 
 /* ------------------------------------------------------ save & submit */
 
+/**
+ * What this claim still needs before it can be submitted, in the server's own
+ * terms.
+ *
+ * submitClaim_ refuses an incomplete claim, and it is right to: a principal
+ * cannot judge a fault they cannot see. But it refuses at the end, after the
+ * claim has been saved and its files uploaded — so the claim exists, sits at
+ * Draft, and the only word about why is a toast behind a panel. Asking first
+ * costs nothing and says exactly what is missing.
+ */
+function missingForSubmit() {
+  const missing = [];
+  if (!el('fProblem').value.trim()) missing.push('a problem description');
+  if (!FORM.files.FAULT.has && !FORM.files.FAULT.file) missing.push('a fault photo');
+  if (!FORM.files.REPORT.has && !FORM.files.REPORT.file) missing.push('a service report');
+  FORM.items.forEach(function (item, index) {
+    if (item.hasPhoto || item.file) return;
+    missing.push('a photo for ' + (item.partName || 'spare part ' + (index + 1)));
+  });
+  return missing;
+}
+
+/** An error the form itself carries, where the fields are, rather than a toast. */
+function showFormProblem(message) {
+  const body = el('formBody');
+  if (!body) { toast(message, 'err'); return; }
+  let box = el('formProblem');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'formProblem';
+    box.className = 'notice crit';
+    body.insertBefore(box, body.firstChild);
+  }
+  box.innerHTML = message;
+  box.scrollIntoView({ block: 'nearest' });
+}
+
+function clearFormProblem() {
+  const box = el('formProblem');
+  if (box) box.remove();
+}
+
 function saveForm(thenSubmit) {
   const customerId = el('fCustomer') ? el('fCustomer').value : '';
   const serial = el('fSerial').value.trim();
@@ -1651,6 +1716,22 @@ function saveForm(thenSubmit) {
   if (FORM.items.some(function (i) { return !i.partId; })) {
     toast('Choose a spare part for every row.', 'err'); return;
   }
+
+  // The administrator's "Save changes" carries thenSubmit as well, and amends
+  // rather than submits — only a real submission has to be complete.
+  const submitting = thenSubmit && !(FORM.claim && S.session.role === ROLE.ADMIN);
+  if (submitting) {
+    const missing = missingForSubmit();
+    if (missing.length) {
+      showFormProblem('This claim cannot be submitted yet — it still needs ' +
+        missing.map(function (m) { return h(m); }).join(', ') +
+        '. <b>Save Draft</b> keeps everything you have entered, and you can add the rest later.');
+      toast('Still missing ' + missing.length + ' thing' + (missing.length === 1 ? '' : 's') +
+        ' — see the top of the form.', 'err');
+      return;
+    }
+  }
+  clearFormProblem();
 
   const steps = buildSteps(thenSubmit);
   showStepper(steps);
@@ -1707,7 +1788,7 @@ function saveForm(thenSubmit) {
 }
 
 function buildSteps(thenSubmit) {
-  const steps = ['Validating serial number'];
+  const steps = ['Saving the claim'];
   const partFiles = FORM.items.filter(function (i) { return i.file; });
   partFiles.forEach(function (i, n) {
     steps.push('Uploading part photo ' + (n + 1) + ' of ' + partFiles.length);
