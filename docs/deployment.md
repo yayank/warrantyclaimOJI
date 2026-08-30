@@ -1,6 +1,6 @@
 # Pemasangan
 
-Urutan ini penting: aplikasi tidak bisa dipakai sebelum langkah 5 selesai, karena identitas pengguna ditegakkan lewat Google Sign-In dan itu memerlukan OAuth Client ID.
+Urutan ini penting: aplikasi tidak bisa dipakai sebelum langkah 6 selesai, karena identitas pengguna ditegakkan lewat Google Sign-In dan itu memerlukan OAuth Client ID.
 
 ## 1. Siapkan spreadsheet
 
@@ -18,11 +18,16 @@ Buka [script.google.com](https://script.google.com) → **New project**, lalu pi
 
 | Salin dari | Jadikan |
 |---|---|
-| `dist/Code.gs` | satu berkas *Script* bernama **Code.gs** |
-| `dist/main.html` | satu berkas *HTML* bernama **main** |
+| `dist/Code.gs` | berkas *Script* bernama **Code.gs** |
+| `dist/main.html` | berkas *HTML* bernama **main** |
 | `dist/appsscript.json` | manifest, lewat **Project Settings → Show "appsscript.json"** |
 
-Hapus berkas `Code.gs` kosong bawaan Apps Script sebelum menempel, agar tidak ada dua berkas bernama sama.
+Dua hal yang mudah keliru:
+
+- **Pakai berkas `Code.gs` yang sudah ada**, ganti isinya. Membuat berkas baru bernama sama menghasilkan `Code1.gs`, dan dua berkas dengan fungsi kembar akan gagal dimuat.
+- **Nama berkas HTML harus persis `main`**, diketik tanpa `.html`. `doGet` memanggil `createTemplateFromFile('main')`.
+
+Berkas dapat diambil langsung dari GitHub tanpa `git`: buka berkasnya, klik **Raw**, lalu salin seluruh isinya.
 
 **Cara modular — 16 berkas.** Salin seluruh isi `src/`: berkas `.gs` sebagai *Script*, `index.html`/`Styles.html`/`Script.html` sebagai *HTML*, dan `appsscript.json` sebagai manifest. Kalau [clasp](https://github.com/google/clasp) bisa dipasang, cukup `clasp push` dari folder `src/`.
 
@@ -30,13 +35,23 @@ Apa pun caranya, lanjutkan dengan **Project Settings → Script Properties** →
 
 > Yang disunting selalu `src/`. Setelah berubah, jalankan `node tools/bundle.js` untuk membangun ulang `dist/` — jangan menyunting `dist/` langsung, isinya akan tertimpa.
 
-## 3. Jalankan `setUp()`
+## 3. Aktifkan layanan Drive
 
-Di editor Apps Script, pilih fungsi `setUp` lalu **Run**. Google akan meminta izin — setujui.
+Di panel kiri editor, cari **Services** → klik **+** → pilih **Drive API**, versi **v2** → **Add**. Identifier-nya harus tetap `Drive`.
+
+Manifest sudah menyebut layanan ini, tetapi menambahkannya lewat menu memastikan API-nya benar-benar aktif di proyek Cloud yang menaungi skrip.
+
+Dipakai oleh fitur impor data unit dari Excel. Kalau langkah ini dilewati, seluruh aplikasi tetap berjalan — hanya tombol **Import from Excel** di Master Data → Units yang akan gagal.
+
+## 4. Jalankan `setUp()`
+
+Di editor Apps Script, pilih fungsi `setUp` dari dropdown di atas, lalu **Run**.
+
+Google meminta izin, dan layarnya terlihat mengkhawatirkan: *"Google hasn't verified this app"*. Klik **Advanced → Go to … (unsafe) → Allow**. Peringatan itu normal untuk skrip yang Anda tulis sendiri; yang diizinkan adalah skrip Anda mengakses spreadsheet dan Drive Anda sendiri.
 
 Fungsi ini membuat empat belas sheet beserta baris judulnya, menyiapkan folder Drive `Klaim/`, memberi ID pada setiap customer, sparepart, dan principal, menambahkan entri customer `Internal — Production`, serta membuat satu principal bernama `Sansin` untuk menampung data yang sudah ada. Aman dijalankan berulang kali.
 
-## 4. Daftarkan diri Anda
+## 5. Daftarkan diri Anda
 
 Buka sheet `users`, tambahkan satu baris:
 
@@ -48,7 +63,7 @@ Tanpa baris ini tidak ada seorang pun yang bisa masuk — termasuk pemilik skrip
 
 Kolom `Principal` hanya wajib untuk akun berperan `Principal`; untuk peran lain biarkan kosong.
 
-## 5. Buat OAuth Client ID
+## 6. Buat OAuth Client ID
 
 1. Buka **Project Settings** di editor Apps Script, catat **Google Cloud Platform Project number**
 2. Buka [console.cloud.google.com](https://console.cloud.google.com) pada proyek tersebut
@@ -60,7 +75,7 @@ Kolom `Principal` hanya wajib untuk akun berperan `Principal`; untuk peran lain 
 
 Ini yang membuat login otomatis berfungsi untuk email domain apa pun, termasuk Principal di luar organisasi Anda, tanpa perlu membagikan spreadsheet kepada siapa pun.
 
-## 6. Deploy
+## 7. Deploy
 
 **Deploy → New deployment → Web app**
 
@@ -73,7 +88,7 @@ Kedua pilihan itu disengaja. *Execute as: Me* membuat data tetap milik Anda; *An
 
 Salin URL hasil deploy ke sheet `Settings`, baris `AppUrl`. URL ini dipakai untuk tautan pintas di dalam email.
 
-## 7. Pasang pemicu terjadwal
+## 8. Pasang pemicu terjadwal
 
 Jalankan `installTriggers()` sekali dari editor. Hasilnya:
 
@@ -84,13 +99,13 @@ Jalankan `installTriggers()` sekali dari editor. Hasilnya:
 
 Jam rekap bisa diubah lewat `Settings!DigestHour`, lalu jalankan `installTriggers()` lagi.
 
-## 8. Migrasi data lama (opsional)
+## 9. Migrasi data lama (opsional)
 
 Kalau spreadsheet Anda masih memuat sheet `Log` yang lama, jalankan `migrateLegacyLog()` sekali. Fungsi ini memecah 20 baris lama menjadi `Claims` dan `ClaimItems`, memberi ClaimID dan ItemID baru, mempertahankan No Ref lama, dan menandai baris uji (`qwerty` dan sejenisnya) sebagai `IsTest`.
 
 Nama sparepart yang tidak ada padanannya di master tetap disimpan apa adanya tanpa `PartID` — riwayat mencatat apa yang benar-benar diklaim, bukan apa yang ada di master hari ini. Fungsi ini menolak berjalan kalau `Claims` sudah berisi data.
 
-## 9. Siapkan pemetaan principal
+## 10. Siapkan pemetaan principal
 
 Aplikasi melayani lebih dari satu principal, dan pemetaannya menentukan siapa boleh melihat apa.
 
@@ -100,7 +115,7 @@ Aplikasi melayani lebih dari satu principal, dan pemetaannya menentukan siapa bo
 
 Layar **Master Data → Units** menampilkan peringatan bila ada unit tanpa principal, atau nama principal yang tidak dikenal master. Selama sebuah unit belum terpetakan, klaim atasnya **tidak bisa diteruskan** dan tidak terlihat oleh principal mana pun — ini disengaja, karena menebak berarti berisiko mengirim data satu principal ke principal lain.
 
-## 10. Isi data pendukung
+## 11. Isi data pendukung
 
 - **`Recipients`** — penerima pesanan di sisi principal, yang tidak punya akses aplikasi. Tanpa ini tombol *Forward Order* tidak bisa dipakai. Kolom `Principal` opsional, untuk memudahkan memilih penerima yang tepat.
 - **`users`** — tambahkan Requester, Production, dan Principal.
@@ -133,6 +148,8 @@ node tools/bundle.js                        # membangun ulang dist/
 | Gejala | Penyebab |
 |---|---|
 | Halaman berhenti di layar masuk | `GoogleClientId` belum diisi, atau origin `https://script.google.com` belum didaftarkan |
+| `Drive is not defined` saat impor unit | Layanan Drive API belum ditambahkan lewat **Services** (langkah 3) |
+| `Sheet not found` pada tiap aksi | `setUp()` belum dijalankan, atau `SPREADSHEET_ID` menunjuk berkas yang keliru |
 | "not registered for this portal" | email belum ada di sheet `users`, atau `Active` bukan `TRUE` |
 | Tombol *Forward Order* menolak | sheet `Recipients` kosong atau semuanya tidak aktif |
 | Email tidak terkirim | kuota `MailApp` habis — 100/hari untuk akun gmail biasa, 1.500/hari untuk Workspace. Cek kolom `Status` dan `Error` di sheet `EmailLog` |
