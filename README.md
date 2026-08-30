@@ -4,6 +4,13 @@ Aplikasi klaim garansi sparepart untuk mesin hemodialisis **Sansin** dan **Oneje
 
 Status: **konsep**. Belum ada kode aplikasi — repo ini baru berisi mockup UI.
 
+## Dokumen
+
+| Berkas | Isi |
+|---|---|
+| [`docs/specification.html`](docs/specification.html) | Spesifikasi lengkap — PRD di depan, spesifikasi teknis di belakang |
+| [`docs/ui-mockups.html`](docs/ui-mockups.html) | Mockup 12 layar |
+
 ## Mockup UI
 
 [`docs/ui-mockups.html`](docs/ui-mockups.html) — sembilan layar, lengkap dengan data contoh dari file klaim asli.
@@ -82,6 +89,8 @@ Klaim/CW300826/CLM-260826-0004/01-PART/
 
 **Ketentuan lain.** Antarmuka aplikasi berbahasa Inggris formal. Data tidak pernah dihapus permanen, hanya ditandai. Setiap perubahan tercatat di `AuditLog` dengan identitas asli pelakunya. Zona waktu `Asia/Jakarta`.
 
+Rincian selengkapnya ada di [`docs/specification.html`](docs/specification.html): struktur seluruh sheet berikut nama kolomnya, tabel transisi status, matriks hak akses per field, isi ketujuh template email, mekanisme verifikasi login, batasan Apps Script, dan rencana migrasi data.
+
 ## Berikutnya
 
-Menyusun dokumen spesifikasi: struktur sheet lengkap dengan nama kolom, state machine, matriks hak akses per field, isi ketujuh email, dan mekanisme verifikasi login.
+Membangun aplikasinya.
