@@ -264,6 +264,8 @@ table.data tr.sub td:first-child{padding-left:30px}
 
 .partrow{display:grid;grid-template-columns:20px minmax(0,1fr) 74px minmax(0,150px) 28px;
   gap:8px;align-items:center;border:1px solid var(--line);border-radius:5px;padding:7px 9px}
+/* The row is a grid, so the combobox has to fill its cell like the old select. */
+.partrow .combo{width:100%}
 .partrow.bad{border-color:var(--crit)}
 @media(max-width:560px){.partrow{grid-template-columns:20px minmax(0,1fr) 28px}
   .partrow .qty,.partrow .file{grid-column:2/4}}

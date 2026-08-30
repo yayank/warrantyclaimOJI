@@ -1095,17 +1095,28 @@ function wireCombo(id) {
 
   spec.shown = [];
   spec.active = -1;
+  // Until something is typed the whole list is offered, even when the box
+  // already holds a choice: a field you cannot reopen to change your mind is
+  // worse than no dropdown at all.
+  spec.typed = false;
 
   function labelFor(v) {
     const hit = (spec.options || []).filter(function (o) { return o.value === v; })[0];
     return hit ? hit.label : '';
   }
 
-  function show() { pop.hidden = false; box.setAttribute('aria-expanded', 'true'); }
+  function show() {
+    const opening = pop.hidden;
+    pop.hidden = false;
+    box.setAttribute('aria-expanded', 'true');
+    // A row near the bottom of the modal would otherwise open its list into the
+    // part of the scrolling body nobody can see.
+    if (opening && pop.scrollIntoView) pop.scrollIntoView({ block: 'nearest' });
+  }
   function hide() { pop.hidden = true; box.setAttribute('aria-expanded', 'false'); spec.active = -1; }
 
   function render(open) {
-    const query = box.value.trim();
+    const query = spec.typed ? box.value.trim() : '';
     const q = query.toLowerCase();
     const all = spec.options || [];
     const shown = [];
@@ -1132,7 +1143,7 @@ function wireCombo(id) {
             ' more — keep typing to narrow the list</div>'
           : '')
       : '<div class="combo-none">' +
-        (spec.emptyHtml ? spec.emptyHtml(query) : 'Nothing matches.') + '</div>';
+        (spec.emptyHtml ? spec.emptyHtml(box.value.trim()) : 'Nothing matches.') + '</div>';
 
     if (open) show();
   }
@@ -1141,14 +1152,16 @@ function wireCombo(id) {
     if (!option) return;
     box.value = option.label;
     value.value = option.value;
+    spec.typed = false;
     hide();
     if (spec.onPick) spec.onPick(option.value, option);
   }
 
-  box.addEventListener('focus', function () { render(true); });
+  box.addEventListener('focus', function () { spec.typed = false; render(true); });
 
   box.addEventListener('input', function () {
     spec.active = -1;
+    spec.typed = true;
     if (spec.allowFree) {
       value.value = box.value.trim();
       if (spec.onType) spec.onType(value.value);
@@ -1188,6 +1201,7 @@ function wireCombo(id) {
 
   box.addEventListener('blur', function () {
     hide();
+    spec.typed = false;
     if (spec.allowFree) {
       value.value = box.value.trim();
       if (spec.onType) spec.onType(value.value);
@@ -1354,7 +1368,9 @@ function claimFormBody() {
           onType: function (v) { scheduleLookup(v); },
           onPick: function (v) { runLookup(v); }
         }) +
-        '<span class="tiny" id="serialHint"></span>' +
+        // A div, not a span: label.field styles its own spans as the field's
+        // caption, which would shout this quiet hint back in capitals.
+        '<div class="tiny" id="serialHint"></div>' +
       '</label>',
     '</div><div id="lookupBox"></div>',
     isAdmin && c ? '<label class="field"><span>Reason for change</span>' +
@@ -1379,19 +1395,35 @@ function claimFormBody() {
   ].join('');
 }
 
+/** The master name behind a part id, for a row that only kept the id. */
+function partName(partId) {
+  const hit = (S.reference.parts || []).filter(function (p) { return p.id === partId; })[0];
+  return hit ? hit.name : '';
+}
+
 function partRows() {
   return FORM.items.map(function (item, index) {
     const missing = !item.hasPhoto && !item.file;
     const warn = FORM.lookup && FORM.lookup.openParts && FORM.lookup.openParts[item.partId];
     return '<div class="partrow' + (missing ? ' bad' : '') + '" data-index="' + index + '">' +
       '<span class="idx">' + (index + 1) + '</span>' +
-      '<select class="pPart">' +
-        '<option value="">Select a spare part…</option>' +
-        S.reference.parts.map(function (p) {
-          return '<option value="' + h(p.id) + '"' + (p.id === item.partId ? ' selected' : '') + '>' +
-            h(p.name) + '</option>';
-        }).join('') +
-      '</select>' +
+      comboField({
+        id: 'pPart' + index,
+        value: item.partId,
+        text: item.partName || partName(item.partId),
+        placeholder: 'Type to search spare parts…',
+        options: S.reference.parts.map(function (p) {
+          return { value: p.id, label: p.name };
+        }),
+        emptyHtml: function (query) {
+          return 'No spare part matches “' + h(query) + '”. ' + adminContactHtml();
+        },
+        onPick: function (value, option) {
+          FORM.items[index].partId = value;
+          FORM.items[index].partName = option.label;
+          refreshPartRows();
+        }
+      }) +
       '<input type="number" class="pQty qty" min="1" value="' + (item.qty || 1) + '">' +
       '<label class="filebtn' + (missing ? '' : ' has') + ' file">' +
         (item.file ? '✓ ' + h(item.file.name) : item.hasPhoto ? '✓ photo attached' : 'Choose photo…') +
@@ -1452,11 +1484,7 @@ function wireClaimForm() {
 function wirePartRows() {
   document.querySelectorAll('.partrow').forEach(function (row) {
     const index = Number(row.dataset.index);
-    row.querySelector('.pPart').addEventListener('change', function () {
-      FORM.items[index].partId = this.value;
-      FORM.items[index].partName = this.options[this.selectedIndex].text;
-      refreshPartRows();
-    });
+    wireCombo('pPart' + index);
     row.querySelector('.pQty').addEventListener('change', function () {
       FORM.items[index].qty = Math.max(1, Number(this.value) || 1);
     });
