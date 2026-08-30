@@ -75,13 +75,39 @@ Kolom `Principal` hanya wajib untuk akun berperan `Principal`; untuk peran lain 
 
 ## 6. Buat OAuth Client ID
 
+Seluruh langkah ini **gratis**. Membuat OAuth Client ID tidak memerlukan akun penagihan, dan aplikasi ini tidak memakai satu pun layanan Google Cloud yang berbayar — Cloud Console hanya dipakai sebagai tempat menerbitkan Client ID. Proyek Cloud-nya pun sudah ada: Apps Script membuatkannya otomatis, Anda hanya membukanya.
+
 1. Buka **Project Settings** di editor Apps Script, catat **Google Cloud Platform Project number**
 2. Buka [console.cloud.google.com](https://console.cloud.google.com) pada proyek tersebut
-3. **APIs & Services → OAuth consent screen** → isi nama aplikasi dan email dukungan
+3. **APIs & Services → OAuth consent screen**
+   - User type: **External** — lihat catatan di bawah, ini menentukan siapa yang bisa masuk
+   - Isi nama aplikasi dan email dukungan
 4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**
    - Application type: **Web application**
-   - Authorized JavaScript origins: `https://script.google.com`
+   - Authorized JavaScript origins: `https://script.google.com` — tanpa path, tanpa garis miring di akhir
 5. Salin **Client ID** ke sheet `Settings`, baris `GoogleClientId`
+
+### User type dan publishing status
+
+Dua pengaturan di halaman consent screen menentukan siapa yang boleh masuk. Keduanya mudah terlewat, dan gejalanya sama: akun ditolak Google sebelum sampai ke portal.
+
+| User type | Siapa yang bisa masuk |
+|---|---|
+| **Internal** | hanya akun dari domain Workspace Anda |
+| **External** | akun Google mana pun |
+
+Principal berada di luar domain Anda, jadi pilihannya **External**. Dengan **Internal**, mereka terkunci di luar dan tidak ada cara memperbaikinya selain mengganti pengaturan ini.
+
+Setelah dibuat, perhatikan **Publishing status**:
+
+| Status | Akibatnya |
+|---|---|
+| **Testing** | hanya email yang terdaftar di *Test users* yang bisa masuk, maksimal 100 |
+| **In production** | akun Google mana pun bisa masuk |
+
+Portal ini hanya meminta izin dasar — nama dan alamat email — yang tergolong *non-sensitive scope*, sehingga menerbitkannya ke production tidak melalui proses verifikasi Google yang panjang.
+
+Cara paling aman: mulai dari **Testing**, daftarkan beberapa email Anda sendiri sebagai *Test users*, buktikan alurnya jalan, lalu tekan **Publish app**.
 
 Bentuknya selalu seperti ini — angka, tanda hubung, huruf, lalu akhiran tetap:
 
@@ -170,6 +196,8 @@ node tools/bundle.js                        # membangun ulang dist/
 | Gejala | Penyebab |
 |---|---|
 | Pesan *"Settings!GoogleClientId is empty"* | Selnya memang belum diisi — kerjakan langkah 6 |
+| Principal ditolak Google padahal Administrator bisa masuk | OAuth consent screen bertipe **Internal**. Ubah ke **External** |
+| Akun tertentu ditolak Google sebelum sampai ke portal | Publishing status masih **Testing** dan email itu belum ada di daftar *Test users* |
 | `Error 401: invalid_client` di halaman Google | `Settings!GoogleClientId` bukan Client ID yang sah. Jalankan `clearCache()` — ia menampilkan nilai yang sedang terbaca |
 | Sudah diperbaiki tapi error yang sama muncul lagi | Cache Settings bertahan lima menit. Jalankan `clearCache()` |
 | Halaman berhenti di layar masuk | `GoogleClientId` belum diisi, atau origin `https://script.google.com` belum didaftarkan |
