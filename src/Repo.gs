@@ -18,6 +18,25 @@ function sheet_(name) {
   return s;
 }
 
+/**
+ * Sheets declared in the schema that the spreadsheet does not have yet.
+ * Empty means setUp() has run against the right spreadsheet.
+ */
+function missingSheets_() {
+  const book = ss_();
+  return Object.keys(SCHEMA).filter(function (name) { return !book.getSheetByName(name); });
+}
+
+/** Which spreadsheet the script is actually pointed at — the first thing to check. */
+function boundSpreadsheet_() {
+  try {
+    const book = ss_();
+    return { id: book.getId(), name: book.getName(), url: book.getUrl() };
+  } catch (e) {
+    return { id: '', name: '', url: '', error: String(e.message || e) };
+  }
+}
+
 /** Creates any missing sheet with its declared header row. */
 function ensureSheets_() {
   const book = ss_();
@@ -156,6 +175,12 @@ function withLock_(fn) {
 function settings_() {
   const cached = CacheService.getScriptCache().get('settings');
   if (cached) return JSON.parse(cached);
+
+  // Before setUp() has run there is no sheet to read. Settings all have
+  // defaults, so an empty map is the honest answer rather than an exception —
+  // it lets doGet reach the point where it can explain what is missing.
+  if (!ss_().getSheetByName(SHEET.SETTINGS)) return {};
+
   const map = {};
   readAll_(SHEET.SETTINGS).forEach(function (r) { if (r.Key) map[r.Key] = r.Value; });
   CacheService.getScriptCache().put('settings', JSON.stringify(map), 300);

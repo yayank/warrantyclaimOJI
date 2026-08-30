@@ -199,6 +199,25 @@ function sheet_(name) {
   return s;
 }
 
+/**
+ * Sheets declared in the schema that the spreadsheet does not have yet.
+ * Empty means setUp() has run against the right spreadsheet.
+ */
+function missingSheets_() {
+  const book = ss_();
+  return Object.keys(SCHEMA).filter(function (name) { return !book.getSheetByName(name); });
+}
+
+/** Which spreadsheet the script is actually pointed at — the first thing to check. */
+function boundSpreadsheet_() {
+  try {
+    const book = ss_();
+    return { id: book.getId(), name: book.getName(), url: book.getUrl() };
+  } catch (e) {
+    return { id: '', name: '', url: '', error: String(e.message || e) };
+  }
+}
+
 /** Creates any missing sheet with its declared header row. */
 function ensureSheets_() {
   const book = ss_();
@@ -337,6 +356,12 @@ function withLock_(fn) {
 function settings_() {
   const cached = CacheService.getScriptCache().get('settings');
   if (cached) return JSON.parse(cached);
+
+  // Before setUp() has run there is no sheet to read. Settings all have
+  // defaults, so an empty map is the honest answer rather than an exception —
+  // it lets doGet reach the point where it can explain what is missing.
+  if (!ss_().getSheetByName(SHEET.SETTINGS)) return {};
+
   const map = {};
   readAll_(SHEET.SETTINGS).forEach(function (r) { if (r.Key) map[r.Key] = r.Value; });
   CacheService.getScriptCache().put('settings', JSON.stringify(map), 300);
@@ -3622,11 +3647,74 @@ function legacyItemStatus_(raw) {
  */
 
 function doGet(e) {
+  // Deploying before setUp() has run is the ordinary first mistake. Saying so
+  // plainly beats a stack trace that names a line number and nothing else.
+  const missing = missingSheets_();
+  if (missing.length) return setupPage_(missing);
+
   const page = HtmlService.createTemplateFromFile('main');
   page.clientId = setting_(SETTING_KEY.CLIENT_ID, '');
   page.deepLink = JSON.stringify((e && e.parameter) || {});
   return page.evaluate()
     .setTitle('Warranty Claim Portal')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * Shown instead of the portal while the spreadsheet is not prepared.
+ *
+ * It names the spreadsheet the script is actually bound to, because the second
+ * form of this mistake — setUp() ran, but against a different spreadsheet than
+ * the one being looked at — is otherwise very hard to see.
+ */
+function setupPage_(missing) {
+  const book = boundSpreadsheet_();
+  const esc = function (t) {
+    return String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+
+  const html =
+    '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<style>' +
+    'body{margin:0;background:#f2f5f6;color:#101619;font-family:-apple-system,' +
+    'BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;font-size:15px;line-height:1.6;' +
+    'display:grid;place-items:center;min-height:100vh;padding:28px}' +
+    '.card{background:#fff;border:1px solid #d7dee1;border-radius:8px;max-width:560px;' +
+    'padding:26px 28px;box-shadow:0 8px 24px -12px rgba(16,22,25,.18)}' +
+    'h1{margin:0 0 4px;font-size:19px}p{margin:10px 0}' +
+    'code{background:#e8ecee;padding:1px 5px;border-radius:3px;font-size:.9em;' +
+    'font-family:ui-monospace,Menlo,Consolas,monospace}' +
+    'ol{margin:10px 0;padding-left:20px}li{margin:5px 0}' +
+    '.muted{color:#6f7c82;font-size:13px}' +
+    '.warn{border-left:3px solid #9a5b06;background:#f7e8d2;color:#9a5b06;' +
+    'padding:10px 13px;border-radius:5px;font-size:13.5px;margin:14px 0}' +
+    '</style></head><body><div class="card">' +
+    '<h1>Setup is not finished</h1>' +
+    '<p>This spreadsheet does not have the sheets the portal needs yet.</p>' +
+    '<div class="warn"><b>' + missing.length + ' sheet' + (missing.length === 1 ? '' : 's') +
+    ' missing:</b><br>' + esc(missing.join(', ')) + '</div>' +
+    '<p><b>To finish setting up:</b></p><ol>' +
+    '<li>Open the Apps Script editor</li>' +
+    '<li>Choose the <code>setUp</code> function from the dropdown</li>' +
+    '<li>Press Run and grant the permissions it asks for</li>' +
+    '<li>Reload this page</li>' +
+    '</ol>' +
+    (book.id
+      ? '<p class="muted">The script is writing to: <b>' + esc(book.name) + '</b><br>' +
+        '<code>' + esc(book.id) + '</code><br>' +
+        'If that is not the spreadsheet you expected, correct ' +
+        '<code>SPREADSHEET_ID</code> in Project Settings &rarr; Script Properties, ' +
+        'then run <code>setUp</code> again.</p>'
+      : '<p class="muted">No spreadsheet could be opened at all. Set ' +
+        '<code>SPREADSHEET_ID</code> in Project Settings &rarr; Script Properties.' +
+        (book.error ? '<br>' + esc(book.error) : '') + '</p>') +
+    '</div></body></html>';
+
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('Warranty Claim Portal — setup')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

@@ -81,6 +81,8 @@ Kolom `Principal` hanya wajib untuk akun berperan `Principal`; untuk peran lain 
 
 Ini yang membuat login otomatis berfungsi untuk email domain apa pun, termasuk Principal di luar organisasi Anda, tanpa perlu membagikan spreadsheet kepada siapa pun.
 
+> **Cek sebelum lanjut.** Buka spreadsheet Anda — harus bertambah 14 sheet baru. Kalau tidak muncul di sana, `SPREADSHEET_ID` menunjuk berkas lain dan sheet-nya terbentuk di tempat yang keliru.
+
 ## 7. Deploy
 
 **Deploy → New deployment → Web app**
@@ -156,7 +158,8 @@ node tools/bundle.js                        # membangun ulang dist/
 | Halaman berhenti di layar masuk | `GoogleClientId` belum diisi, atau origin `https://script.google.com` belum didaftarkan |
 | `Found a service identifier used more than once: Drive` | Layanan Drive tercatat dua kali di `appsscript.json` — hapus salah satu bloknya (langkah 3) |
 | `Drive is not defined` saat impor unit | `appsscript.json` belum tersimpan dengan blok `enabledAdvancedServices` |
-| `Sheet not found` pada tiap aksi | `setUp()` belum dijalankan, atau `SPREADSHEET_ID` menunjuk berkas yang keliru |
+| Halaman berjudul *"Setup is not finished"* | `setUp()` belum dijalankan. Halaman itu menyebutkan sheet apa yang kurang dan spreadsheet mana yang sedang dituju skrip |
+| `Sheet not found: …` saat menjalankan fungsi dari editor | `setUp()` belum dijalankan pada spreadsheet tersebut |
 | "not registered for this portal" | email belum ada di sheet `users`, atau `Active` bukan `TRUE` |
 | Tombol *Forward Order* menolak | sheet `Recipients` kosong atau semuanya tidak aktif |
 | Email tidak terkirim | kuota `MailApp` habis — 100/hari untuk akun gmail biasa, 1.500/hari untuk Workspace. Cek kolom `Status` dan `Error` di sheet `EmailLog` |
