@@ -14,7 +14,7 @@ Status: **aplikasi sudah tertulis**, belum di-deploy. Pemasangannya ada di [`doc
 | [`docs/architecture.md`](docs/architecture.md) | Bagaimana kode ini bekerja, ditelusuri dari satu permintaan nyata |
 | [`docs/deployment.md`](docs/deployment.md) | Langkah pemasangan, pengujian, dan penanganan masalah |
 | [`docs/ui-mockups.html`](docs/ui-mockups.html) | Mockup 12 layar (visual; unduh lalu buka di browser) |
-| [`tools/`](tools) | Bundler dan tiga penguji yang berjalan di Node tanpa perlu Google |
+| [`tools/`](tools) | Bundler dan empat penguji yang berjalan di Node tanpa perlu Google |
 
 Spesifikasi sekarang hidup sebagai markdown di dalam repo supaya hanya ada satu sumber kebenaran yang ikut ter-versi bersama kodenya. Versi HTML-nya sudah dihapus; halaman artifact yang pernah diterbitkan tetap ada sebagai potret Rev 1.
 
@@ -50,11 +50,14 @@ Yang disunting tetap `src/`. Setelah berubah, jalankan `node tools/bundle.js` un
 
 ```bash
 node tools/verify-warranty.js units.json    # 22 pemeriksaan
-node tools/verify-access.js                 # 22 pemeriksaan
+node tools/verify-access.js                 # 27 pemeriksaan
 node tools/verify-templates.js              # 18 pemeriksaan
+node tools/verify-sheets.js                 # 25 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.
+
+Penguji sheet menjalankan `Repo.gs` terhadap spreadsheet tiruan dan membuktikan bahwa baris pertama yang berisi data tidak pernah dibaca sebagai baris judul — persoalan nyata pada sheet `Customer` dan `sparepart` yang datang dari workbook lama tanpa judul kolom, yang membuat dropdown terisi baris kosong.
 
 Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah saling melihat klaim, klaim yang belum terpetakan tidak sampai ke siapa pun, dan klaim uji tersembunyi dari semua peran kecuali Tester.
 
@@ -92,7 +95,7 @@ Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah 
 | `XT` + `YYMM` + urut | `XT2305083` | Mei 2023 | + 22 bulan |
 | `C` + `YY` + huruf bulan + kode + urut | `C25GPA011` | Juli 2025 | selalu diperiksa manual oleh Admin |
 
-Rumus 22 bulan diuji terhadap 1.113 unit `XT` dan cocok pada 99,91% baris. Unit `C` dirakit di dalam negeri sehingga masa garansi komponennya tidak dapat dihitung dari data yang tersedia.
+Rumus 22 bulan diuji terhadap seluruh 1.112 unit `XT` dan cocok pada semuanya (100%). Unit `C` dirakit di dalam negeri sehingga masa garansi komponennya tidak dapat dihitung dari data yang tersedia.
 
 **Alur klaim.**
 

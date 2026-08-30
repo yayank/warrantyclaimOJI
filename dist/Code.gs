@@ -98,6 +98,19 @@ SCHEMA[SHEET.POPULATION] = [
   'DeliveryQuantity', 'ShipToParty', 'Principal'
 ];
 
+/**
+ * Sheets that arrive from the old workbook as a bare list with no header row.
+ *
+ * The customer and spare-part lists are a single column of names: row 1 is a
+ * real customer, not a column name. Read as a header it disappears and every
+ * Name reads blank, which empties the dropdowns. This names the schema field
+ * each unlabelled column actually holds, in order, so the values can be moved
+ * under the declared header instead of being mistaken for one.
+ */
+const ADOPT = {};
+ADOPT[SHEET.CUSTOMER] = ['Name'];
+ADOPT[SHEET.PART] = ['Name'];
+
 /** Roles. */
 const ROLE = {
   REQUESTER: 'Requester',
@@ -218,9 +231,14 @@ function boundSpreadsheet_() {
   }
 }
 
-/** Creates any missing sheet with its declared header row. */
+/**
+ * Creates any missing sheet with its declared header row, and repairs one whose
+ * first row turned out to be data. Returns the names of the sheets repaired, so
+ * setUp() can say what it touched.
+ */
 function ensureSheets_() {
   const book = ss_();
+  const repaired = [];
   Object.keys(SCHEMA).forEach(function (name) {
     let s = book.getSheetByName(name);
     if (!s) {
@@ -234,6 +252,10 @@ function ensureSheets_() {
       s.setFrozenRows(1);
       return;
     }
+    // A sheet that never had a header row is rewritten whole, so the value in
+    // row 1 stays a value.
+    if (adoptHeaderless_(s, name)) { repaired.push(name); return; }
+
     // Append columns added by a later revision without disturbing existing data.
     const head = s.getRange(1, 1, 1, Math.max(s.getLastColumn(), 1)).getValues()[0];
     const missing = SCHEMA[name].filter(function (h) { return head.indexOf(h) === -1; });
@@ -253,6 +275,86 @@ function ensureSheets_() {
       s.getRange(2, column, rows, 1).setValues(values);
     }
   });
+  return repaired;
+}
+
+/**
+ * Puts a proper header on a sheet whose first row is data.
+ *
+ * The customer and spare-part lists came out of the old workbook as one bare
+ * column, so `PT. Asri Trisna Mandiri` sits where a column name is expected.
+ * Adding the declared columns beside it leaves Name empty on all 1386 rows and
+ * the dropdown renders 1386 blank entries. Here the unlabelled columns are read
+ * as the values they are and moved under the header ADOPT names for them.
+ *
+ * Only the run of columns *before* the first recognised one is adopted, which
+ * covers both a sheet that still has no header and one this ran on before the
+ * fix — there the value is in column A and the declared columns follow it. A
+ * column added after them is somebody's own and is left alone.
+ *
+ * Returns true when it rewrote the sheet; idempotent, since a sheet it has
+ * repaired starts with a recognised column.
+ */
+function adoptHeaderless_(s, name) {
+  const plan = ADOPT[name];
+  if (!plan) return false;
+
+  const schema = SCHEMA[name];
+  const width = Math.max(s.getLastColumn(), 1);
+  const head = s.getRange(1, 1, 1, width).getValues()[0]
+    .map(function (h) { return String(h).trim(); });
+
+  const lead = [];
+  for (let i = 0; i < head.length; i++) {
+    if (schema.indexOf(head[i]) !== -1) break;
+    lead.push(i);
+  }
+  if (!lead.length) return false;
+  // All blank means there is no stray value to rescue, only empty columns.
+  if (!lead.some(function (i) { return head[i] !== ''; })) return false;
+  if (lead.length > plan.length) {
+    throw new Error('The ' + name + ' sheet starts with ' + lead.length + ' column(s) this ' +
+      'version does not recognise (' + lead.map(function (i) {
+        return head[i] || 'blank column ' + (i + 1);
+      }).join(', ') + '). Expected columns are: ' + schema.join(', ') +
+      '. Give them those names, or move them after the declared columns, then run setUp() again.');
+  }
+
+  const values = s.getRange(1, 1, s.getLastRow(), head.length).getValues();
+  const records = [];
+
+  values.forEach(function (row, r) {
+    const rec = {};
+    // In row 1 the recognised columns hold their own names, not data.
+    if (r > 0) {
+      head.forEach(function (h, c) {
+        if (h && lead.indexOf(c) === -1) rec[h] = row[c];
+      });
+    }
+    lead.forEach(function (c, i) {
+      const v = row[c];
+      if (v !== '' && v !== null) rec[plan[i]] = v;
+    });
+    const empty = schema.every(function (f) {
+      return rec[f] === undefined || rec[f] === '' || rec[f] === null;
+    });
+    if (!empty) records.push(rec);
+  });
+
+  const rows = records.map(function (rec) {
+    return schema.map(function (f) {
+      // A row that predates the column would otherwise read as deactivated and
+      // vanish from every list.
+      if (f === 'Active' && (rec[f] === undefined || rec[f] === '')) return true;
+      return rec[f] === undefined ? '' : rec[f];
+    });
+  });
+
+  s.clearContents();
+  s.getRange(1, 1, 1, schema.length).setValues([schema]);
+  if (rows.length) s.getRange(2, 1, rows.length, schema.length).setValues(rows);
+  s.setFrozenRows(1);
+  return true;
 }
 
 /** Reads a whole sheet as objects keyed by header name. */
@@ -3472,7 +3574,7 @@ function backupSpreadsheet_() {
 
 /** Run once from the Apps Script editor after binding the spreadsheet. */
 function setUp() {
-  ensureSheets_();
+  const repaired = ensureSheets_();
   seedSettings_();
   seedProductionCustomer_();
   seedPrincipal_();
@@ -3480,6 +3582,10 @@ function setUp() {
   const folder = rootFolder_();
   return [
     'Sheets ready.',
+    repaired.length
+      ? 'Gave a header row to sheets that had none: ' + repaired.join(', ') +
+        ' — the values moved into their proper columns.'
+      : 'Every sheet already had its header row.',
     'Drive root: ' + folder.getName() + ' (' + folder.getId() + ')',
     'Next: put your OAuth Client ID in Settings!GoogleClientId, add yourself to the users sheet',
     'as Administrator, deploy the web app, paste its URL into Settings!AppUrl, then run',
@@ -3508,6 +3614,46 @@ function clearCache() {
       : 'That does NOT look like an OAuth client ID — it should end in ' +
         '.apps.googleusercontent.com'
   ].join('\n');
+}
+
+/**
+ * Reports what the reference lists actually contain.
+ *
+ * A dropdown that renders blank entries looks the same as a dropdown with no
+ * data, and neither says why. Run this from the editor and it names the header
+ * row it found, how many rows carry a name, and how many are active — which is
+ * exactly the set the form offers.
+ */
+function checkData() {
+  const book = ss_();
+  const lines = ['Spreadsheet: ' + book.getName()];
+
+  [MASTER.customers, MASTER.parts, MASTER.principals, MASTER.recipients, MASTER.users]
+    .forEach(function (def) {
+      const s = book.getSheetByName(def.sheet);
+      if (!s) { lines.push(def.sheet + ': sheet missing — run setUp().'); return; }
+
+      const head = s.getLastRow()
+        ? s.getRange(1, 1, 1, Math.max(s.getLastColumn(), 1)).getValues()[0]
+          .map(function (h) { return String(h).trim(); })
+        : [];
+      const rows = readAll_(def.sheet);
+      const named = rows.filter(function (r) { return String(r[def.label] || '').trim(); });
+      const active = named.filter(function (r) { return isTrue_(r.Active); });
+
+      lines.push(def.sheet + ': ' + rows.length + ' row(s), ' + named.length + ' with a ' +
+        def.label + ', ' + active.length + ' active.');
+      lines.push('  header: ' + (head.join(' | ') || '(empty)'));
+
+      const unknown = head.filter(function (h) { return h && SCHEMA[def.sheet].indexOf(h) === -1; });
+      if (unknown.length) lines.push('  unrecognised column(s): ' + unknown.join(', '));
+      if (rows.length && !named.length) {
+        lines.push('  → the ' + def.label + ' column is empty on every row, so this list shows ' +
+          'blank entries. Run setUp() again; it moves values under the right header.');
+      }
+    });
+
+  return lines.join('\n');
 }
 
 function seedSettings_() {

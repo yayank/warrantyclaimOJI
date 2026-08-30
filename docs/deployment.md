@@ -61,6 +61,8 @@ Google meminta izin, dan layarnya terlihat mengkhawatirkan: *"Google hasn't veri
 
 Fungsi ini membuat empat belas sheet beserta baris judulnya, menyiapkan folder Drive `Klaim/`, memberi ID pada setiap customer, sparepart, dan principal, menambahkan entri customer `Internal — Production`, serta membuat satu principal bernama `Sansin` untuk menampung data yang sudah ada. Aman dijalankan berulang kali.
 
+Sheet `Customer` dan `sparepart` di workbook lama hanya satu kolom nama **tanpa baris judul** — baris pertamanya sudah berisi data (`PT. Asri Trisna Mandiri`, `A pick up tube`). `setUp()` mengenali itu, memasang baris judul yang benar, dan memindahkan seluruh nilainya ke kolom `Name`; baris pertama tidak hilang. Kalau itu terjadi, hasil jalannya menyebutkan sheet mana yang dirapikan.
+
 ## 5. Daftarkan diri Anda
 
 Buka sheet `users`, tambahkan satu baris:
@@ -192,6 +194,7 @@ Tiga penguji dan satu bundler berjalan di Node tanpa perlu Google:
 node tools/verify-warranty.js units.json    # mesin garansi, diuji ke 2.610 unit asli
 node tools/verify-access.js                 # pemisahan data antar principal
 node tools/verify-templates.js              # perender template email
+node tools/verify-sheets.js                 # pembacaan sheet tanpa baris judul
 node tools/bundle.js                        # membangun ulang dist/
 ```
 
@@ -215,6 +218,8 @@ node tools/bundle.js                        # membangun ulang dist/
 | Halaman berjudul *"Setup is not finished"* | `setUp()` belum dijalankan. Halaman itu menyebutkan sheet apa yang kurang dan spreadsheet mana yang sedang dituju skrip |
 | `Sheet not found: …` saat menjalankan fungsi dari editor | `setUp()` belum dijalankan pada spreadsheet tersebut |
 | "not registered for this portal" | email belum ada di sheet `users`, atau `Active` bukan `TRUE` |
+| Dropdown *Customer* atau *Spare part* kosong / isinya baris kosong | Sheet aslinya tanpa baris judul, sehingga kolom `Name` terbaca kosong. Jalankan `setUp()` sekali lagi — ia memindahkan nilainya ke kolom yang benar. Jalankan `checkData()` untuk melihat keadaan tiap sheet master |
+| `checkData()` melaporkan *unrecognised column* | Ada kolom tambahan di sheet master. Letakkan setelah kolom bawaan, atau beri nama sesuai skema |
 | Tombol *Forward Order* menolak | sheet `Recipients` kosong atau semuanya tidak aktif |
 | Email tidak terkirim | kuota `MailApp` habis — 100/hari untuk akun gmail biasa, 1.500/hari untuk Workspace. Cek kolom `Status` dan `Error` di sheet `EmailLog` |
 | Rekap sore tidak jalan | `installTriggers()` belum dijalankan, atau klaim belum berstatus `In Review` |

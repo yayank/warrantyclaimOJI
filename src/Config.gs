@@ -84,6 +84,19 @@ SCHEMA[SHEET.POPULATION] = [
   'DeliveryQuantity', 'ShipToParty', 'Principal'
 ];
 
+/**
+ * Sheets that arrive from the old workbook as a bare list with no header row.
+ *
+ * The customer and spare-part lists are a single column of names: row 1 is a
+ * real customer, not a column name. Read as a header it disappears and every
+ * Name reads blank, which empties the dropdowns. This names the schema field
+ * each unlabelled column actually holds, in order, so the values can be moved
+ * under the declared header instead of being mistaken for one.
+ */
+const ADOPT = {};
+ADOPT[SHEET.CUSTOMER] = ['Name'];
+ADOPT[SHEET.PART] = ['Name'];
+
 /** Roles. */
 const ROLE = {
   REQUESTER: 'Requester',
