@@ -1,0 +1,2125 @@
+<script>
+/* =============================================================== state */
+
+const S = {
+  token: null,
+  session: null,
+  reference: null,
+  page: 'claims',
+  tab: 'action',
+  view: 'claim',            // 'claim' | 'item'
+  filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', partId: '', from: '', to: '' },
+  rows: [],
+  counts: { action: 0 },
+  expanded: {},
+  selection: {},
+  deepLink: window.APP_DEEP_LINK || {},
+  master: { kind: 'users', rows: [] },
+  templates: [],
+  templateCode: 'DAILY_DIGEST'
+};
+
+const STATUS = {
+  DRAFT: 'Draft', SUBMITTED: 'Submitted', RETURNED: 'Returned to Requester',
+  IN_REVIEW: 'In Review', INTERNAL: 'Internal Verification',
+  FULFILMENT: 'In Fulfilment', CLOSED: 'Closed'
+};
+const ITEM = {
+  PENDING: 'Pending', APPROVED: 'Approved', REJECTED: 'Rejected',
+  FORWARDED: 'Order Forwarded', AWAITING: 'Awaiting Part Availability', SHIPPED: 'Shipped'
+};
+const WARRANTY = {
+  PRINCIPAL: 'Principal Warranty', OUT: 'Out of Principal Warranty',
+  MANUAL: 'Manual Verification Required', INTERNAL: 'Internal Warranty'
+};
+const ROLE = {
+  REQUESTER: 'Requester', PRODUCTION: 'Production',
+  ADMIN: 'Administrator', PRINCIPAL: 'Principal', TESTER: 'Tester'
+};
+
+/* ============================================================= helpers */
+
+function h(v) {
+  return String(v === undefined || v === null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function el(id) { return document.getElementById(id); }
+function initials(name) {
+  return String(name || '?').split(/\s+/).slice(0, 2)
+    .map(function (p) { return p.charAt(0).toUpperCase(); }).join('');
+}
+function fmtDate(v) {
+  if (!v) return '';
+  const d = new Date(String(v).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return String(v);
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return d.getDate() + ' ' + m[d.getMonth()] + ' ' + d.getFullYear();
+}
+function fmtDateTime(v) {
+  if (!v) return '';
+  const d = new Date(String(v).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return String(v);
+  return fmtDate(v) + ', ' + String(d.getHours()).padStart(2, '0') + ':' +
+    String(d.getMinutes()).padStart(2, '0');
+}
+
+const STATUS_CLASS = {};
+STATUS_CLASS[STATUS.DRAFT] = 'p-draft';
+STATUS_CLASS[STATUS.SUBMITTED] = 'p-sub';
+STATUS_CLASS[STATUS.RETURNED] = 'p-sub';
+STATUS_CLASS[STATUS.IN_REVIEW] = 'p-rev';
+STATUS_CLASS[STATUS.INTERNAL] = 'p-wait';
+STATUS_CLASS[STATUS.FULFILMENT] = 'p-wait';
+STATUS_CLASS[STATUS.CLOSED] = 'p-ok';
+
+const ITEM_CLASS = {};
+ITEM_CLASS[ITEM.PENDING] = 'p-draft';
+ITEM_CLASS[ITEM.APPROVED] = 'p-ok';
+ITEM_CLASS[ITEM.REJECTED] = 'p-no';
+ITEM_CLASS[ITEM.FORWARDED] = 'p-rev';
+ITEM_CLASS[ITEM.AWAITING] = 'p-wait';
+ITEM_CLASS[ITEM.SHIPPED] = 'p-ok';
+
+function statusPill(status) {
+  return '<span class="pill ' + (STATUS_CLASS[status] || 'p-draft') + '">' + h(status) + '</span>';
+}
+function itemPill(status) {
+  return '<span class="pill ' + (ITEM_CLASS[status] || 'p-draft') + '">' + h(status) + '</span>';
+}
+function warrantyPill(type) {
+  const cls = type === WARRANTY.PRINCIPAL ? 'p-ok'
+    : type === WARRANTY.OUT ? 'p-no'
+      : type === WARRANTY.INTERNAL ? 'p-rev' : 'p-wait';
+  return '<span class="pill flat ' + cls + '">' + h(type) + '</span>';
+}
+function ageCell(days) {
+  if (days === null || days === undefined) return '<span class="dim">—</span>';
+  const cls = days >= 7 ? 'age-crit' : days >= 3 ? 'age-warn' : '';
+  return '<span class="num ' + cls + '">' + days + ' d</span>';
+}
+function summaryText(s) {
+  const bits = [];
+  if (s.approved) bits.push(s.approved + ' approved');
+  if (s.rejected) bits.push(s.rejected + ' rejected');
+  if (s.pending) bits.push(s.pending + ' pending');
+  return bits.join(' · ');
+}
+
+function toast(message, kind) {
+  const node = document.createElement('div');
+  node.className = 'toast ' + (kind || 'info');
+  node.textContent = message;
+  el('toastHost').appendChild(node);
+  setTimeout(function () { node.remove(); }, kind === 'err' ? 7000 : 3800);
+}
+
+/* ================================================================= api */
+
+function api(action, payload) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (!res || res.ok) {
+          if (res && res.session) S.session = res.session;
+          resolve(res ? res.data : null);
+          return;
+        }
+        if (res.kind === 'auth') {
+          S.token = null;
+          showSignIn(res.error);
+        }
+        const err = new Error(res.error);
+        err.kind = res.kind;
+        err.current = res.current;
+        reject(err);
+      })
+      .withFailureHandler(function (e) { reject(new Error(e && e.message ? e.message : String(e))); })
+      .api({
+        token: S.token,
+        simulatedRole: S.session && S.session.isTester ? S.session.simulatedRole : null,
+        action: action,
+        payload: payload || {}
+      });
+  });
+}
+
+function fail(err) {
+  toast(err && err.message ? err.message : 'Something went wrong.', 'err');
+}
+
+/* ============================================================= sign in */
+
+function showSignIn(message) {
+  el('app').hidden = true;
+  el('boot').hidden = false;
+  const box = el('bootError');
+  if (message) { box.textContent = message; box.hidden = false; } else { box.hidden = true; }
+}
+
+window.onGoogleLibraryLoad = function () {
+  if (!window.APP_CLIENT_ID) {
+    showSignIn('This portal has not been configured yet: no Google Client ID is set in the ' +
+      'Settings sheet.');
+    return;
+  }
+  google.accounts.id.initialize({
+    client_id: window.APP_CLIENT_ID,
+    callback: function (response) { signIn(response.credential); },
+    auto_select: true
+  });
+  google.accounts.id.renderButton(el('gsi'), {
+    theme: 'outline', size: 'large', width: 320, text: 'signin_with'
+  });
+  google.accounts.id.prompt();
+};
+
+function signIn(credential) {
+  S.token = credential;
+  api('session.bootstrap', {}).then(function (data) {
+    S.session = data.session;
+    S.reference = data.reference;
+    el('boot').hidden = true;
+    el('app').hidden = false;
+    applyDeepLink();
+    renderChrome();
+    navigate(S.page);
+  }).catch(function (err) {
+    S.token = null;
+    showSignIn(err.message);
+  });
+}
+
+el('signOut').addEventListener('click', function () {
+  S.token = null;
+  S.session = null;
+  if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
+  showSignIn(null);
+});
+
+function applyDeepLink() {
+  const link = S.deepLink || {};
+  if (link.page === 'claim' && link.id) { S.page = 'claims'; S.tab = 'all'; }
+  else if (link.page === 'batch') { S.page = 'batch'; }
+  else if (link.page === 'orders') { S.page = 'orders'; }
+  else if (link.page === 'claims') { S.page = 'claims'; }
+  if (S.session.role === ROLE.PRINCIPAL && S.page === 'claims') S.page = 'batch';
+  if (S.session.role === ROLE.ADMIN) S.view = 'item';
+}
+
+/* ============================================================== chrome */
+
+function renderChrome() {
+  const s = S.session;
+  el('whoText').textContent = s.name + ' · ' + s.role;
+  el('whoAvatar').textContent = initials(s.name);
+
+  const pages = [{ id: 'claims', label: 'Claims' }];
+  if (s.role === ROLE.REQUESTER || s.role === ROLE.PRODUCTION) {
+    pages.push({ id: 'new', label: 'New Claim' });
+  }
+  if (s.role === ROLE.PRINCIPAL) pages.unshift({ id: 'batch', label: 'Batches' });
+  if (s.role === ROLE.ADMIN) {
+    pages.push({ id: 'orders', label: 'Orders' });
+    pages.push({ id: 'master', label: 'Master Data' });
+    pages.push({ id: 'templates', label: 'Email Templates' });
+    pages.push({ id: 'audit', label: 'Audit Log' });
+  }
+
+  el('nav').innerHTML = pages.map(function (p) {
+    return '<button type="button" data-page="' + p.id + '"' +
+      (S.page === p.id ? ' class="on"' : '') + '>' + h(p.label) + '</button>';
+  }).join('');
+  el('nav').querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () { navigate(b.dataset.page); });
+  });
+
+  renderTesterBar();
+}
+
+function renderTesterBar() {
+  const host = el('testerBar');
+  if (!S.session.isTester) { host.innerHTML = ''; return; }
+  const roles = [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL];
+  host.innerHTML =
+    '<div class="tester">' +
+      '<span>🧪 TEST MODE</span>' +
+      '<label>Viewing as ' +
+        '<select id="simRole">' + roles.map(function (r) {
+          return '<option value="' + r + '"' +
+            (S.session.simulatedRole === r ? ' selected' : '') + '>' + r + '</option>';
+        }).join('') + '</select>' +
+      '</label>' +
+      '<span class="tiny" style="color:inherit">Signed in as ' + h(S.session.email) +
+        ' · actions are limited to test claims · notifications are redirected to you</span>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn sm" id="purgeTest" type="button">Purge Test Claims</button>' +
+    '</div>';
+
+  el('simRole').addEventListener('change', function () {
+    S.session.simulatedRole = this.value;
+    S.session.role = this.value;
+    S.view = this.value === ROLE.ADMIN ? 'item' : 'claim';
+    S.page = this.value === ROLE.PRINCIPAL ? 'batch' : 'claims';
+    renderChrome();
+    navigate(S.page);
+  });
+  el('purgeTest').addEventListener('click', function () {
+    if (!confirm('Permanently remove every test claim, its files and its log entries?')) return;
+    api('test.purge', {}).then(function (r) {
+      toast('Removed ' + r.claims + ' test claims and ' + r.folders + ' folders.', 'ok');
+      navigate(S.page);
+    }).catch(fail);
+  });
+}
+
+function navigate(page) {
+  S.page = page;
+  renderChrome();
+  if (page === 'new') { S.page = 'claims'; renderChrome(); openClaimForm(null); loadClaims(); return; }
+  if (page === 'claims') return loadClaims();
+  if (page === 'batch') return loadBatches();
+  if (page === 'orders') return loadOrders();
+  if (page === 'master') return loadMaster(S.master.kind);
+  if (page === 'templates') return loadTemplates();
+  if (page === 'audit') return loadAudit();
+}
+
+function skeleton(rows) {
+  const out = [];
+  for (let i = 0; i < (rows || 5); i++) out.push('<div class="skel"></div>');
+  return '<div style="display:flex;flex-direction:column;gap:8px">' + out.join('') + '</div>';
+}
+
+/* ============================================================== claims */
+
+function loadClaims() {
+  el('view').innerHTML = skeleton(6);
+  const filter = Object.assign({ tab: S.tab }, S.filters);
+  api('claims.list', filter).then(function (data) {
+    S.rows = data.rows;
+    S.counts = data.counts;
+    renderClaims();
+    const link = S.deepLink;
+    if (link && link.page === 'claim' && link.id) {
+      S.deepLink = {};
+      openClaimPanel(link.id);
+    }
+  }).catch(function (e) { fail(e); el('view').innerHTML = '<div class="empty">' + h(e.message) + '</div>'; });
+}
+
+function renderClaims() {
+  const s = S.session;
+  const canCreate = s.role === ROLE.REQUESTER || s.role === ROLE.PRODUCTION;
+
+  const html = [
+    '<div class="tabs">',
+    tabButton('action', 'Needs Action', S.counts.action),
+    tabButton('progress', 'In Progress'),
+    tabButton('completed', 'Completed'),
+    tabButton('all', 'All'),
+    '</div>',
+    '<div class="toolbar">',
+      '<div class="seg">',
+        '<button type="button" data-view="claim"' + (S.view === 'claim' ? ' class="on"' : '') + '>By claim</button>',
+        '<button type="button" data-view="item"' + (S.view === 'item' ? ' class="on"' : '') + '>By spare part</button>',
+      '</div>',
+      '<input type="text" id="q" class="grow" placeholder="Search claim ID, reference, serial number, customer…" value="' + h(S.filters.search) + '">',
+      selectFilter('statusFilter', 'All statuses', S.reference.statuses, S.filters.statuses[0] || ''),
+      selectFilter('warrantyFilter', 'All warranties', S.reference.warrantyTypes, S.filters.warrantyTypes[0] || ''),
+      customerFilter(),
+      '<span class="spacer"></span>',
+      s.role === ROLE.ADMIN ? '<button class="btn" id="digestNow" type="button">Send Digest Now</button>' : '',
+      '<button class="btn" id="doExport" type="button">Export to Excel</button>',
+      canCreate ? '<button class="btn pri" id="newClaim" type="button">New Claim</button>' : '',
+    '</div>',
+    activeChips(),
+    S.rows.length
+      ? (S.view === 'claim' ? claimTable() : itemTable())
+      : '<div class="tablewrap"><div class="empty">Nothing here yet.</div></div>'
+  ].join('');
+
+  el('view').innerHTML = html;
+  wireClaimsToolbar();
+}
+
+function tabButton(id, label, count) {
+  return '<button type="button" data-tab="' + id + '"' + (S.tab === id ? ' class="on"' : '') + '>' +
+    h(label) + (count ? ' <span class="count">' + count + '</span>' : '') + '</button>';
+}
+
+function selectFilter(id, blank, options, value) {
+  return '<select id="' + id + '" style="width:auto;min-width:150px">' +
+    '<option value="">' + h(blank) + '</option>' +
+    options.map(function (o) {
+      return '<option value="' + h(o) + '"' + (o === value ? ' selected' : '') + '>' + h(o) + '</option>';
+    }).join('') + '</select>';
+}
+
+function customerFilter() {
+  return '<select id="customerFilter" style="width:auto;max-width:220px">' +
+    '<option value="">All customers</option>' +
+    S.reference.customers.map(function (c) {
+      return '<option value="' + h(c.id) + '"' +
+        (S.filters.customerId === c.id ? ' selected' : '') + '>' + h(c.name) + '</option>';
+    }).join('') + '</select>';
+}
+
+function activeChips() {
+  const chips = [];
+  if (S.filters.statuses.length) {
+    chips.push(chip('Status', S.filters.statuses.join(', '), 'statuses'));
+  }
+  if (S.filters.warrantyTypes.length) {
+    chips.push(chip('Warranty', S.filters.warrantyTypes.join(', '), 'warrantyTypes'));
+  }
+  if (S.filters.customerId) {
+    const c = S.reference.customers.filter(function (x) { return x.id === S.filters.customerId; })[0];
+    chips.push(chip('Customer', c ? c.name : S.filters.customerId, 'customerId'));
+  }
+  if (!chips.length) return '';
+  return '<div class="toolbar">' + chips.join('') + '</div>';
+}
+
+function chip(label, value, key) {
+  return '<span class="chip"><b>' + h(label) + '</b> ' + h(value) +
+    '<button type="button" data-clear="' + key + '" aria-label="Remove filter">✕</button></span>';
+}
+
+function claimTable() {
+  const s = S.session;
+  const showCustomer = true;
+  const showRequester = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
+  const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
+
+  const head = ['<th class="caret"></th>', '<th>Claim</th>', '<th>Date</th>'];
+  if (showCustomer) head.push('<th>Customer</th>');
+  head.push('<th>Serial number</th>', '<th>Parts</th>');
+  if (showRequester) head.push('<th>Requested by</th>');
+  if (showWo) head.push('<th>Work order</th>');
+  head.push('<th>Status</th>', '<th>Age</th>');
+
+  const body = S.rows.map(function (c) {
+    const open = !!S.expanded[c.claimId];
+    const cells = [
+      '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
+      '<td class="stack"><span class="mono">' + h(c.claimId) + '</span>' +
+        '<span class="mono tiny">' + h(c.refNo || 'not submitted') + '</span></td>',
+      '<td>' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
+    ];
+    if (showCustomer) cells.push('<td>' + h(c.customerName) + '</td>');
+    cells.push(
+      '<td class="stack"><span class="mono">' + h(c.serialNumber) + '</span>' +
+        warrantyPill(c.warrantyType) + '</td>',
+      '<td>' + c.items.length + ' item' + (c.items.length === 1 ? '' : 's') + '</td>'
+    );
+    if (showRequester) cells.push('<td class="dim">' + h(c.requesterName) + '</td>');
+    if (showWo) {
+      cells.push('<td class="mono' + (c.workOrderNo ? '' : ' dimmer') + '">' +
+        h(c.workOrderNo || '— required') + '</td>');
+    }
+    cells.push(
+      '<td class="stack">' + statusPill(c.status) +
+        (summaryText(c.summary) ? '<span class="tiny">' + h(summaryText(c.summary)) + '</span>' : '') +
+        '</td>',
+      '<td>' + ageCell(c.ageDays) + '</td>'
+    );
+
+    const rows = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
+    if (open) {
+      c.items.forEach(function (i) {
+        rows.push('<tr class="sub"><td></td><td colspan="' + (head.length - 4) + '">' +
+          h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td><td>' +
+          itemPill(i.itemStatus) + (i.decisionReason
+            ? '<div class="tiny">' + h(i.decisionReason) + '</div>' : '') +
+          '</td><td></td></tr>');
+      });
+    }
+    return rows.join('');
+  }).join('');
+
+  return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
+    '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+
+function itemTable() {
+  const s = S.session;
+  const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
+  const head = ['<th>Claim</th>', '<th>Serial number</th>', '<th>Customer</th>',
+    '<th>Spare part</th>', '<th>Qty</th>'];
+  if (showWo) head.push('<th>Work order</th>');
+  head.push('<th>Status</th>', '<th>Reason</th>');
+
+  const body = [];
+  S.rows.forEach(function (c) {
+    c.items.forEach(function (i, index) {
+      const faded = index > 0 ? ' dimmer' : '';
+      const cells = [
+        '<td class="mono' + faded + '">' + h(c.claimId) + '</td>',
+        '<td class="mono' + faded + '">' + h(c.serialNumber) + '</td>',
+        '<td class="' + (index > 0 ? 'dimmer' : '') + '">' + h(c.customerName) + '</td>',
+        '<td>' + h(i.partName) + '</td>',
+        '<td class="mono">' + i.qty + '</td>'
+      ];
+      if (showWo) cells.push('<td class="mono' + faded + '">' + h(c.workOrderNo || '—') + '</td>');
+      cells.push('<td>' + itemPill(i.itemStatus) + '</td>',
+        '<td class="tiny">' + h(i.decisionReason || '') + '</td>');
+      body.push('<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>');
+    });
+  });
+
+  return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
+    '</tr></thead><tbody>' + body.join('') + '</tbody></table></div>';
+}
+
+function wireClaimsToolbar() {
+  el('view').querySelectorAll('[data-tab]').forEach(function (b) {
+    b.addEventListener('click', function () { S.tab = b.dataset.tab; loadClaims(); });
+  });
+  el('view').querySelectorAll('[data-view]').forEach(function (b) {
+    b.addEventListener('click', function () { S.view = b.dataset.view; renderClaims(); });
+  });
+  el('view').querySelectorAll('[data-toggle]').forEach(function (td) {
+    td.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const id = td.dataset.toggle;
+      S.expanded[id] = !S.expanded[id];
+      renderClaims();
+    });
+  });
+  el('view').querySelectorAll('[data-claim]').forEach(function (tr) {
+    tr.addEventListener('click', function () { openClaimPanel(tr.dataset.claim); });
+  });
+  el('view').querySelectorAll('[data-clear]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      const key = b.dataset.clear;
+      S.filters[key] = Array.isArray(S.filters[key]) ? [] : '';
+      loadClaims();
+    });
+  });
+
+  const q = el('q');
+  if (q) {
+    let timer = null;
+    q.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { S.filters.search = q.value.trim(); loadClaims(); }, 350);
+    });
+  }
+  const sf = el('statusFilter');
+  if (sf) sf.addEventListener('change', function () {
+    S.filters.statuses = this.value ? [this.value] : []; loadClaims();
+  });
+  const wf = el('warrantyFilter');
+  if (wf) wf.addEventListener('change', function () {
+    S.filters.warrantyTypes = this.value ? [this.value] : []; loadClaims();
+  });
+  const cf = el('customerFilter');
+  if (cf) cf.addEventListener('change', function () {
+    S.filters.customerId = this.value; loadClaims();
+  });
+  const nc = el('newClaim');
+  if (nc) nc.addEventListener('click', function () { openClaimForm(null); });
+  const ex = el('doExport');
+  if (ex) ex.addEventListener('click', doExport);
+  const dg = el('digestNow');
+  if (dg) dg.addEventListener('click', function () {
+    dg.disabled = true;
+    dg.textContent = 'Sending…';
+    api('email.digestNow', {}).then(function (r) {
+      toast(r.sent ? 'Digest sent for ' + r.claims + ' claim(s).' : 'No claims are waiting to be sent.',
+        r.sent ? 'ok' : 'info');
+    }).catch(fail).then(function () {
+      dg.disabled = false; dg.textContent = 'Send Digest Now';
+    });
+  });
+}
+
+function doExport() {
+  const btn = el('doExport');
+  btn.disabled = true;
+  btn.textContent = 'Preparing file…';
+  const filter = Object.assign({ tab: S.tab, view: S.view }, S.filters);
+  api('claims.export', filter).then(function (r) {
+    btn.textContent = 'Export to Excel';
+    btn.disabled = false;
+    openModal({
+      title: 'Export ready',
+      size: 'narrow',
+      body: '<p>' + r.rows + ' row' + (r.rows === 1 ? '' : 's') + ' exported to ' +
+        '<span class="mono">' + h(r.fileName) + '</span>.</p>' +
+        '<p class="tiny">The file is kept in Drive for seven days.</p>',
+      actions: [
+        { label: 'Close', close: true },
+        { label: 'Download', primary: true, onClick: function () { window.open(r.url, '_blank'); } }
+      ]
+    });
+  }).catch(function (e) {
+    btn.textContent = 'Export to Excel'; btn.disabled = false; fail(e);
+  });
+}
+
+/* ======================================================== claim panel */
+
+function openClaimPanel(claimId) {
+  renderPanel('<div class="panel-body"><div class="panel-sec">' + skeleton(4) + '</div></div>');
+  api('claims.get', { claimId: claimId }).then(function (claim) {
+    renderClaimPanel(claim);
+  }).catch(function (e) { closePanel(); fail(e); });
+}
+
+function renderPanel(inner) {
+  el('panelHost').innerHTML =
+    '<div class="panel-scrim" data-close="1"></div><aside class="panel">' + inner + '</aside>';
+  el('panelHost').querySelectorAll('[data-close]').forEach(function (n) {
+    n.addEventListener('click', closePanel);
+  });
+}
+function closePanel() { el('panelHost').innerHTML = ''; }
+
+function renderClaimPanel(c) {
+  const s = S.session;
+  const sec = [];
+
+  sec.push(
+    '<div class="panel-sec"><h3>Warranty assessment</h3>' +
+      '<div class="calc"><b>' + h(c.serialNumber) + '</b>' +
+        (c.productName ? ' · ' + h(c.productName) : '') + '<br>' + h(c.warrantyBasis) + '</div>' +
+      '<div class="row">' + warrantyPill(c.warrantyType) +
+        (c.warrantyOverridden ? '<span class="tiny" style="color:var(--warn);font-weight:600">🔧 overridden by administrator</span>' : '') +
+        '</div>' +
+      (c.warrantyOverrideReason ? '<div class="tiny">' + h(c.warrantyOverrideReason) + '</div>' : '') +
+    '</div>'
+  );
+
+  sec.push(
+    '<div class="panel-sec"><h3>Claim</h3>' +
+      kv('Customer', c.customerName) + kv('Requested by', c.requesterName) +
+      kv('Reference', c.refNo || '—') + kv('Work order', c.workOrderNo || '—') +
+      (c.returnReason ? kv('Returned because', c.returnReason) : '') +
+      '<div class="tiny" style="margin-top:6px">“' + h(c.problem) + '”</div>' +
+    '</div>'
+  );
+
+  sec.push(
+    '<div class="panel-sec"><h3>Spare parts</h3>' +
+      c.items.map(function (i) {
+        return '<div class="itemrow"><span class="nm">' + h(i.partName) + '</span>' +
+          '<span class="mono tiny">' + i.qty + ' pcs</span>' + itemPill(i.itemStatus) +
+          (i.decisionReason ? '<div class="tiny" style="width:100%">' + h(i.decisionReason) + '</div>' : '') +
+          (i.availabilityDate ? '<div class="tiny" style="width:100%">Available ' +
+            h(fmtDate(i.availabilityDate)) + ' · ' + h(i.documentRefNo) + '</div>' : '') +
+          '</div>';
+      }).join('') +
+    '</div>'
+  );
+
+  if (c.attachments.length) {
+    sec.push('<div class="panel-sec"><h3>Evidence</h3><div class="gallery">' +
+      c.attachments.map(function (a) {
+        return '<figure data-att="' + h(a.attachmentId) + '">' +
+          '<div style="height:82px;display:grid;place-items:center;color:var(--ink-3);font-size:11px">' +
+            h(a.kind) + '</div>' +
+          '<figcaption>' + h(a.fileName) + '</figcaption></figure>';
+      }).join('') + '</div></div>');
+  }
+
+  if (c.audit && c.audit.length) {
+    sec.push('<div class="panel-sec"><h3>History</h3><div class="audit">' +
+      c.audit.slice(0, 12).map(function (a) {
+        return '<div class="entry"><div>' + h(a.action) +
+          (a.field ? ' · ' + h(a.field) : '') + '</div>' +
+          (a.oldValue || a.newValue
+            ? '<div class="tiny">' + h(a.oldValue || '(empty)') + ' → ' + h(a.newValue || '(empty)') + '</div>'
+            : '') +
+          (a.reason ? '<div class="tiny">“' + h(a.reason) + '”</div>' : '') +
+          '<div class="tiny">' + h(fmtDateTime(a.timestamp)) + ' · ' + h(a.actor) +
+            ' (' + h(a.role) + ')</div></div>';
+      }).join('') + '</div></div>');
+  }
+
+  renderPanel(
+    '<div class="panel-head">' +
+      '<div class="row"><h2>' + h(c.claimId) + '</h2><span class="spacer"></span>' +
+        '<button class="btn sm ghost" data-close="1" type="button">Close</button></div>' +
+      '<div class="row">' + statusPill(c.status) +
+        '<span class="tiny">' + h(c.customerName) + ' · ' +
+        h(fmtDateTime(c.submittedAt || c.createdAt)) + '</span></div>' +
+    '</div>' +
+    '<div class="panel-body">' + sec.join('') + '</div>' +
+    '<div class="panel-foot" id="panelActions"></div>'
+  );
+
+  renderPanelActions(c);
+  el('panelHost').querySelectorAll('[data-att]').forEach(function (fig) {
+    fig.addEventListener('click', function () { showAttachment(fig.dataset.att); });
+  });
+}
+
+function kv(label, value) {
+  return '<div class="row" style="gap:6px;font-size:12.5px"><span class="tiny" style="min-width:96px">' +
+    h(label) + '</span><span>' + h(value) + '</span></div>';
+}
+
+function renderPanelActions(c) {
+  const s = S.session;
+  const host = el('panelActions');
+  const buttons = [];
+
+  const owner = String(c.requesterEmail).toLowerCase() === String(s.email).toLowerCase();
+  const isRequester = s.role === ROLE.REQUESTER || s.role === ROLE.PRODUCTION;
+
+  if (isRequester && owner && (c.status === STATUS.DRAFT || c.status === STATUS.RETURNED)) {
+    buttons.push(btn('Edit claim', 'pri', function () { closePanel(); openClaimForm(c); }));
+    if (c.status === STATUS.DRAFT) {
+      buttons.push(btn('Delete draft', 'no', function () {
+        if (!confirm('Remove this draft?')) return;
+        api('claims.delete', { claimId: c.claimId, rowVersion: c.rowVersion })
+          .then(function () { toast('Draft removed.', 'ok'); closePanel(); loadClaims(); })
+          .catch(fail);
+      }));
+    }
+  }
+
+  if (s.role === ROLE.ADMIN) {
+    if (c.status === STATUS.SUBMITTED || c.status === STATUS.INTERNAL) {
+      buttons.push(btn('Return to Requester', 'no', function () { promptReturn(c); }));
+      buttons.push(btn('Override warranty', '', function () { promptOverride(c); }));
+      buttons.push(btn('Amend', '', function () { closePanel(); openClaimForm(c); }));
+    }
+    if (c.status === STATUS.SUBMITTED) {
+      if (c.warrantyType === WARRANTY.PRINCIPAL) {
+        buttons.push(btn('Forward to Principal', 'pri', function () { promptForward(c); }));
+      } else {
+        buttons.push(btn('Process Internal Warranty', 'pri', function () {
+          api('claims.internal', { claimId: c.claimId, rowVersion: c.rowVersion })
+            .then(function () { toast('Moved to internal verification.', 'ok'); reopen(c.claimId); })
+            .catch(fail);
+        }));
+      }
+    }
+    if (c.status === STATUS.INTERNAL) {
+      buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
+      buttons.push(btn('Reject parts', 'no', function () { promptDecision(c, 'reject'); }));
+    }
+    if (c.status === STATUS.IN_REVIEW) {
+      buttons.push(btn('Withdraw from Principal', '', function () {
+        if (!confirm('Withdraw this claim from the principal?')) return;
+        api('claims.withdraw', { claimId: c.claimId, rowVersion: c.rowVersion })
+          .then(function () { toast('Withdrawn.', 'ok'); reopen(c.claimId); }).catch(fail);
+      }));
+    }
+    if (c.status === STATUS.FULFILMENT) {
+      buttons.push(btn('Open in Orders', 'pri', function () { closePanel(); navigate('orders'); }));
+    }
+  }
+
+  if (s.role === ROLE.PRINCIPAL && c.warrantyType === WARRANTY.PRINCIPAL &&
+    [STATUS.IN_REVIEW, STATUS.FULFILMENT, STATUS.CLOSED].indexOf(c.status) !== -1) {
+    buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
+    buttons.push(btn('Reject parts', 'no', function () { promptDecision(c, 'reject'); }));
+  }
+
+  if (!buttons.length) {
+    host.innerHTML = '<span class="tiny">No action is available to you at this status.</span>';
+    return;
+  }
+  host.innerHTML = '';
+  buttons.forEach(function (b) { host.appendChild(b); });
+}
+
+function btn(label, cls, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn ' + (cls || '');
+  b.textContent = label;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function reopen(claimId) { openClaimPanel(claimId); loadClaims(); }
+
+function showAttachment(attachmentId) {
+  api('claims.attachment', { attachmentId: attachmentId }).then(function (a) {
+    if (a.kind === 'pdf') { window.open(a.url, '_blank'); return; }
+    const box = document.createElement('div');
+    box.className = 'lightbox';
+    box.innerHTML = '<img src="' + a.dataUri + '" alt="' + h(a.name) + '">';
+    box.addEventListener('click', function () { box.remove(); });
+    document.body.appendChild(box);
+  }).catch(fail);
+}
+
+/* ---------------------------------------------------------- prompts */
+
+function promptReturn(c) {
+  openModal({
+    title: 'Return to Requester',
+    size: 'narrow',
+    body: '<label class="field"><span>Reason <b class="req">*</b></span>' +
+      '<textarea id="reason" placeholder="What does the requester need to correct?"></textarea></label>' +
+      '<p class="tiny">The requester is emailed this reason together with a link back to the claim.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Return claim', primary: true, onClick: function (close) {
+        const reason = el('reason').value.trim();
+        if (!reason) { toast('Please give a reason.', 'err'); return; }
+        api('claims.return', { claimId: c.claimId, reason: reason, rowVersion: c.rowVersion })
+          .then(function () { close(); toast('Returned to requester.', 'ok'); reopen(c.claimId); })
+          .catch(fail);
+      } }
+    ]
+  });
+}
+
+function promptOverride(c) {
+  const types = [WARRANTY.PRINCIPAL, WARRANTY.OUT, WARRANTY.INTERNAL, WARRANTY.MANUAL];
+  openModal({
+    title: 'Override warranty',
+    size: 'narrow',
+    body: '<div class="calc">' + h(c.warrantyBasis) + '</div>' +
+      '<label class="field"><span>New warranty status</span><select id="wtype">' +
+      types.map(function (t) {
+        return '<option value="' + h(t) + '"' + (t === c.warrantyType ? ' selected' : '') + '>' +
+          h(t) + '</option>';
+      }).join('') + '</select></label>' +
+      '<label class="field"><span>Reason <b class="req">*</b></span>' +
+      '<textarea id="reason" placeholder="Why is the calculated result being overruled?"></textarea></label>' +
+      '<p class="tiny">Recorded in the audit log with the previous value.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Save override', primary: true, onClick: function (close) {
+        const reason = el('reason').value.trim();
+        if (!reason) { toast('An override must state its reason.', 'err'); return; }
+        api('claims.override', {
+          claimId: c.claimId, warrantyType: el('wtype').value,
+          reason: reason, rowVersion: c.rowVersion
+        }).then(function () { close(); toast('Warranty overridden.', 'ok'); reopen(c.claimId); })
+          .catch(fail);
+      } }
+    ]
+  });
+}
+
+function promptForward(c) {
+  openModal({
+    title: 'Forward to Principal',
+    size: 'narrow',
+    body: '<label class="field"><span>Work order number <b class="req">*</b></span>' +
+      '<input type="text" id="wo" value="' + h(c.workOrderNo || '') + '" placeholder="WO-2608-0041"></label>' +
+      '<p class="tiny">The principal sees the claim immediately. The notification goes out with the ' +
+      'daily digest at 17:00 WIB, or straight away using “Send Digest Now”.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Forward', primary: true, onClick: function (close) {
+        const wo = el('wo').value.trim();
+        if (!wo) { toast('Enter the work order number first.', 'err'); return; }
+        api('claims.forward', { claimId: c.claimId, workOrderNo: wo, rowVersion: c.rowVersion })
+          .then(function () { close(); toast('Forwarded to principal.', 'ok'); reopen(c.claimId); })
+          .catch(fail);
+      } }
+    ]
+  });
+}
+
+function promptDecision(claim, decision) {
+  const open = claim.items.filter(function (i) {
+    return [ITEM.FORWARDED, ITEM.AWAITING, ITEM.SHIPPED].indexOf(i.itemStatus) === -1;
+  });
+  if (!open.length) { toast('Every part on this claim has already been ordered.', 'err'); return; }
+
+  openModal({
+    title: decision === 'approve' ? 'Approve spare parts' : 'Reject spare parts',
+    size: 'narrow',
+    body: '<div class="blk"><h3>Spare parts</h3>' +
+      open.map(function (i) {
+        return '<label class="itemrow"><input type="checkbox" class="pick" value="' + h(i.itemId) +
+          '" checked><span class="nm">' + h(i.partName) + '</span>' +
+          '<span class="mono tiny">' + i.qty + ' pcs</span>' + itemPill(i.itemStatus) + '</label>';
+      }).join('') + '</div>' +
+      '<label class="field"><span>Reason' +
+        (decision === 'reject' ? ' <b class="req">*</b>' : '') + '</span>' +
+      '<textarea id="reason" placeholder="' +
+        (decision === 'reject' ? 'Why is this not covered?' : 'Optional note') + '"></textarea></label>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: decision === 'approve' ? 'Approve' : 'Reject',
+        primary: decision === 'approve', danger: decision === 'reject',
+        onClick: function (close) {
+          const ids = Array.prototype.slice.call(document.querySelectorAll('.pick:checked'))
+            .map(function (n) { return n.value; });
+          if (!ids.length) { toast('Select at least one spare part.', 'err'); return; }
+          const reason = el('reason').value.trim();
+          if (decision === 'reject' && !reason) { toast('A rejection must state its reason.', 'err'); return; }
+          api('claims.decide', { itemIds: ids, decision: decision, reason: reason })
+            .then(function () { close(); toast('Decision recorded.', 'ok'); reopen(claim.claimId); })
+            .catch(fail);
+        } }
+    ]
+  });
+}
+
+/* ============================================================== modals */
+
+function openModal(spec) {
+  const actions = (spec.actions || []).map(function (a, i) {
+    return '<button type="button" class="btn ' +
+      (a.primary ? 'pri' : a.danger ? 'no' : '') + '" data-action="' + i + '">' + h(a.label) + '</button>';
+  }).join('');
+
+  el('modalHost').innerHTML =
+    '<div class="modal-scrim"><div class="modal ' + (spec.size === 'wide' ? 'wide' :
+      spec.size === 'narrow' ? 'narrow' : '') + '">' +
+      '<div class="modal-head"><h2>' + h(spec.title) + '</h2>' +
+        (spec.meta ? '<span class="mono tiny">' + h(spec.meta) + '</span>' : '') + '</div>' +
+      '<div class="modal-body">' + spec.body + '</div>' +
+      '<div class="modal-foot">' + (spec.footNote ? '<span class="tiny">' + h(spec.footNote) +
+        '</span>' : '') + '<span class="spacer"></span>' + actions + '</div>' +
+    '</div></div>';
+
+  el('modalHost').querySelectorAll('[data-action]').forEach(function (b) {
+    const spec_ = spec.actions[Number(b.dataset.action)];
+    b.addEventListener('click', function () {
+      if (spec_.close) { closeModal(); return; }
+      spec_.onClick(closeModal);
+    });
+  });
+  if (spec.onOpen) spec.onOpen();
+}
+
+function closeModal() { el('modalHost').innerHTML = ''; }
+
+/* ========================================================== claim form */
+
+const FORM = { claim: null, items: [], files: {}, lookup: null };
+
+function openClaimForm(existing) {
+  FORM.claim = existing || null;
+  FORM.items = existing
+    ? existing.items.map(function (i) {
+        return { itemId: i.itemId, partId: i.partId, partName: i.partName, qty: i.qty, file: null,
+          hasPhoto: (existing.attachments || []).some(function (a) {
+            return a.kind === 'PART' && a.itemId === i.itemId;
+          }) };
+      })
+    : [{ itemId: null, partId: '', partName: '', qty: 1, file: null, hasPhoto: false }];
+  FORM.files = {
+    FAULT: { file: null, has: existing ? (existing.attachments || []).some(function (a) { return a.kind === 'FAULT'; }) : false },
+    REPORT: { file: null, has: existing ? (existing.attachments || []).some(function (a) { return a.kind === 'REPORT'; }) : false }
+  };
+  FORM.lookup = null;
+
+  openModal({
+    title: existing ? (S.session.role === ROLE.ADMIN ? 'Amend Claim' : 'Edit Claim') : 'New Warranty Claim',
+    meta: existing ? existing.claimId : '',
+    body: '<div id="formBody">' + claimFormBody() + '</div>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Save Draft', onClick: function () { saveForm(false); } },
+      { label: existing && S.session.role === ROLE.ADMIN ? 'Save changes' : 'Submit Claim',
+        primary: true, onClick: function () { saveForm(true); } }
+    ],
+    onOpen: function () {
+      wireClaimForm();
+      if (existing && existing.serialNumber) runLookup(existing.serialNumber);
+    }
+  });
+}
+
+function claimFormBody() {
+  const c = FORM.claim;
+  const isProduction = S.session.role === ROLE.PRODUCTION;
+  const isAdmin = S.session.role === ROLE.ADMIN;
+
+  return [
+    '<div class="blk"><h3>Submission</h3><div class="grid2">',
+      '<div class="ro">' + h(S.session.name) + '</div>',
+      '<div class="ro">' + h(fmtDate(new Date().toISOString())) + '</div>',
+      '<div class="ro mono">' + h(c && c.refNo ? c.refNo : 'assigned on submit') + '</div>',
+      '<div class="ro mono">' + h(c ? c.claimId : 'assigned on save') + '</div>',
+    '</div><p class="tiny">Claims submitted on the same day share one reference number so the ' +
+      'principal receives them as a single batch.</p></div>',
+
+    '<div class="blk"><h3>Unit</h3><div class="grid2">',
+      '<label class="field"><span>Customer <b class="req">*</b></span>' +
+        (isProduction
+          ? '<div class="ro">' + h(S.reference.productionCustomer) + '</div>'
+          : '<select id="fCustomer"><option value="">Select a customer…</option>' +
+            S.reference.customers.map(function (x) {
+              return '<option value="' + h(x.id) + '"' +
+                (c && c.customerId === x.id ? ' selected' : '') + '>' + h(x.name) + '</option>';
+            }).join('') + '</select>') +
+      '</label>',
+      '<label class="field"><span>Serial number <b class="req">*</b></span>' +
+        '<input type="text" id="fSerial" class="mono" value="' + h(c ? c.serialNumber : '') +
+        '" placeholder="XT2410090"></label>',
+    '</div><div id="lookupBox"></div>',
+    isAdmin && c ? '<label class="field"><span>Reason for change</span>' +
+      '<input type="text" id="fReason" placeholder="Required when the serial number changes"></label>' : '',
+    '</div>',
+
+    '<div class="blk"><h3>Fault</h3>',
+      '<label class="field"><span>Problem description <b class="req">*</b></span>' +
+        '<textarea id="fProblem" placeholder="Describe what the machine is doing">' +
+        h(c ? c.problem : '') + '</textarea></label>',
+    '</div>',
+
+    '<div class="blk"><h3>Spare parts requested <b class="req">*</b></h3>',
+      '<div id="partRows">' + partRows() + '</div>',
+      '<button type="button" class="addrow" id="addPart">+ Add spare part</button>',
+    '</div>',
+
+    '<div class="blk"><h3>Attachments</h3><div class="grid2">',
+      fileField('FAULT', 'Fault photo', 'image/*'),
+      fileField('REPORT', 'Service report', 'application/pdf,image/*'),
+    '</div></div>'
+  ].join('');
+}
+
+function partRows() {
+  return FORM.items.map(function (item, index) {
+    const missing = !item.hasPhoto && !item.file;
+    const warn = FORM.lookup && FORM.lookup.openParts && FORM.lookup.openParts[item.partId];
+    return '<div class="partrow' + (missing ? ' bad' : '') + '" data-index="' + index + '">' +
+      '<span class="idx">' + (index + 1) + '</span>' +
+      '<select class="pPart">' +
+        '<option value="">Select a spare part…</option>' +
+        S.reference.parts.map(function (p) {
+          return '<option value="' + h(p.id) + '"' + (p.id === item.partId ? ' selected' : '') + '>' +
+            h(p.name) + '</option>';
+        }).join('') +
+      '</select>' +
+      '<input type="number" class="pQty qty" min="1" value="' + (item.qty || 1) + '">' +
+      '<label class="filebtn' + (missing ? '' : ' has') + ' file">' +
+        (item.file ? '✓ ' + h(item.file.name) : item.hasPhoto ? '✓ photo attached' : 'Choose photo…') +
+        '<input type="file" class="pFile" accept="image/*"></label>' +
+      '<button type="button" class="btn sm ghost pDel" aria-label="Remove row">✕</button>' +
+      (warn ? '<div class="notice crit" style="grid-column:1/-1">⚠ This part is already requested on ' +
+        '<span class="mono">' + h(warn.claimId) + '</span> (' + h(warn.status) + ') and not yet resolved.' +
+        '</div>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function fileField(kind, label, accept) {
+  const f = FORM.files[kind];
+  const ok = f.has || f.file;
+  return '<label class="field"><span>' + h(label) + ' <b class="req">*</b></span>' +
+    '<label class="filebtn' + (ok ? ' has' : '') + '" style="padding:7px 10px">' +
+      (f.file ? '✓ ' + h(f.file.name) : f.has ? '✓ attached' : 'Choose file…') +
+      '<input type="file" class="kindFile" data-kind="' + kind + '" accept="' + accept + '"></label>' +
+    '</label>';
+}
+
+function wireClaimForm() {
+  const serial = el('fSerial');
+  if (serial) {
+    let timer = null;
+    serial.addEventListener('input', function () {
+      clearTimeout(timer);
+      const value = serial.value.trim();
+      timer = setTimeout(function () { runLookup(value); }, 400);
+    });
+  }
+  const add = el('addPart');
+  if (add) add.addEventListener('click', function () {
+    FORM.items.push({ itemId: null, partId: '', partName: '', qty: 1, file: null, hasPhoto: false });
+    refreshPartRows();
+  });
+  wirePartRows();
+  document.querySelectorAll('.kindFile').forEach(function (input) {
+    input.addEventListener('change', function () {
+      const kind = input.dataset.kind;
+      FORM.files[kind].file = input.files[0] || null;
+      refreshAttachments();
+    });
+  });
+}
+
+function wirePartRows() {
+  document.querySelectorAll('.partrow').forEach(function (row) {
+    const index = Number(row.dataset.index);
+    row.querySelector('.pPart').addEventListener('change', function () {
+      FORM.items[index].partId = this.value;
+      FORM.items[index].partName = this.options[this.selectedIndex].text;
+      refreshPartRows();
+    });
+    row.querySelector('.pQty').addEventListener('change', function () {
+      FORM.items[index].qty = Math.max(1, Number(this.value) || 1);
+    });
+    row.querySelector('.pFile').addEventListener('change', function () {
+      FORM.items[index].file = this.files[0] || null;
+      refreshPartRows();
+    });
+    row.querySelector('.pDel').addEventListener('click', function () {
+      if (FORM.items.length === 1) { toast('A claim needs at least one spare part.', 'err'); return; }
+      FORM.items.splice(index, 1);
+      refreshPartRows();
+    });
+  });
+}
+
+function refreshPartRows() {
+  const host = el('partRows');
+  if (!host) return;
+  host.innerHTML = partRows();
+  wirePartRows();
+}
+
+function refreshAttachments() {
+  const body = el('formBody');
+  if (!body) return;
+  const blocks = body.querySelectorAll('.blk');
+  const last = blocks[blocks.length - 1];
+  last.innerHTML = '<h3>Attachments</h3><div class="grid2">' +
+    fileField('FAULT', 'Fault photo', 'image/*') +
+    fileField('REPORT', 'Service report', 'application/pdf,image/*') + '</div>';
+  last.querySelectorAll('.kindFile').forEach(function (input) {
+    input.addEventListener('change', function () {
+      FORM.files[input.dataset.kind].file = input.files[0] || null;
+      refreshAttachments();
+    });
+  });
+}
+
+function runLookup(serial) {
+  const box = el('lookupBox');
+  if (!box) return;
+  if (!serial) { box.innerHTML = ''; FORM.lookup = null; return; }
+  box.innerHTML = '<div class="lookup none"><div class="l1">' + h(serial) + '</div>' +
+    '<div class="tiny">Checking…</div></div>';
+
+  api('claims.lookup', { serialNumber: serial }).then(function (data) {
+    FORM.lookup = data;
+    const w = data.warranty;
+    const cls = w.type === WARRANTY.PRINCIPAL ? 'ok'
+      : w.type === WARRANTY.OUT ? 'out'
+        : w.type === WARRANTY.MANUAL ? 'manual' : 'none';
+    const verdict = w.type === WARRANTY.PRINCIPAL
+      ? 'PRINCIPAL WARRANTY — valid until ' + monthLabel(w.expiry) +
+        (w.daysRemaining !== null ? ' <span class="tiny">(' + w.daysRemaining + ' days remaining)</span>' : '')
+      : w.type === WARRANTY.OUT
+        ? 'OUT OF PRINCIPAL WARRANTY — expired ' + monthLabel(w.expiry)
+        : 'MANUAL VERIFICATION REQUIRED — the administrator will check this';
+
+    box.innerHTML =
+      '<div class="lookup ' + cls + '">' +
+        '<div class="l1">' + h(data.serial) + '</div>' +
+        (data.productName ? '<div>' + h(data.productName) + '</div>' : '') +
+        '<div class="tiny" style="color:inherit">' + h(w.basis) + '</div>' +
+        '<div class="l3">' + verdict + '</div>' +
+      '</div>' +
+      (data.openClaims.length
+        ? '<div class="notice" style="margin-top:8px">⚠ This unit has ' + data.openClaims.length +
+          ' open claim' + (data.openClaims.length === 1 ? '' : 's') + ': ' +
+          data.openClaims.map(function (o) {
+            return '<span class="mono">' + h(o.claimId) + '</span> · ' + h(o.status);
+          }).join(', ') + '</div>'
+        : '');
+    refreshPartRows();
+  }).catch(function () {
+    box.innerHTML = '<div class="lookup none"><div class="tiny">Could not check this serial number.</div></div>';
+  });
+}
+
+function monthLabel(key) {
+  if (!key) return '—';
+  const parts = String(key).split('-');
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return names[Number(parts[1]) - 1] + ' ' + parts[0];
+}
+
+/* ------------------------------------------------------ save & submit */
+
+function saveForm(thenSubmit) {
+  const customerId = el('fCustomer') ? el('fCustomer').value : '';
+  const serial = el('fSerial').value.trim();
+  const problem = el('fProblem').value.trim();
+  const reason = el('fReason') ? el('fReason').value.trim() : '';
+
+  if (S.session.role !== ROLE.PRODUCTION && !customerId) { toast('Choose a customer.', 'err'); return; }
+  if (!serial) { toast('Enter the serial number.', 'err'); return; }
+  if (FORM.items.some(function (i) { return !i.partId; })) {
+    toast('Choose a spare part for every row.', 'err'); return;
+  }
+
+  const steps = buildSteps(thenSubmit);
+  showStepper(steps);
+
+  const payload = {
+    claimId: FORM.claim ? FORM.claim.claimId : null,
+    rowVersion: FORM.claim ? FORM.claim.rowVersion : null,
+    customerId: customerId,
+    serialNumber: serial,
+    problem: problem,
+    reason: reason,
+    items: FORM.items.map(function (i) {
+      return { itemId: i.itemId, partId: i.partId, qty: i.qty };
+    })
+  };
+
+  let claim = null;
+  advanceStep(0);
+
+  api('claims.save', payload)
+    .then(function (saved) {
+      claim = saved;
+      completeStep(0);
+      return uploadAll(saved, 1);
+    })
+    .then(function (nextStep) {
+      if (!thenSubmit) return { claim: claim, step: nextStep };
+      advanceStep(nextStep);
+      return api('claims.submit', { claimId: claim.claimId, rowVersion: claim.rowVersion })
+        .then(function (submitted) {
+          completeStep(nextStep);
+          advanceStep(nextStep + 1);
+          completeStep(nextStep + 1);
+          return { claim: submitted, step: nextStep + 1 };
+        });
+    })
+    .then(function (result) {
+      closeModal();
+      toast(thenSubmit
+        ? result.claim.claimId + ' submitted.'
+        : 'Draft saved as ' + result.claim.claimId + '.', 'ok');
+      if (thenSubmit) showSubmitted(result.claim);
+      loadClaims();
+    })
+    .catch(function (e) {
+      if (e.kind === 'stale') { showConflict(e); return; }
+      closeModal();
+      fail(e);
+      if (claim) openClaimPanel(claim.claimId);
+      loadClaims();
+    });
+}
+
+function buildSteps(thenSubmit) {
+  const steps = ['Validating serial number'];
+  const partFiles = FORM.items.filter(function (i) { return i.file; });
+  partFiles.forEach(function (i, n) {
+    steps.push('Uploading part photo ' + (n + 1) + ' of ' + partFiles.length);
+  });
+  if (FORM.files.FAULT.file) steps.push('Uploading fault photo');
+  if (FORM.files.REPORT.file) steps.push('Uploading service report');
+  if (thenSubmit) { steps.push('Filing documents'); steps.push('Notifying administrator'); }
+  return steps;
+}
+
+const STEP = { list: [], current: -1 };
+
+function showStepper(steps) {
+  STEP.list = steps;
+  STEP.current = -1;
+  openModal({
+    title: 'Saving…',
+    size: 'narrow',
+    body: '<div class="stepper" id="stepper">' + steps.map(function (s, i) {
+      return '<div class="step" data-step="' + i + '"><span class="dot"></span>' +
+        '<span class="label">' + h(s) + '</span>' +
+        '<span class="bar" hidden><i style="width:0"></i></span></div>';
+    }).join('') + '</div>',
+    actions: [],
+    footNote: 'Please keep this window open.'
+  });
+}
+
+function advanceStep(index) {
+  STEP.current = index;
+  const node = document.querySelector('[data-step="' + index + '"]');
+  if (node) node.classList.add('now');
+}
+function completeStep(index) {
+  const node = document.querySelector('[data-step="' + index + '"]');
+  if (node) { node.classList.remove('now'); node.classList.add('done'); }
+}
+function stepProgress(index, pct) {
+  const node = document.querySelector('[data-step="' + index + '"] .bar');
+  if (!node) return;
+  node.hidden = false;
+  node.querySelector('i').style.width = Math.round(pct) + '%';
+}
+
+/** Uploads every pending file in sequence, advancing the stepper as it goes. */
+function uploadAll(claim, startStep) {
+  const jobs = [];
+  const items = claim.items || [];
+
+  FORM.items.forEach(function (formItem, index) {
+    if (!formItem.file) return;
+    const target = formItem.itemId
+      ? items.filter(function (i) { return i.itemId === formItem.itemId; })[0]
+      : items[index];
+    jobs.push({ kind: 'PART', itemId: target ? target.itemId : '', file: formItem.file });
+  });
+  if (FORM.files.FAULT.file) jobs.push({ kind: 'FAULT', itemId: '', file: FORM.files.FAULT.file });
+  if (FORM.files.REPORT.file) jobs.push({ kind: 'REPORT', itemId: '', file: FORM.files.REPORT.file });
+
+  let step = startStep;
+  let chain = Promise.resolve();
+
+  jobs.forEach(function (job) {
+    const at = step++;
+    chain = chain.then(function () {
+      advanceStep(at);
+      return prepareFile(job.file, function (pct) { stepProgress(at, pct); });
+    }).then(function (prepared) {
+      return api('claims.upload', {
+        claimId: claim.claimId, kind: job.kind, itemId: job.itemId,
+        data: prepared.data, fileName: prepared.name, mimeType: prepared.mimeType
+      });
+    }).then(function () { completeStep(at); });
+  });
+
+  return chain.then(function () { return step; });
+}
+
+/**
+ * Reads a file as base64. Photos are resized first: base64 inflates by a third,
+ * and a modern phone photo would otherwise make every submission crawl.
+ */
+function prepareFile(file, onProgress) {
+  return new Promise(function (resolve, reject) {
+    const isImage = /^image\//.test(file.type);
+    const reader = new FileReader();
+    reader.onprogress = function (e) {
+      if (e.lengthComputable && onProgress) onProgress((e.loaded / e.total) * 60);
+    };
+    reader.onerror = function () { reject(new Error('Could not read ' + file.name)); };
+
+    reader.onload = function () {
+      if (!isImage) {
+        if (onProgress) onProgress(100);
+        resolve({
+          data: String(reader.result).split(',')[1],
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream'
+        });
+        return;
+      }
+      const img = new Image();
+      img.onload = function () {
+        const max = 1600;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        if (onProgress) onProgress(100);
+        resolve({
+          data: dataUrl.split(',')[1],
+          name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
+          mimeType: 'image/jpeg'
+        });
+      };
+      img.onerror = function () { reject(new Error('Could not read ' + file.name)); };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function showSubmitted(claim) {
+  openModal({
+    title: 'Claim submitted',
+    size: 'narrow',
+    body: '<p><span class="mono">' + h(claim.claimId) + '</span> has been submitted under reference ' +
+      '<span class="mono">' + h(claim.refNo) + '</span>.</p>' +
+      '<p class="tiny">The administrator has been notified.</p>',
+    actions: [
+      { label: 'Close', close: true },
+      { label: 'View claim', onClick: function (close) { close(); openClaimPanel(claim.claimId); } },
+      { label: 'Submit another', primary: true, onClick: function (close) { close(); openClaimForm(null); } }
+    ]
+  });
+}
+
+function showConflict(err) {
+  const current = err.current || {};
+  openModal({
+    title: 'This claim was changed by someone else',
+    size: 'narrow',
+    body: '<p class="tiny">' + h(current.UpdatedBy || 'Another user') + ' saved a change after you ' +
+      'opened this claim. Reload to see their version before saving again.</p>',
+    actions: [
+      { label: 'Discard mine', onClick: function (close) { close(); loadClaims(); } },
+      { label: 'Reload', primary: true, onClick: function (close) {
+        close();
+        if (current.ClaimID) openClaimPanel(current.ClaimID);
+        loadClaims();
+      } }
+    ]
+  });
+}
+
+/* =========================================================== batches */
+
+function loadBatches() {
+  el('view').innerHTML = skeleton(4);
+  const tab = S.tab === 'action' ? 'action' : S.tab;
+  api('claims.list', Object.assign({ tab: tab }, S.filters)).then(function (data) {
+    S.rows = data.rows;
+    S.counts = data.counts;
+    S.selection = {};
+    renderBatches();
+  }).catch(fail);
+}
+
+function renderBatches() {
+  const batches = {};
+  S.rows.forEach(function (c) {
+    (batches[c.refNo || '—'] = batches[c.refNo || '—'] || []).push(c);
+  });
+  const refs = Object.keys(batches).sort().reverse();
+
+  const html = [
+    '<div class="tabs">',
+    tabButton('action', 'Needs Action', S.counts.action),
+    tabButton('progress', 'In Progress'),
+    tabButton('completed', 'Completed'),
+    tabButton('all', 'All'),
+    '</div>',
+    '<div class="toolbar">',
+      '<input type="text" id="q" class="grow" placeholder="Search claim, serial number, customer…" value="' + h(S.filters.search) + '">',
+      '<span class="spacer"></span>',
+      '<button class="btn" id="doExport" type="button">Export to Excel</button>',
+    '</div>',
+    refs.length ? refs.map(function (ref) { return batchCard(ref, batches[ref]); }).join('')
+      : '<div class="tablewrap"><div class="empty">Nothing waiting for you.</div></div>',
+    '<div id="selbar"></div>'
+  ].join('');
+
+  el('view').innerHTML = html;
+  wireBatches();
+  renderSelectionBar();
+}
+
+function batchCard(ref, claims) {
+  const parts = claims.reduce(function (n, c) { return n + c.items.length; }, 0);
+  const pending = claims.reduce(function (n, c) { return n + c.summary.pending; }, 0);
+
+  return '<div class="bulk"><div class="bulk-head">' +
+      '<span class="ref">' + h(ref) + '</span>' +
+      '<span class="tiny">' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') +
+        ' · ' + parts + ' part' + (parts === 1 ? '' : 's') + '</span>' +
+      '<span class="spacer"></span>' +
+      (pending ? '<button class="btn sm" data-approve-batch="' + h(ref) + '" type="button">' +
+        'Approve All (' + pending + ')</button>' : '') +
+    '</div>' +
+    claims.map(function (c) {
+      return '<div class="claim-blk">' +
+        '<div class="row"><span class="mono" style="font-weight:600">' + h(c.claimId) + '</span>' +
+          '<span>' + h(c.customerName) + '</span>' +
+          '<span class="mono dim">' + h(c.serialNumber) + '</span>' +
+          '<span class="mono dim">' + h(c.workOrderNo || '—') + '</span>' +
+          '<span class="spacer"></span>' +
+          '<button class="btn sm" data-open="' + h(c.claimId) + '" type="button">View Evidence</button>' +
+        '</div>' +
+        '<div class="warr">' + h(c.warrantyBasis) + '</div>' +
+        (c.problem ? '<div class="tiny">“' + h(c.problem) + '”</div>' : '') +
+        c.items.map(function (i) {
+          const settled = [ITEM.FORWARDED, ITEM.AWAITING, ITEM.SHIPPED].indexOf(i.itemStatus) !== -1;
+          return '<div class="itemrow">' +
+            (settled ? '<span style="width:14px"></span>'
+              : '<input type="checkbox" class="pick" value="' + h(i.itemId) + '"' +
+                (S.selection[i.itemId] ? ' checked' : '') + '>') +
+            '<span class="nm">' + h(i.partName) + '</span>' +
+            '<span class="mono tiny">' + i.qty + ' pcs</span>' +
+            itemPill(i.itemStatus) +
+            (i.decisionReason ? '<span class="tiny">' + h(i.decisionReason) + '</span>' : '') +
+            '</div>';
+        }).join('') +
+      '</div>';
+    }).join('') + '</div>';
+}
+
+function wireBatches() {
+  el('view').querySelectorAll('[data-tab]').forEach(function (b) {
+    b.addEventListener('click', function () { S.tab = b.dataset.tab; loadBatches(); });
+  });
+  el('view').querySelectorAll('[data-open]').forEach(function (b) {
+    b.addEventListener('click', function () { openClaimPanel(b.dataset.open); });
+  });
+  el('view').querySelectorAll('.pick').forEach(function (box) {
+    box.addEventListener('change', function () {
+      if (box.checked) S.selection[box.value] = true; else delete S.selection[box.value];
+      renderSelectionBar();
+    });
+  });
+  el('view').querySelectorAll('[data-approve-batch]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      const ref = b.dataset.approveBatch;
+      const ids = [];
+      S.rows.filter(function (c) { return (c.refNo || '—') === ref; }).forEach(function (c) {
+        c.items.forEach(function (i) { if (i.itemStatus === ITEM.PENDING) ids.push(i.itemId); });
+      });
+      if (!ids.length) return;
+      if (!confirm('Approve all ' + ids.length + ' undecided parts in ' + ref + '?')) return;
+      api('claims.decide', { itemIds: ids, decision: 'approve', reason: '' })
+        .then(function () { toast(ids.length + ' parts approved.', 'ok'); loadBatches(); })
+        .catch(fail);
+    });
+  });
+  const q = el('q');
+  if (q) {
+    let timer = null;
+    q.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { S.filters.search = q.value.trim(); loadBatches(); }, 350);
+    });
+  }
+  const ex = el('doExport');
+  if (ex) ex.addEventListener('click', doExport);
+}
+
+function renderSelectionBar() {
+  const ids = Object.keys(S.selection);
+  const host = el('selbar');
+  if (!host) return;
+  if (!ids.length) { host.innerHTML = ''; return; }
+
+  const isAdmin = S.session.role === ROLE.ADMIN;
+  host.innerHTML = '<div class="selbar"><b>' + ids.length + ' part' +
+    (ids.length === 1 ? '' : 's') + ' selected</b><span class="spacer"></span>' +
+    '<button class="btn sm ok" id="selApprove" type="button">Approve</button>' +
+    '<button class="btn sm no" id="selReject" type="button">Reject</button>' +
+    (isAdmin ? '<button class="btn sm" id="selAvail" type="button">Set Availability &amp; Document Ref</button>' +
+      '<button class="btn sm pri" id="selForward" type="button">Forward Order…</button>' : '') +
+    '</div>';
+
+  el('selApprove').addEventListener('click', function () { bulkDecision('approve'); });
+  el('selReject').addEventListener('click', function () { bulkDecision('reject'); });
+  if (isAdmin) {
+    el('selAvail').addEventListener('click', promptAvailability);
+    el('selForward').addEventListener('click', promptForwardOrder);
+  }
+}
+
+function bulkDecision(decision) {
+  const ids = Object.keys(S.selection);
+  openModal({
+    title: decision === 'approve' ? 'Approve selected parts' : 'Reject selected parts',
+    size: 'narrow',
+    body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') + ' selected.</p>' +
+      '<label class="field"><span>Reason' + (decision === 'reject' ? ' <b class="req">*</b>' : '') +
+      '</span><textarea id="reason"></textarea></label>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: decision === 'approve' ? 'Approve' : 'Reject',
+        primary: decision === 'approve', danger: decision === 'reject',
+        onClick: function (close) {
+          const reason = el('reason').value.trim();
+          if (decision === 'reject' && !reason) { toast('A rejection must state its reason.', 'err'); return; }
+          api('claims.decide', { itemIds: ids, decision: decision, reason: reason })
+            .then(function () {
+              close(); S.selection = {}; toast('Decision recorded.', 'ok');
+              S.page === 'orders' ? loadOrders() : loadBatches();
+            }).catch(fail);
+        } }
+    ]
+  });
+}
+
+/* ============================================================ orders */
+
+function loadOrders() {
+  el('view').innerHTML = skeleton(4);
+  api('claims.list', { tab: 'all' }).then(function (data) {
+    S.rows = data.rows.filter(function (c) {
+      return c.items.some(function (i) {
+        return [ITEM.APPROVED, ITEM.FORWARDED, ITEM.AWAITING].indexOf(i.itemStatus) !== -1;
+      });
+    });
+    S.selection = {};
+    renderOrders();
+  }).catch(fail);
+}
+
+function renderOrders() {
+  if (!S.rows.length) {
+    el('view').innerHTML = '<div class="tablewrap"><div class="empty">' +
+      'No approved parts are waiting to be ordered.</div></div>';
+    return;
+  }
+
+  const batches = {};
+  S.rows.forEach(function (c) { (batches[c.refNo] = batches[c.refNo] || []).push(c); });
+
+  const html = Object.keys(batches).sort().reverse().map(function (ref) {
+    const claims = batches[ref];
+    const groups = {};
+    const loose = [];
+
+    claims.forEach(function (c) {
+      c.items.forEach(function (i) {
+        if ([ITEM.APPROVED, ITEM.FORWARDED, ITEM.AWAITING].indexOf(i.itemStatus) === -1) return;
+        const entry = { claim: c, item: i };
+        if (i.documentRefNo) (groups[i.documentRefNo] = groups[i.documentRefNo] || []).push(entry);
+        else loose.push(entry);
+      });
+    });
+
+    return '<div class="bulk"><div class="bulk-head"><span class="ref">' + h(ref) + '</span>' +
+      '<span class="tiny">' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') + '</span>' +
+      '</div>' +
+      Object.keys(groups).map(function (doc) {
+        const entries = groups[doc];
+        const date = entries[0].item.availabilityDate;
+        const readyToShip = entries.some(function (e) { return e.item.itemStatus !== ITEM.SHIPPED; });
+        return '<div class="claim-blk">' +
+          '<div class="shipgrp"><span class="pill flat p-rev">📦 ' + h(doc) + '</span>' +
+            '<span>Available <b>' + h(fmtDate(date)) + '</b></span>' +
+            '<span class="tiny">' + entries.length + ' part' + (entries.length === 1 ? '' : 's') + '</span>' +
+            '<span class="spacer"></span>' +
+            (readyToShip ? '<button class="btn sm" data-ship="' + h(doc) + '" type="button">Mark as Shipped</button>' : '') +
+          '</div>' + entries.map(orderRow).join('') + '</div>';
+      }).join('') +
+      (loose.length
+        ? '<div class="claim-blk"><div class="tiny" style="font-weight:600;letter-spacing:.08em;' +
+          'text-transform:uppercase">Not yet scheduled</div>' + loose.map(orderRow).join('') + '</div>'
+        : '') +
+    '</div>';
+  }).join('');
+
+  el('view').innerHTML = '<div class="toolbar"><h2 style="margin:0;font-size:16px">Approved parts</h2>' +
+    '<span class="spacer"></span><button class="btn" id="doExport" type="button">Export to Excel</button>' +
+    '</div>' + html + '<div id="selbar"></div>';
+
+  el('view').querySelectorAll('.pick').forEach(function (box) {
+    box.addEventListener('change', function () {
+      if (box.checked) S.selection[box.value] = true; else delete S.selection[box.value];
+      renderSelectionBar();
+    });
+  });
+  el('view').querySelectorAll('[data-open]').forEach(function (b) {
+    b.addEventListener('click', function () { openClaimPanel(b.dataset.open); });
+  });
+  el('view').querySelectorAll('[data-ship]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      const doc = b.dataset.ship;
+      const ids = [];
+      S.rows.forEach(function (c) {
+        c.items.forEach(function (i) {
+          if (i.documentRefNo === doc && i.itemStatus !== ITEM.SHIPPED) ids.push(i.itemId);
+        });
+      });
+      if (!ids.length) return;
+      api('claims.shipped', { itemIds: ids })
+        .then(function () { toast(ids.length + ' part(s) marked as shipped.', 'ok'); loadOrders(); })
+        .catch(fail);
+    });
+  });
+  const ex = el('doExport');
+  if (ex) ex.addEventListener('click', doExport);
+  renderSelectionBar();
+}
+
+function orderRow(entry) {
+  const i = entry.item;
+  const c = entry.claim;
+  const settled = i.itemStatus === ITEM.SHIPPED;
+  return '<div class="itemrow">' +
+    (settled ? '<span style="width:14px"></span>'
+      : '<input type="checkbox" class="pick" value="' + h(i.itemId) + '"' +
+        (S.selection[i.itemId] ? ' checked' : '') + '>') +
+    '<span class="nm">' + h(i.partName) + ' · <span class="dim">' + h(c.customerName) + '</span></span>' +
+    '<span class="mono tiny">' + i.qty + ' pcs</span>' +
+    itemPill(i.itemStatus) +
+    '<button class="btn sm ghost" data-open="' + h(c.claimId) + '" type="button">' +
+      h(c.claimId) + '</button>' +
+    '</div>';
+}
+
+function promptAvailability() {
+  const ids = Object.keys(S.selection);
+  openModal({
+    title: 'Set availability & document reference',
+    size: 'narrow',
+    body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') + ' selected.</p>' +
+      '<label class="field"><span>Availability date <b class="req">*</b></span>' +
+      '<input type="date" id="avail"></label>' +
+      '<label class="field"><span>Document reference <b class="req">*</b></span>' +
+      '<input type="text" id="doc" placeholder="DOC-2609-011"></label>' +
+      '<p class="tiny">Parts sharing a document reference are shown together as one shipment.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Apply', primary: true, onClick: function (close) {
+        const date = el('avail').value;
+        const doc = el('doc').value.trim();
+        if (!date || !doc) { toast('Both fields are required.', 'err'); return; }
+        api('claims.availability', { itemIds: ids, availabilityDate: date, documentRefNo: doc })
+          .then(function () {
+            close(); S.selection = {}; toast('Schedule recorded.', 'ok'); loadOrders();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+function promptForwardOrder() {
+  const ids = Object.keys(S.selection);
+  const recipients = S.reference.recipients || [];
+  if (!recipients.length) {
+    toast('Add a recipient in Master Data before forwarding an order.', 'err');
+    return;
+  }
+  openModal({
+    title: 'Forward Order',
+    size: 'narrow',
+    body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') + ' selected.</p>' +
+      '<div class="blk"><h3>Recipient</h3>' +
+      recipients.map(function (r) {
+        return '<label class="itemrow"><input type="checkbox" class="rcp" value="' + h(r.id) + '">' +
+          '<span class="nm">' + h(r.name) + ' — ' + h(r.company || '') + '</span>' +
+          '<span class="tiny">' + h(r.email) + '</span></label>';
+      }).join('') + '</div>' +
+      '<label class="field"><span>CC (optional)</span>' +
+      '<input type="text" id="cc" placeholder="name@example.com, other@example.com"></label>' +
+      '<p class="tiny">A copy of this message is stored in the email log as an audit record.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Send', primary: true, onClick: function (close) {
+        const picked = Array.prototype.slice.call(document.querySelectorAll('.rcp:checked'))
+          .map(function (n) { return n.value; });
+        if (!picked.length) { toast('Choose at least one recipient.', 'err'); return; }
+        const cc = el('cc').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+        api('claims.forwardOrder', { itemIds: ids, recipientIds: picked, cc: cc })
+          .then(function (r) {
+            close(); S.selection = {};
+            toast('Order sent to ' + r.to.join(', ') + '.', 'ok');
+            loadOrders();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/* ======================================================= master data */
+
+function loadMaster(kind) {
+  S.master.kind = kind;
+  el('view').innerHTML = skeleton(5);
+  if (kind === 'units') {
+    api('master.units', {}).then(function (data) {
+      S.master.rows = data.rows;
+      renderMaster(data.total);
+    }).catch(fail);
+    return;
+  }
+  api('master.list', { kind: kind }).then(function (rows) {
+    S.master.rows = rows;
+    renderMaster(rows.length);
+  }).catch(fail);
+}
+
+const MASTER_TABS = [
+  { id: 'users', label: 'Users' },
+  { id: 'customers', label: 'Customers' },
+  { id: 'parts', label: 'Spare Parts' },
+  { id: 'recipients', label: 'Recipients' },
+  { id: 'units', label: 'Units' }
+];
+
+function renderMaster(total) {
+  const kind = S.master.kind;
+  const rows = S.master.rows;
+  const active = rows.filter(function (r) { return r.Active !== false; }).length;
+
+  const head = {
+    users: ['Email', 'Name', 'Role', 'Active', 'Claims', ''],
+    customers: ['ID', 'Name', 'Active', 'Claims', ''],
+    parts: ['ID', 'Name', 'Active', 'Used in claims', ''],
+    recipients: ['ID', 'Name', 'Email', 'Company', 'Active', ''],
+    units: ['Serial number', 'Product', 'Selling in', 'Computed warranty']
+  }[kind];
+
+  const body = rows.map(function (r) {
+    if (kind === 'units') {
+      return '<tr><td class="mono">' + h(r.serialNumber) + '</td><td>' + h(r.product) + '</td>' +
+        '<td>' + h(r.sellingInDate) + '</td>' +
+        '<td class="stack">' + warrantyPill(r.computedType) +
+          '<span class="tiny">' + h(r.computedBasis) + '</span></td></tr>';
+    }
+    const cells = [];
+    if (kind === 'users') {
+      cells.push('<td class="mono">' + h(r.Email) + '</td>', '<td>' + h(r.Name) + '</td>',
+        '<td>' + h(r.Role) + '</td>');
+    } else if (kind === 'recipients') {
+      cells.push('<td class="mono">' + h(r.RecipientID) + '</td>', '<td>' + h(r.Name) + '</td>',
+        '<td class="mono">' + h(r.Email) + '</td>', '<td>' + h(r.Company) + '</td>');
+    } else {
+      const id = kind === 'parts' ? r.PartID : r.CustomerID;
+      cells.push('<td class="mono' + (r.Active ? '' : ' dimmer') + '">' + h(id) + '</td>',
+        '<td class="' + (r.Active ? '' : 'dimmer') + '">' + h(r.Name) + '</td>');
+    }
+    cells.push('<td>' + (r.Active ? '<span class="pill p-ok">Active</span>'
+      : '<span class="pill p-draft">Inactive</span>') + '</td>');
+    if (kind !== 'recipients') cells.push('<td class="num">' + (r.__used || 0) + '</td>');
+    cells.push('<td><button class="btn sm" data-edit="' + h(masterKey(kind, r)) + '" type="button">Edit</button></td>');
+    return '<tr>' + cells.join('') + '</tr>';
+  }).join('');
+
+  el('view').innerHTML = [
+    '<div class="tabs">' + MASTER_TABS.map(function (t) {
+      return '<button type="button" data-master="' + t.id + '"' +
+        (kind === t.id ? ' class="on"' : '') + '>' + h(t.label) + '</button>';
+    }).join('') + '</div>',
+    '<div class="toolbar">',
+      '<span class="tiny">' + total + ' item' + (total === 1 ? '' : 's') +
+        (kind === 'units' ? '' : ' · ' + active + ' active') + '</span>',
+      '<span class="spacer"></span>',
+      kind === 'units'
+        ? '<button class="btn pri" id="importUnits" type="button">Import from Excel</button>'
+        : '<button class="btn pri" id="addMaster" type="button">Add</button>',
+    '</div>',
+    '<div class="tablewrap"><table class="data"><thead><tr>' +
+      head.map(function (x) { return '<th>' + h(x) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + body + '</tbody></table></div>',
+    kind === 'units'
+      ? '<p class="tiny">Unit data is read-only here. It arrives from the principal as a file, so it ' +
+        'is replaced by import rather than edited row by row. Warranty is computed from the serial ' +
+        'number; the Status column of the source sheet is never used.</p>'
+      : '<p class="tiny">Entries are never deleted — deactivating one hides it from selection lists ' +
+        'while older claims keep showing the name they were submitted with.</p>'
+  ].join('');
+
+  el('view').querySelectorAll('[data-master]').forEach(function (b) {
+    b.addEventListener('click', function () { loadMaster(b.dataset.master); });
+  });
+  el('view').querySelectorAll('[data-edit]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      const record = rows.filter(function (r) { return masterKey(kind, r) === b.dataset.edit; })[0];
+      openMasterForm(kind, record);
+    });
+  });
+  const add = el('addMaster');
+  if (add) add.addEventListener('click', function () { openMasterForm(kind, null); });
+  const imp = el('importUnits');
+  if (imp) imp.addEventListener('click', promptImportUnits);
+}
+
+function masterKey(kind, r) {
+  return kind === 'users' ? r.Email
+    : kind === 'parts' ? r.PartID
+      : kind === 'customers' ? r.CustomerID : r.RecipientID;
+}
+
+function openMasterForm(kind, record) {
+  const isNew = !record;
+  let body = '';
+
+  if (kind === 'users') {
+    const roles = [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL, ROLE.TESTER];
+    body =
+      '<label class="field"><span>Email</span><input type="email" id="mEmail" value="' +
+        h(record ? record.Email : '') + '"' + (isNew ? '' : ' readonly') + '></label>' +
+      '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
+        h(record ? record.Name : '') + '"></label>' +
+      '<label class="field"><span>Role</span><select id="mRole">' + roles.map(function (r) {
+        return '<option value="' + h(r) + '"' + (record && record.Role === r ? ' selected' : '') +
+          '>' + h(r) + '</option>';
+      }).join('') + '</select></label>' +
+      activeToggle(record);
+  } else if (kind === 'recipients') {
+    body =
+      '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
+        h(record ? record.Name : '') + '"></label>' +
+      '<label class="field"><span>Email</span><input type="email" id="mEmail" value="' +
+        h(record ? record.Email : '') + '"></label>' +
+      '<label class="field"><span>Company</span><input type="text" id="mCompany" value="' +
+        h(record ? record.Company : '') + '"></label>' +
+      '<label class="field"><span>Notes</span><input type="text" id="mNotes" value="' +
+        h(record ? record.Notes : '') + '"></label>' +
+      activeToggle(record);
+  } else {
+    body =
+      '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
+        h(record ? record.Name : '') + '"></label>' +
+      activeToggle(record) +
+      (record && record.__used
+        ? '<div class="notice">⚠ ' + record.__used + ' existing claim' +
+          (record.__used === 1 ? '' : 's') + ' keep the name they were submitted with. New claims ' +
+          'will use the new name.</div>'
+        : '');
+  }
+
+  openModal({
+    title: (isNew ? 'Add ' : 'Edit ') + kind.replace(/s$/, ''),
+    size: 'narrow',
+    meta: record ? masterKey(kind, record) : '',
+    body: body,
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Save', primary: true, onClick: function (close) {
+        const payload = { Active: el('mActive').checked };
+        if (kind === 'users') {
+          payload.Email = el('mEmail').value.trim().toLowerCase();
+          payload.Name = el('mName').value.trim();
+          payload.Role = el('mRole').value;
+        } else if (kind === 'recipients') {
+          payload.RecipientID = record ? record.RecipientID : '';
+          payload.Name = el('mName').value.trim();
+          payload.Email = el('mEmail').value.trim();
+          payload.Company = el('mCompany').value.trim();
+          payload.Notes = el('mNotes').value.trim();
+        } else {
+          if (kind === 'parts') payload.PartID = record ? record.PartID : '';
+          else payload.CustomerID = record ? record.CustomerID : '';
+          payload.Name = el('mName').value.trim();
+        }
+        api('master.save', { kind: kind, record: payload })
+          .then(function () {
+            close(); toast('Saved.', 'ok');
+            return api('session.bootstrap', {});
+          })
+          .then(function (data) { S.reference = data.reference; loadMaster(kind); })
+          .catch(fail);
+      } }
+    ]
+  });
+}
+
+function activeToggle(record) {
+  const on = !record || record.Active !== false;
+  return '<label class="row" style="gap:8px"><input type="checkbox" id="mActive"' +
+    (on ? ' checked' : '') + '><span>Active</span></label>';
+}
+
+function promptImportUnits() {
+  openModal({
+    title: 'Import unit data',
+    size: 'narrow',
+    body: '<p class="tiny">Choose the workbook supplied by the principal. It must contain sheets ' +
+      'named <span class="mono">warranty</span> and <span class="mono">Population</span>. ' +
+      'Existing rows are replaced.</p>' +
+      '<label class="filebtn" style="padding:9px 12px">Choose file…' +
+      '<input type="file" id="unitFile" accept=".xlsx,.xls"></label>' +
+      '<div id="importInfo"></div>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Import', primary: true, onClick: function (close) {
+        const file = el('unitFile').files[0];
+        if (!file) { toast('Choose a file first.', 'err'); return; }
+        toast('Importing — this can take a minute.', 'info');
+        prepareFile(file).then(function (prepared) {
+          return api('master.import', {
+            data: prepared.data, fileName: prepared.name, mimeType: file.type
+          });
+        }).then(function (r) {
+          close();
+          toast('Imported ' + r.warranty + ' warranty rows and ' + r.population + ' population rows.', 'ok');
+          loadMaster('units');
+        }).catch(fail);
+      } }
+    ],
+    onOpen: function () {
+      el('unitFile').addEventListener('change', function () {
+        const file = this.files[0];
+        if (!file) return;
+        api('master.importPreview', { fileName: file.name }).then(function (p) {
+          el('importInfo').innerHTML = '<div class="notice">Replacing ' + p.currentWarranty +
+            ' warranty rows and ' + p.currentPopulation + ' population rows.</div>';
+        }).catch(fail);
+      });
+    }
+  });
+}
+
+/* ======================================================== templates */
+
+function loadTemplates() {
+  el('view').innerHTML = skeleton(4);
+  api('templates.list', {}).then(function (list) {
+    S.templates = list;
+    renderTemplates();
+  }).catch(fail);
+}
+
+function renderTemplates() {
+  const current = S.templates.filter(function (t) { return t.code === S.templateCode; })[0]
+    || S.templates[0];
+  if (!current) { el('view').innerHTML = '<div class="empty">No templates.</div>'; return; }
+  S.templateCode = current.code;
+
+  el('view').innerHTML =
+    '<div class="tpl-grid">' +
+      '<nav class="tpl-list">' + S.templates.map(function (t) {
+        return '<button type="button" data-tpl="' + h(t.code) + '"' +
+          (t.code === current.code ? ' class="on"' : '') + '>' +
+          '<span class="tcode">' + h(t.code) + '</span>' + h(t.name) + '</button>';
+      }).join('') + '</nav>' +
+
+      '<div class="tpl-col">' +
+        '<div class="row"><h3 style="margin:0">Editor</h3><span class="spacer"></span>' +
+          '<span class="tiny">' + (current.isDefault ? 'Built-in default'
+            : 'Version ' + current.version + ' · ' + h(current.updatedBy) + ' · ' +
+              h(fmtDate(current.updatedAt))) + '</span></div>' +
+        '<label class="field"><span>Subject</span>' +
+          '<input type="text" id="tSubject" value="' + h(current.subject) + '"></label>' +
+        '<label class="field"><span>Body</span>' +
+          '<textarea id="tBody">' + h(current.body) + '</textarea></label>' +
+        '<h3>Available placeholders</h3>' +
+        '<div class="ph">' + placeholderChips(current) + '</div>' +
+        '<p class="tiny">Placeholders marked in orange are required for the audit record and ' +
+          'cannot be removed.</p>' +
+        '<div class="row">' +
+          '<button class="btn" id="tRestore" type="button">Restore Default</button>' +
+          '<button class="btn" id="tTest" type="button">Send Test to Me</button>' +
+          '<span class="spacer"></span>' +
+          '<button class="btn pri" id="tSave" type="button">Save as v' +
+            ((current.isDefault ? 0 : current.version) + 1) + '</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="tpl-col">' +
+        '<h3>Live preview</h3>' +
+        '<div class="mail">' +
+          '<div class="mail-lock"><span class="tag">Locked</span>' +
+            '<b>' + h(current.name.toUpperCase()) + '</b><br>' +
+            'Ref. <span class="mono">CW300826</span> · Generated 30 Aug 2026, 17:00 WIB' +
+          '</div>' +
+          '<div class="mail-body" id="tPreview"></div>' +
+          '<div class="mail-lock"><span class="tag">Locked</span>' +
+            'Automatically generated record · do not reply<br>' +
+            '<span class="mono">Template ' + h(current.code) + ' v' + current.version +
+            ' · Log ref EML-260830-0091</span>' +
+          '</div>' +
+        '</div>' +
+        '<p class="tiny">Preview uses sample data from reference ' +
+          '<span class="mono">CW300826</span>.</p>' +
+      '</div>' +
+    '</div>';
+
+  el('view').querySelectorAll('[data-tpl]').forEach(function (b) {
+    b.addEventListener('click', function () { S.templateCode = b.dataset.tpl; renderTemplates(); });
+  });
+  el('view').querySelectorAll('.ph button').forEach(function (b) {
+    b.addEventListener('click', function () { insertPlaceholder(b.textContent); });
+  });
+  el('tBody').addEventListener('input', updatePreview);
+  el('tSubject').addEventListener('input', updatePreview);
+  el('tSave').addEventListener('click', saveTemplate);
+  el('tRestore').addEventListener('click', function () {
+    if (!confirm('Restore this template to its built-in default?')) return;
+    api('templates.restore', { code: S.templateCode })
+      .then(function () { toast('Restored to default.', 'ok'); loadTemplates(); }).catch(fail);
+  });
+  el('tTest').addEventListener('click', function () {
+    api('templates.test', { code: S.templateCode })
+      .then(function () { toast('Test message sent to you.', 'ok'); }).catch(fail);
+  });
+  updatePreview();
+}
+
+const SAMPLE = {
+  ClaimID: 'CLM-260826-0004', RefNo: 'CW300826', Customer: 'RSUD Koja',
+  SerialNumber: 'XT2410090',
+  WarrantyBasis: 'assembled Oct 2024 + 22 months = valid until Aug 2026',
+  WorkOrder: 'WO-2608-0041', Problem: 'Machine does not power on',
+  RequesterName: 'Rian Pratama', SubmittedAt: '30 Aug 2026 14:25',
+  VerifiedBy: 'yayan.arifin@oneject.co.id', ClaimCount: 2, PartCount: 3,
+  ApprovedCount: 2, RejectedCount: 1, DecisionBy: 'roland@westley.com',
+  DecisionAt: '31 Aug 2026 09:10', ForwardedBy: 'yayan.arifin@oneject.co.id',
+  ForwardedAt: '02 Sep 2026 10:00', ReturnReason: 'The fault photo is unclear',
+  AmendedBy: 'yayan.arifin@oneject.co.id', AmendedAt: '30 Aug 2026 16:00',
+  Reason: 'Corrected at the requester’s request',
+  Items: [
+    { PartName: 'Electrical Mainboard', Qty: 1, ItemStatus: 'Approved', DecisionReason: '',
+      ClaimID: 'CLM-260826-0004', Customer: 'RSUD Koja', SerialNumber: 'XT2410090',
+      WorkOrder: 'WO-2608-0041' },
+    { PartName: 'Power supply', Qty: 1, ItemStatus: 'Rejected',
+      DecisionReason: 'Not covered under warranty', ClaimID: 'CLM-260826-0004',
+      Customer: 'RSUD Koja', SerialNumber: 'XT2410090', WorkOrder: 'WO-2608-0041' }
+  ],
+  Changes: [{ Field: 'Customer', OldValue: 'RSUD Kojaa', NewValue: 'RSUD Koja' }]
+};
+SAMPLE.Claims = [
+  Object.assign({}, SAMPLE, { Items: SAMPLE.Items }),
+  Object.assign({}, SAMPLE, {
+    ClaimID: 'CLM-260826-0005', Customer: 'Mitra Kasih Cimahi', SerialNumber: 'XT2411194',
+    WarrantyBasis: 'assembled Nov 2024 + 22 months = valid until Sep 2026',
+    WorkOrder: 'WO-2608-0042',
+    Items: [{ PartName: 'Blood pump rotor', Qty: 2 }]
+  })
+];
+
+function render(text, data) {
+  let out = String(text);
+  out = out.replace(/\{\{#([A-Za-z]+)\}\}\n?([\s\S]*?)\{\{\/\1\}\}\n?/g, function (m, key, inner) {
+    const list = data[key];
+    if (!list || !list.length) return '';
+    return list.map(function (row) { return render(inner, row); }).join('');
+  });
+  return out.replace(/\{\{([A-Za-z]+)\}\}/g, function (m, key) {
+    return data[key] === undefined || data[key] === null ? '' : String(data[key]);
+  });
+}
+
+function updatePreview() {
+  const box = el('tPreview');
+  if (!box) return;
+  box.textContent = render(el('tBody').value, SAMPLE);
+}
+
+function placeholderChips(template) {
+  const found = {};
+  const all = String(template.body + ' ' + template.subject);
+  const known = ['ClaimID', 'RefNo', 'Customer', 'SerialNumber', 'WarrantyBasis', 'WorkOrder',
+    'Problem', 'PartName', 'Qty', 'ItemStatus', 'DecisionReason', 'ClaimCount', 'PartCount',
+    'ApprovedCount', 'RejectedCount', 'VerifiedBy', 'RequesterName', 'SubmittedAt', 'DecisionBy',
+    'DecisionAt', 'ForwardedBy', 'ForwardedAt', 'ReturnReason', 'AmendedBy', 'AmendedAt',
+    'Reason', 'Field', 'OldValue', 'NewValue'];
+  known.forEach(function (k) { found['{{' + k + '}}'] = false; });
+  (template.required || []).forEach(function (r) { found[r] = true; });
+
+  return Object.keys(found).map(function (p) {
+    return '<button type="button" class="' + (found[p] ? 'must' : '') + '">' + h(p) + '</button>';
+  }).join('');
+}
+
+function insertPlaceholder(token) {
+  const box = el('tBody');
+  const start = box.selectionStart;
+  box.value = box.value.slice(0, start) + token + box.value.slice(box.selectionEnd);
+  box.focus();
+  box.selectionStart = box.selectionEnd = start + token.length;
+  updatePreview();
+}
+
+function saveTemplate() {
+  api('templates.save', {
+    code: S.templateCode,
+    subject: el('tSubject').value,
+    body: el('tBody').value
+  }).then(function () { toast('Template saved.', 'ok'); loadTemplates(); }).catch(fail);
+}
+
+/* ============================================================= audit */
+
+function loadAudit() {
+  el('view').innerHTML = skeleton(6);
+  api('audit.list', { limit: 200 }).then(function (data) {
+    el('view').innerHTML =
+      '<div class="toolbar"><h2 style="margin:0;font-size:16px">Audit Log</h2>' +
+        '<span class="tiny">' + data.total + ' entries · showing the most recent ' +
+        data.rows.length + '</span></div>' +
+      '<div class="tablewrap"><table class="data"><thead><tr>' +
+        '<th>When</th><th>Actor</th><th>Claim</th><th>Action</th><th>Field</th>' +
+        '<th>Change</th><th>Reason</th></tr></thead><tbody>' +
+        data.rows.map(function (r) {
+          return '<tr><td class="tiny">' + h(fmtDateTime(r.timestamp)) + '</td>' +
+            '<td class="stack"><span>' + h(r.actor) + '</span><span class="tiny">' +
+              h(r.simulatedRole ? r.role + ' → ' + r.simulatedRole : r.role) + '</span></td>' +
+            '<td class="mono">' + h(r.claimId) + '</td>' +
+            '<td>' + h(r.action) + '</td>' +
+            '<td class="tiny">' + h(r.field) + '</td>' +
+            '<td class="tiny">' + (r.oldValue || r.newValue
+              ? h(r.oldValue || '(empty)') + ' → ' + h(r.newValue || '(empty)') : '') + '</td>' +
+            '<td class="tiny">' + h(r.reason) + '</td></tr>';
+        }).join('') +
+      '</tbody></table></div>';
+  }).catch(fail);
+}
+</script>

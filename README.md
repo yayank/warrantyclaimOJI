@@ -2,20 +2,45 @@
 
 Aplikasi klaim garansi sparepart untuk mesin hemodialisis **Sansin** dan **Oneject**, dibangun di atas Google Apps Script (backend dan frontend) dengan Google Sheets sebagai basis data.
 
-Status: **konsep**. Belum ada kode aplikasi — repo ini baru berisi mockup UI.
+Status: **aplikasi sudah tertulis**, belum di-deploy. Pemasangannya ada di [`docs/deployment.md`](docs/deployment.md).
 
-## Dokumen
+## Isi repo
 
 | Berkas | Isi |
 |---|---|
+| [`src/`](src) | Aplikasinya — 13 berkas `.gs` dan 3 berkas HTML |
+| [`docs/deployment.md`](docs/deployment.md) | Langkah pemasangan, pengujian, dan penanganan masalah |
 | [`docs/specification.html`](docs/specification.html) | Spesifikasi lengkap — PRD di depan, spesifikasi teknis di belakang |
 | [`docs/ui-mockups.html`](docs/ui-mockups.html) | Mockup 12 layar |
+| [`tools/`](tools) | Dua penguji yang berjalan di Node tanpa perlu Google |
+
+GitHub tidak merender HTML langsung dari repo. Untuk melihat kedua dokumen: unduh berkasnya lalu buka di browser, atau aktifkan GitHub Pages pada branch ini.
+
+## Struktur kode
+
+| Berkas | Tanggung jawab |
+|---|---|
+| `Code.gs` | `doGet`, satu-satunya pintu masuk API, dispatcher |
+| `Auth.gs` | Verifikasi ID token, resolusi peran, penyaringan baris per peran |
+| `Warranty.gs` | Penguraian serial number dan penentuan masa garansi |
+| `Claims.gs` | Klaim, item, dan seluruh transisi status |
+| `Files.gs` | Folder Drive, penamaan berkas, penyajian gambar |
+| `Mailer.gs` | Tujuh template bawaan, perender, pengiriman, arsip |
+| `MasterData.gs` | CRUD master, impor data unit |
+| `Export.gs` | Ekspor Excel mengikuti filter dan lingkup peran |
+| `Audit.gs` · `Triggers.gs` · `Repo.gs` · `Config.gs` · `Setup.gs` | Jejak audit, pemicu terjadwal, akses sheet, konstanta, pemasangan awal |
+| `index.html` · `Styles.html` · `Script.html` | Kerangka halaman, sistem desain, seluruh antarmuka |
+
+## Pengujian
+
+```bash
+node tools/verify-warranty.js units.json    # 22 pemeriksaan
+node tools/verify-templates.js              # 18 pemeriksaan
+```
+
+Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.
 
 ## Mockup UI
-
-[`docs/ui-mockups.html`](docs/ui-mockups.html) — sembilan layar, lengkap dengan data contoh dari file klaim asli.
-
-GitHub tidak merender HTML langsung dari repo. Untuk melihatnya: unduh berkasnya lalu buka di browser, atau aktifkan GitHub Pages pada branch ini.
 
 | | Layar |
 |---|---|
@@ -93,4 +118,4 @@ Rincian selengkapnya ada di [`docs/specification.html`](docs/specification.html)
 
 ## Berikutnya
 
-Membangun aplikasinya.
+Deploy sesuai [`docs/deployment.md`](docs/deployment.md), lalu uji seluruh alur memakai peran `Tester` sebelum data sungguhan masuk.

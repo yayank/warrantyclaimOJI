@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Warranty Claim Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+
+  <div id="boot" class="boot">
+    <div class="boot-card">
+      <div class="mark"></div>
+      <div>
+        <h1>Warranty Claim Portal</h1>
+        <p>Sansin &amp; Oneject Hemodialysis Machines</p>
+      </div>
+      <div id="gsi"></div>
+      <p class="boot-note">
+        Any Google account may sign in. Access is granted according to the role
+        registered for your address.
+      </p>
+      <div id="bootError" class="boot-error" hidden></div>
+    </div>
+  </div>
+
+  <div id="app" hidden>
+    <div id="testerBar"></div>
+    <header class="topbar">
+      <div class="brand"><i></i> Warranty Claim Portal</div>
+      <nav id="nav" class="nav"></nav>
+      <div class="who">
+        <span id="whoText"></span>
+        <span id="whoAvatar" class="avatar"></span>
+        <button id="signOut" class="btn sm ghost" type="button">Sign out</button>
+      </div>
+    </header>
+    <main id="view" class="view"></main>
+  </div>
+
+  <div id="panelHost"></div>
+  <div id="modalHost"></div>
+  <div id="toastHost" class="toast-host"></div>
+
+  <script>
+    window.APP_CLIENT_ID = <?= JSON.stringify(clientId) ?>;
+    window.APP_DEEP_LINK = <?= deepLink ?>;
+  </script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <?!= include('Script'); ?>
+</body>
+</html>
