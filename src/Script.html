@@ -1304,11 +1304,6 @@ function unitOptions() {
   });
 }
 
-function isRegisteredUnit(serial) {
-  const sn = String(serial || '').trim().toUpperCase();
-  return (S.units || []).some(function (u) { return u.serial === sn; });
-}
-
 /** Who to ask when a customer or a unit is not on the list. */
 function adminContactText() {
   const admins = (S.reference && S.reference.administrators) || [];
@@ -1409,8 +1404,9 @@ function claimFormBody() {
           emptyHtml: function (query) {
             return !S.units
               ? 'Still loading the unit list…'
-              : 'No unit matches “' + h(query) + '”. The list is the Population sheet, and a ' +
-                'claim can only be submitted for a unit on it. ' + adminContactHtml();
+              : 'No unit matches “' + h(query) + '” in the Population sheet. You can still ' +
+                'claim on it, but nothing will say which principal it belongs to. ' +
+                adminContactHtml();
           },
           onType: function (v) { scheduleLookup(v); },
           onPick: function (v) { runLookup(v); }
@@ -1610,10 +1606,10 @@ function runLookup(serial) {
         '<div class="l3">' + verdict + '</div>' +
       '</div>' +
       (data.registered === false
-        ? '<div class="notice crit" style="margin-top:8px">⚠ <b class="mono">' + h(data.serial) +
-          '</b> is not in the unit list the Population sheet supplies, so the claim cannot be ' +
-          'attributed to a principal and cannot be submitted. Check the serial number against ' +
-          'the machine — if it is right, the unit still has to be registered. ' +
+        ? '<div class="notice" style="margin-top:8px">⚠ <b class="mono">' + h(data.serial) +
+          '</b> is not in the unit list the Population sheet supplies, so this claim cannot be ' +
+          'attributed to a principal on its own — an administrator will have to assign one, or ' +
+          'register the unit. Worth checking the serial number against the machine first. ' +
           adminContactHtml() + '</div>'
         : '') +
       (data.openClaims.length
@@ -1652,16 +1648,6 @@ function saveForm(thenSubmit) {
     return;
   }
   if (!serial) { toast('Enter the serial number.', 'err'); return; }
-
-  // A draft may hold anything — it is the submission that has to reach a
-  // principal, and an unregistered unit reaches none. The server refuses it too;
-  // this only saves the round trip and says the same thing sooner.
-  if (thenSubmit && S.session.role !== ROLE.ADMIN && S.units && !isRegisteredUnit(serial)) {
-    toast('Serial number ' + serial + ' is not in the unit list, so the claim cannot be ' +
-      'submitted. Save it as a draft and ' + adminContactText().replace(/^Please contact/, 'contact'),
-      'err');
-    return;
-  }
   if (FORM.items.some(function (i) { return !i.partId; })) {
     toast('Choose a spare part for every row.', 'err'); return;
   }

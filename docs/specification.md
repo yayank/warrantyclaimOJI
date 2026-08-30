@@ -114,12 +114,12 @@ Tiga isian pada formulir klaim adalah **dropdown yang bisa dicari**: kotak teks 
 | Field | Sumber daftar | Isian di luar daftar |
 |---|---|---|
 | Customer | master `Customer` yang aktif | Ditolak. Kotak menampilkan “tidak ada yang cocok” beserta nama dan alamat email Administrator, lalu isian dikembalikan ke pilihan terakhir yang sah |
-| Serial number | kolom `Batch` pada sheet `Population` | Boleh diketik dan boleh disimpan sebagai draft, **tetapi tidak bisa di-submit**. Layar menyebutkan bahwa unit itu tidak terdaftar dan siapa Administrator yang harus dihubungi |
+| Serial number | kolom `Batch` pada sheet `Population` | **Diterima.** Klaim tetap bisa disimpan dan di-submit; layar memberi tahu bahwa unit itu tidak terdaftar, apa akibatnya, dan siapa Administrator yang bisa dihubungi |
 | Sparepart (tiap baris) | master `sparepart` yang aktif | Ditolak, sama seperti Customer |
 
 Selama belum ada yang diketik, seluruh daftar ditawarkan — termasuk saat isian sudah terisi. Isian yang tidak bisa dibuka ulang untuk diganti lebih buruk daripada tidak ada dropdown sama sekali.
 
-Alasannya bukan sekadar rapi: unit yang tidak ada di `Population` tidak punya principal, jadi klaimnya tidak akan sampai ke siapa pun. Aturan ini ditegakkan di server pada `claims.submit`, bukan hanya di layar — pesannya memuat nama dan email Administrator aktif dari sheet `users`.
+Serial number yang tidak ada di `Population` **tidak menghalangi apa pun** — mesin di lapangan tidak menunggu sheet diperbarui, dan sebuah unit bisa saja belum sempat diimpor. Yang terjadi hanyalah klaim itu tidak terpetakan ke principal mana pun, jadi Administrator harus menetapkannya sendiri (`Assign principal`) atau mendaftarkan unitnya. Layar menyebutkan hal itu apa adanya, beserta nama dan email Administrator aktif dari sheet `users`.
 
 Daftar unit diambil sekali per sesi lewat `claims.units`, bukan ikut dalam payload login: setiap layar butuh daftar customer, hanya formulir klaim yang butuh beberapa ribu serial number.
 
@@ -395,6 +395,18 @@ Penanda `AdvanceIssued` **berdiri di luar rangkaian ini** — bisa dipasang atau
 
 Kolom Status pada tabel menampilkan **posisi alur**; hasil keputusan tampil terpisah sebagai ringkasan seperti `2 approved · 1 rejected · 1 issued in advance`.
 
+### Tab pada layar klaim
+
+Tiga tab membagi habis pekerjaan, dan sisanya ada di **All**:
+
+| Tab | Isinya |
+|---|---|
+| Needs Action | klaim yang menunggu peran yang sedang melihat |
+| In Progress | belum selesai, dan tidak menunggu peran yang sedang melihat |
+| Completed | `Closed` |
+
+Aturannya harus membagi habis: setiap klaim yang terlihat oleh sebuah peran wajib masuk **tepat satu** dari ketiganya. Sebelumnya `Draft` dikecualikan dari In Progress untuk semua peran sekaligus sudah bukan Needs Action bagi Administrator — akibatnya draft tidak muncul di tab mana pun kecuali All, dan tidak ada yang menjelaskan kenapa. `tools/verify-tabs.js` menguji seluruh kombinasi peran × status × status item terhadap aturan ini.
+
 ## 12. Matriks hak akses
 
 ✓ dapat diubah · ○ hanya baca · — tidak ditampilkan · **R** perlu alasan tertulis
@@ -572,7 +584,7 @@ Empat hal yang menopang ketiganya:
 
 ## 19. Pengujian
 
-Lima penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
+Enam penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
 
 ```bash
 node tools/verify-warranty.js units.json    # mesin garansi, 2.610 unit asli
@@ -580,9 +592,10 @@ node tools/verify-access.js                 # pemisahan antar principal
 node tools/verify-templates.js              # perender template email
 node tools/verify-sheets.js                 # baris data tidak dibaca sebagai judul kolom
 node tools/verify-payload.js                # tidak ada Date yang lolos ke browser
+node tools/verify-tabs.js                   # tidak ada klaim yang lolos dari semua tab
 ```
 
-Hasil terakhir: **22 · 27 · 18 · 25 · 13 pemeriksaan, seluruhnya lolos.**
+Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 179 pemeriksaan, seluruhnya lolos.**
 
 Penguji payload menjaga satu kegagalan yang sangat mudah terulang. `google.script.run` menolak `Date` di mana pun dalam nilai kembalian — panggilannya gagal dan halaman menerima `null`, tanpa pesan kesalahan apa pun. Aplikasi ini menulis stempel waktunya sebagai teks `2026-08-30T11:53:50`, dan Sheets berhak menyimpannya sebagai date-time sungguhan lalu mengembalikannya sebagai `Date`. Karena itu `readAll_` mengubah setiap sel `Date` menjadi teks ISO saat dibaca (`cellValue_`), dan `api()` memeriksa sekali lagi sebelum nilainya menyeberang ke browser (`jsonSafe_`). Konversi saat baca sekaligus memperbaiki urutan dan filter tanggal, yang membandingkan stempel waktu sebagai teks.
 

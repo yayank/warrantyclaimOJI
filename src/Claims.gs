@@ -53,7 +53,11 @@ function matchesTab_(session, row, tab) {
   if (tab === 'all') return true;
   if (tab === 'completed') return row.status === STATUS.CLOSED;
   if (tab === 'progress') {
-    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 && !needsAction_(session, row);
+    // Anything not finished and not waiting on the viewer. A draft is the
+    // requester's own work, so it is their action rather than their progress —
+    // needsAction_ already says so, and saying it twice here hid every draft
+    // from the administrator, who has no other tab that would show one.
+    return row.status !== STATUS.CLOSED && !needsAction_(session, row);
   }
   if (tab === 'action') return needsAction_(session, row);
   return true;
@@ -476,14 +480,6 @@ function submitClaim_(session, payload) {
     });
     if (problems.length) {
       throw new Error('This claim still needs ' + problems.join(', ') + '.');
-    }
-
-    // A unit the population sheet does not carry belongs to no principal, so a
-    // claim on it would be forwarded to nobody. The administrator registers the
-    // unit — or corrects the serial number — before this can go anywhere.
-    if (!isRegisteredUnit_(claim.SerialNumber)) {
-      throw new Error('Serial number ' + claim.SerialNumber + ' is not in the unit list, ' +
-        'so this claim cannot be routed to a principal. ' + administratorContact_());
     }
 
     // The reference number belongs to the day of submission, not the day the
