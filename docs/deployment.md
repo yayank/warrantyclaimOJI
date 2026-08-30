@@ -71,7 +71,12 @@ Buka sheet `users`, tambahkan satu baris:
 
 Tanpa baris ini tidak ada seorang pun yang bisa masuk — termasuk pemilik skripnya.
 
-Kolom `Principal` hanya wajib untuk akun berperan `Principal`; untuk peran lain biarkan kosong.
+Dua kolom yang mudah terlewat:
+
+- **`Active` harus `TRUE`.** Sel kosong dibaca sebagai tidak aktif, dan akunnya ditolak.
+- **`Principal`** hanya wajib untuk akun berperan `Principal`; untuk peran lain biarkan kosong.
+
+Kalau sheet `users` Anda sudah ada sebelum memasang portal ini, `setUp()` menambahkan kolom `Active` dan mengisinya `TRUE` untuk seluruh baris yang sudah ada — menambah kolom tidak boleh mencabut akses siapa pun.
 
 ## 6. Deploy
 
@@ -197,6 +202,7 @@ node tools/bundle.js                        # membangun ulang dist/
 | Gejala | Penyebab |
 |---|---|
 | *"Google did not identify you to this portal"* | Akun di luar domain organisasi. Kerjakan langkah 11, atau pakai akun organisasi |
+| *"… is not active"* | Kolom `Active` pada baris itu di sheet `users` kosong atau bukan `TRUE` |
 | Principal ditolak Google padahal Administrator bisa masuk | Audience bertipe **Internal**. Ubah ke **External** (langkah 11) |
 | Diminta memasukkan GCP Project number | Tidak perlu, dan langkah 11 sendiri opsional. Jangan tekan *Change project* |
 | Akun tertentu ditolak Google sebelum sampai ke portal | Publishing status masih **Testing** dan email itu belum ada di daftar *Test users* |

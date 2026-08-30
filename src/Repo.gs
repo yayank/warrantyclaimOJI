@@ -56,8 +56,20 @@ function ensureSheets_() {
     // Append columns added by a later revision without disturbing existing data.
     const head = s.getRange(1, 1, 1, Math.max(s.getLastColumn(), 1)).getValues()[0];
     const missing = SCHEMA[name].filter(function (h) { return head.indexOf(h) === -1; });
-    if (missing.length) {
-      s.getRange(1, head.length + 1, 1, missing.length).setValues([missing]);
+    if (!missing.length) return;
+
+    s.getRange(1, head.length + 1, 1, missing.length).setValues([missing]);
+
+    // Rows that predate the column have nothing in it, and an empty Active reads
+    // as deactivated — which would lock out everyone already registered. Adding
+    // a column must not revoke anybody's access.
+    const activeAt = missing.indexOf('Active');
+    const rows = s.getLastRow() - 1;
+    if (activeAt !== -1 && rows > 0) {
+      const column = head.length + activeAt + 1;
+      const values = [];
+      for (let i = 0; i < rows; i++) values.push([true]);
+      s.getRange(2, column, rows, 1).setValues(values);
     }
   });
 }

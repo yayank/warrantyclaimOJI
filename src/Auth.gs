@@ -32,7 +32,10 @@ function resolveSession_(idToken, simulatedRole) {
   })[0];
 
   if (!user) throw authError_('The address ' + email + ' is not registered for this portal.');
-  if (!isTrue_(user.Active)) throw authError_('Access for ' + email + ' has been deactivated.');
+  if (!isTrue_(user.Active)) {
+    throw authError_('Access for ' + email + ' is not active. Set the Active column to TRUE on ' +
+      'that row of the users sheet.');
+  }
 
   const actualRole = String(user.Role || '').trim();
   const session = {
