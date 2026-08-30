@@ -23,6 +23,7 @@ GitHub tidak merender HTML langsung dari repo. Untuk melihatnya: unduh berkasnya
 | 09 | Role Simulation — Tester |
 | 10 | Edit Mode by Role — Administrator vs Principal |
 | 11 | Master Data — Administrator |
+| 12 | Email Templates — Administrator |
 
 ## Keputusan rancangan
 
@@ -52,7 +53,7 @@ Draft → Submitted → (verifikasi Admin)
 
 **Penomoran.** `ClaimID` unik per klaim (`CLM-260826-0004`); `No Ref` adalah nomor bulk harian yang dibagi bersama seluruh klaim di tanggal yang sama (`CW300826`), agar principal melihatnya sebagai satu pengajuan kolektif. Klaim uji memakai seri terpisah (`TEST-` dan `CWT`).
 
-**Struktur sheet.** `Claims` · `ClaimItems` · `Attachments` · `AuditLog` · `EmailLog` · `users` · `Customer` · `sparepart` · `Recipients` · `warranty` · `Population`.
+**Struktur sheet.** `Claims` · `ClaimItems` · `Attachments` · `AuditLog` · `EmailLog` · `EmailTemplates` · `users` · `Customer` · `sparepart` · `Recipients` · `warranty` · `Population`.
 
 Master data dirujuk lewat ID, bukan teks. `Claims` menyimpan `CustomerID` beserta salinan nama saat pengajuan, `ClaimItems` menyimpan `PartID` beserta salinan namanya. Layar menampilkan nama terkini; ekspor audit menampilkan keduanya bila berbeda.
 
@@ -76,6 +77,8 @@ Klaim/CW300826/CLM-260826-0004/01-PART/
 | 5 | Pesanan disetujui diteruskan | daftar `Recipients` |
 | 6 | Klaim dikembalikan | Requester |
 | 7 | Klaim diubah Administrator | Requester |
+
+**Template email** dapat disunting Administrator. Ketujuh template bawaan ikut di dalam kode dan aktif sejak awal; sheet `EmailTemplates` hanya menimpanya, dan sistem jatuh kembali ke bawaan bila sheet kosong atau tidak valid. Kop dan kaki email dikunci karena memuat nomor referensi, waktu, versi template, dan nomor arsip; badan email bebas ditulis ulang memakai placeholder. Placeholder yang menopang nilai pembuktian — antara lain `{{ClaimID}}` dan `{{WarrantyBasis}}` — tidak dapat dihapus. Versi template yang dipakai tiap pengiriman dicatat di `EmailLog`.
 
 **Ketentuan lain.** Antarmuka aplikasi berbahasa Inggris formal. Data tidak pernah dihapus permanen, hanya ditandai. Setiap perubahan tercatat di `AuditLog` dengan identitas asli pelakunya. Zona waktu `Asia/Jakarta`.
 

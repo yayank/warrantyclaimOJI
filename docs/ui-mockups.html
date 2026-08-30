@@ -472,12 +472,51 @@ a{color:inherit}
 .act{display:flex;gap:6px}
 .count-note{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
 
+/* email templates */
+.frame-inner.wide{min-width:1020px}
+.tpl-grid{display:grid;grid-template-columns:172px minmax(0,1fr) minmax(0,1fr)}
+.tpl-list{border-right:1px solid var(--line);background:var(--surface-2)}
+.tpl-list a{
+  display:block;padding:9px 12px;border-bottom:1px solid var(--line-soft);
+  text-decoration:none;font-size:12.5px;color:var(--ink-2);
+}
+.tpl-list a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+.tpl-list .tcode{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;
+  display:block;color:var(--ink-3);letter-spacing:.03em;
+}
+.tpl-list a.on .tcode{color:var(--accent-ink);opacity:.75}
+.tpl-col{padding:14px 16px;display:flex;flex-direction:column;gap:11px;min-width:0}
+.tpl-col+.tpl-col{border-left:1px solid var(--line)}
+.tpl-col>h4{margin:0;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.editor{
+  border:1px solid var(--line);border-radius:5px;background:var(--surface);
+  padding:11px 12px;font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:11.5px;line-height:1.8;white-space:pre-wrap;color:var(--ink-2);
+}
+.editor b{color:var(--accent);font-weight:600}
+.editor i{color:var(--info);font-style:normal;font-weight:600}
+.ph{display:flex;flex-wrap:wrap;gap:5px}
+.ph span{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;
+  border:1px solid var(--line);border-radius:3px;padding:2px 6px;color:var(--ink-3);
+}
+.ph span.must{border-color:var(--warn);color:var(--warn);background:var(--warn-soft);font-weight:600}
+.mail{border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.mail-lock{background:var(--mute-soft);padding:9px 34px 9px 12px;font-size:11.5px;color:var(--ink-3);position:relative;line-height:1.6}
+.mail-lock .tag{
+  position:absolute;right:7px;top:6px;font-size:9px;letter-spacing:.09em;
+  text-transform:uppercase;font-weight:700;color:var(--ink-3);opacity:.7;
+}
+.mail-body{padding:12px;font-size:12.5px;display:flex;flex-direction:column;gap:9px;background:var(--surface);line-height:1.6}
+.mail-claim{border-left:2px solid var(--line);padding-left:10px;display:flex;flex-direction:column;gap:2px}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 
 <header class="deck-head">
   <div class="deck-head-in">
-    <div class="eyebrow">Design Review · Draft 2</div>
+    <div class="eyebrow">Design Review · Draft 3</div>
     <h1>Warranty Claim Portal</h1>
     <p class="deck-lede">Mockup seluruh layar yang sudah kita sepakati, untuk mesin hemodialisis Sansin dan Oneject. Antarmuka aplikasi berbahasa Inggris formal sesuai keputusan; catatan di bawah tiap layar berbahasa Indonesia — itu komentar saya kepada Anda, bukan bagian dari produk. Data yang tampil diambil dari file klaim Anda yang sebenarnya.</p>
     <div class="deck-meta">
@@ -503,6 +542,7 @@ a{color:inherit}
       <li><a href="#s9"><span>09</span>Tester Mode</a></li>
       <li><a href="#s10"><span>10</span>Edit Mode by Role</a></li>
       <li><a href="#s11"><span>11</span>Master Data</a></li>
+      <li><a href="#s12"><span>12</span>Email Templates</a></li>
     </ol>
   </nav>
 
@@ -1236,8 +1276,119 @@ a{color:inherit}
       </div>
     </section>
 
+
+    <!-- 12 EMAIL TEMPLATES -->
+    <section class="shot" id="s12">
+      <div class="shot-label">Screen 12 — Administrator</div>
+      <h2>Email Templates</h2>
+      <p class="shot-note">Tujuh template bawaan sudah aktif sejak hari pertama; menu ini hanya menimpanya, dan <code>Restore Default</code> mengembalikannya kapan saja. Kop dan kaki email diarsir abu-abu di pratinjau — itu bagian yang dikunci sistem, karena nomor referensi, waktu, versi template, dan nomor arsip adalah yang membuat email sah sebagai bukti. Badan email bebas ditulis ulang. Placeholder bertanda oranye di bawah editor tidak boleh hilang: menyimpan tanpa <code>{{ClaimID}}</code> atau <code>{{WarrantyBasis}}</code> ditolak beserta alasannya, sebab tanpa keduanya email kehilangan nilai pembuktiannya.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner wide">
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s12">Claims</a><a href="#s12">Orders</a><a href="#s12" class="on">Master Data</a><a href="#s12">Audit Log</a></nav>
+            <div class="app-user"><span>Yayan Arifin · Administrator</span><span class="avatar">YA</span></div>
+          </div>
+          <div style="padding:14px 16px 0;background:var(--surface)">
+            <div class="tabs">
+              <button>Users</button><button>Customers</button><button>Spare Parts</button>
+              <button>Recipients</button><button>Units</button><button class="on">Email Templates</button>
+            </div>
+          </div>
+          <div class="tpl-grid">
+
+            <nav class="tpl-list">
+              <a href="#s12"><span class="tcode">CLAIM_SUBMIT</span>New Submission</a>
+              <a href="#s12" class="on"><span class="tcode">DAILY_DIGEST</span>Daily Submission</a>
+              <a href="#s12"><span class="tcode">DECISION_REQ</span>Decision · Requester</a>
+              <a href="#s12"><span class="tcode">DECISION_ADM</span>Decision · Admin</a>
+              <a href="#s12"><span class="tcode">ORDER_FORWARD</span>Parts Order</a>
+              <a href="#s12"><span class="tcode">CLAIM_RETURN</span>Action Required</a>
+              <a href="#s12"><span class="tcode">CLAIM_AMEND</span>Claim Updated</a>
+            </nav>
+
+            <div class="tpl-col">
+              <div class="claim-line">
+                <h4 style="margin:0">Editor</h4>
+                <span class="spacer"></span>
+                <span class="tiny">Version 4 · Yayan Arifin · 12 Aug 2026</span>
+              </div>
+              <div class="inp edit"><span class="stack" style="min-width:0"><span class="lab">Subject</span><span style="font-size:12.5px">[Warranty Claim] Daily Submission {{RefNo}} — {{ClaimCount}} claims</span></span></div>
+              <div class="editor">The following warranty claims have been verified and are submitted for your review.
+
+<i>{{#Claims}}</i>
+Claim <b>{{ClaimID}}</b> — <b>{{Customer}}</b>
+  Serial number   <b>{{SerialNumber}}</b>
+  Warranty        <b>{{WarrantyBasis}}</b>
+  Work order      <b>{{WorkOrder}}</b>
+  Problem         <b>{{Problem}}</b>
+  Parts requested
+<i>  {{#Items}}</i>    · <b>{{PartName}}</b> — <b>{{Qty}}</b> pcs<i>{{/Items}}</i>
+<i>{{/Claims}}</i>
+
+Total <b>{{ClaimCount}}</b> claims, <b>{{PartCount}}</b> parts.
+Verified by <b>{{VerifiedBy}}</b>.</div>
+              <h4>Available placeholders</h4>
+              <div class="ph">
+                <span class="must">{{ClaimID}}</span><span class="must">{{RefNo}}</span>
+                <span class="must">{{WarrantyBasis}}</span><span>{{Customer}}</span>
+                <span>{{SerialNumber}}</span><span>{{WorkOrder}}</span><span>{{Problem}}</span>
+                <span>{{PartName}}</span><span>{{Qty}}</span><span>{{ClaimCount}}</span>
+                <span>{{PartCount}}</span><span>{{VerifiedBy}}</span><span>{{Link}}</span>
+              </div>
+              <div class="tiny">Orange placeholders are required for the audit record and cannot be removed.</div>
+              <div class="claim-line" style="padding-top:2px">
+                <button class="btn">Restore Default</button>
+                <button class="btn">Send Test to Me</button>
+                <span class="spacer"></span>
+                <button class="btn pri">Save as v5</button>
+              </div>
+            </div>
+
+            <div class="tpl-col">
+              <h4>Live preview</h4>
+              <div class="mail">
+                <div class="mail-lock">
+                  <span class="tag">Locked</span>
+                  <b>WARRANTY CLAIM SUBMISSION</b><br>
+                  Ref. <span class="mono">CW300826</span> · Generated 30 Aug 2026, 17:00 WIB<br>
+                  <span class="pill p-wait flat" style="margin-top:5px">Review This Batch →</span>
+                </div>
+                <div class="mail-body">
+                  <div>The following warranty claims have been verified and are submitted for your review.</div>
+                  <div class="mail-claim">
+                    <div><b>CLM-260826-0004</b> — RSUD Koja</div>
+                    <div class="tiny">Serial number <span class="mono">XT2410090</span></div>
+                    <div class="tiny">Warranty assembled Oct 2024 + 22 months = valid until Aug 2026</div>
+                    <div class="tiny">Work order <span class="mono">WO-2608-0041</span></div>
+                    <div class="tiny">Problem Machine does not power on</div>
+                    <div class="tiny">· Electrical Mainboard — 1 pcs</div>
+                    <div class="tiny">· Power supply — 1 pcs</div>
+                  </div>
+                  <div class="mail-claim">
+                    <div><b>CLM-260826-0005</b> — Mitra Kasih Cimahi</div>
+                    <div class="tiny">Serial number <span class="mono">XT2411194</span></div>
+                    <div class="tiny">Warranty assembled Nov 2024 + 22 months = valid until Sep 2026</div>
+                    <div class="tiny">· Blood pump rotor — 2 pcs</div>
+                  </div>
+                  <div>Total 4 claims, 9 parts.<br>Verified by yayan.arifin@oneject.co.id.</div>
+                </div>
+                <div class="mail-lock">
+                  <span class="tag">Locked</span>
+                  Automatically generated record · do not reply<br>
+                  <span class="mono">Template DAILY_DIGEST v4 · Log ref EML-260830-0091</span>
+                </div>
+              </div>
+              <div class="tiny">Preview uses live data from reference <span class="mono">CW300826</span>.</div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div class="deck-foot">
-      <span>Draft 2 · 30 Aug 2026</span>
+      <span>Draft 3 · 30 Aug 2026</span>
       <span>Data contoh diambil dari claim_Warranty_sansin_1.xlsx</span>
       <span>Seluruh modul yang disepakati sudah tercakup</span>
     </div>
