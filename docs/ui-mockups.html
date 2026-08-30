@@ -1,0 +1,1043 @@
+<title>Warranty Portal Screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+
+<style>
+:root{
+  --ground:#f2f5f6;
+  --surface:#ffffff;
+  --surface-2:#f8fafb;
+  --line:#d7dee1;
+  --line-soft:#e6ebed;
+  --ink:#101619;
+  --ink-2:#465055;
+  --ink-3:#6f7c82;
+  --accent:#00697a;
+  --accent-ink:#00505e;
+  --accent-soft:#dcedf0;
+  --on-accent:#ffffff;
+  --ok:#1f7a4d;      --ok-soft:#dcefe4;
+  --warn:#9a5b06;    --warn-soft:#f7e8d2;
+  --crit:#ab2318;    --crit-soft:#f8dedb;
+  --info:#2b5a86;    --info-soft:#dde8f2;
+  --mute-soft:#e8ecee;
+  --shadow:0 1px 2px rgba(16,22,25,.05), 0 8px 24px -12px rgba(16,22,25,.18);
+  --radius:6px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0d1315;
+    --surface:#151d20;
+    --surface-2:#1a2427;
+    --line:#2a373b;
+    --line-soft:#222d31;
+    --ink:#e7eef0;
+    --ink-2:#a8b6bb;
+    --ink-3:#7d8b91;
+    --accent:#54bfd0;
+    --accent-ink:#8ad6e2;
+    --accent-soft:#123239;
+    --on-accent:#07171b;
+    --ok:#5cc38c;      --ok-soft:#123022;
+    --warn:#d69a4a;    --warn-soft:#33260f;
+    --crit:#e8877c;    --crit-soft:#3a1d1a;
+    --info:#79aada;    --info-soft:#16283a;
+    --mute-soft:#222d31;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0d1315;
+  --surface:#151d20;
+  --surface-2:#1a2427;
+  --line:#2a373b;
+  --line-soft:#222d31;
+  --ink:#e7eef0;
+  --ink-2:#a8b6bb;
+  --ink-3:#7d8b91;
+  --accent:#54bfd0;
+  --accent-ink:#8ad6e2;
+  --accent-soft:#123239;
+  --on-accent:#07171b;
+  --ok:#5cc38c;      --ok-soft:#123022;
+  --warn:#d69a4a;    --warn-soft:#33260f;
+  --crit:#e8877c;    --crit-soft:#3a1d1a;
+  --info:#79aada;    --info-soft:#16283a;
+  --mute-soft:#222d31;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:15px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- wrapper ---------- */
+.deck-head{
+  border-bottom:1px solid var(--line);
+  background:var(--surface);
+}
+.deck-head-in{
+  max-width:1240px;margin:0 auto;padding:56px 32px 40px;
+  display:flex;flex-direction:column;gap:18px;
+}
+.eyebrow{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);font-weight:600;
+}
+.deck-head h1{
+  margin:0;font-size:clamp(30px,4vw,44px);line-height:1.1;
+  letter-spacing:-.02em;font-weight:600;text-wrap:balance;max-width:20ch;
+}
+.deck-lede{
+  font-family:"IBM Plex Serif",Georgia,serif;
+  font-size:17px;line-height:1.7;color:var(--ink-2);max-width:64ch;margin:0;
+}
+.deck-meta{
+  display:flex;flex-wrap:wrap;gap:8px 28px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:12px;color:var(--ink-3);
+  border-top:1px solid var(--line-soft);padding-top:16px;
+}
+.deck-meta b{color:var(--ink-2);font-weight:500}
+
+.deck-body{
+  max-width:1240px;margin:0 auto;padding:0 32px 96px;
+  display:grid;grid-template-columns:190px minmax(0,1fr);gap:48px;
+}
+@media(max-width:920px){.deck-body{grid-template-columns:1fr;gap:0}.deck-nav{display:none}}
+
+.deck-nav{position:sticky;top:0;align-self:start;padding-top:40px;height:100vh;overflow-y:auto}
+.deck-nav h2{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;margin:0 0 12px;
+}
+.deck-nav ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.deck-nav a{
+  display:flex;gap:9px;text-decoration:none;padding:6px 8px;border-radius:4px;
+  font-size:13px;color:var(--ink-3);line-height:1.35;
+}
+.deck-nav a:hover{background:var(--mute-soft);color:var(--ink)}
+.deck-nav a span{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;
+  color:var(--accent);padding-top:1px;
+}
+
+.deck-main{display:flex;flex-direction:column;gap:72px;padding-top:56px;min-width:0}
+
+.shot{display:flex;flex-direction:column;gap:16px;scroll-margin-top:24px}
+.shot-label{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600;
+}
+.shot h2{margin:0;font-size:24px;letter-spacing:-.015em;font-weight:600;line-height:1.25}
+.shot-note{
+  font-family:"IBM Plex Serif",Georgia,serif;
+  font-size:15.5px;line-height:1.72;color:var(--ink-2);margin:0;max-width:70ch;
+}
+.shot-note em{color:var(--ink);font-style:italic}
+.shot-note code{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.86em;
+  background:var(--mute-soft);padding:1px 5px;border-radius:3px;font-style:normal;
+}
+
+.frame{
+  border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);box-shadow:var(--shadow);overflow:hidden;
+}
+.frame-scroll{overflow-x:auto}
+.frame-inner{min-width:840px}
+
+/* ---------- app chrome ---------- */
+.app-top{
+  display:flex;align-items:center;gap:16px;
+  padding:0 16px;height:48px;
+  border-bottom:1px solid var(--line);background:var(--surface-2);
+}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:13.5px;letter-spacing:-.005em}
+.brand i{
+  width:18px;height:18px;border-radius:3px;background:var(--accent);display:block;
+  position:relative;flex:none;
+}
+.brand i::after{
+  content:"";position:absolute;inset:4px 4px auto 4px;height:2px;background:var(--surface);
+  box-shadow:0 4px 0 var(--surface);
+}
+.app-nav{display:flex;gap:2px;margin-left:8px}
+.app-nav a{
+  padding:5px 10px;border-radius:4px;font-size:13px;color:var(--ink-3);text-decoration:none;
+}
+.app-nav a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:500}
+.app-user{
+  margin-left:auto;display:flex;align-items:center;gap:8px;
+  font-size:12.5px;color:var(--ink-3);
+}
+.avatar{
+  width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);
+  display:grid;place-items:center;font-size:10.5px;font-weight:600;flex:none;
+}
+
+.app-body{padding:18px 16px 22px;display:flex;flex-direction:column;gap:14px;background:var(--surface)}
+
+/* tabs */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:-2px}
+.tabs button{
+  font:inherit;font-size:13px;background:none;border:0;cursor:default;
+  padding:8px 12px;color:var(--ink-3);border-bottom:2px solid transparent;
+  display:flex;align-items:center;gap:6px;
+}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.tabs .count{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;
+  background:var(--accent);color:var(--on-accent);border-radius:9px;padding:1px 6px;font-weight:600;
+}
+
+/* toolbar */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.seg{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.seg span{padding:5px 11px;font-size:12.5px;color:var(--ink-3);background:var(--surface)}
+.seg span.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.seg span+span{border-left:1px solid var(--line)}
+.field{
+  display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:5px;
+  padding:5px 10px;font-size:12.5px;color:var(--ink-3);background:var(--surface);
+}
+.field.grow{flex:1;min-width:180px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;font-size:12px;
+  background:var(--accent-soft);color:var(--accent-ink);border-radius:20px;padding:3px 9px 3px 11px;font-weight:500;
+}
+.chip b{font-weight:600}
+.chip u{text-decoration:none;opacity:.6}
+.spacer{margin-left:auto}
+
+/* buttons */
+.btn{
+  font:inherit;font-size:12.5px;font-weight:500;border-radius:5px;padding:6px 12px;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:default;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.ok{border-color:var(--ok);color:var(--ok)}
+.btn.no{border-color:var(--crit);color:var(--crit)}
+.btn.off{opacity:.45}
+.btn.sm{padding:4px 9px;font-size:12px}
+
+/* pills */
+.pill{
+  display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:2px 9px;
+  font-size:11.5px;font-weight:600;letter-spacing:.01em;white-space:nowrap;
+}
+.pill::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+.p-draft{background:var(--mute-soft);color:var(--ink-3)}
+.p-sub{background:var(--warn-soft);color:var(--warn)}
+.p-rev{background:var(--info-soft);color:var(--info)}
+.p-ok{background:var(--ok-soft);color:var(--ok)}
+.p-no{background:var(--crit-soft);color:var(--crit)}
+.p-wait{background:var(--accent-soft);color:var(--accent-ink)}
+.pill.flat::before{display:none}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{
+  text-align:left;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;padding:0 10px 7px;border-bottom:1px solid var(--line);
+}
+.tbl td{padding:10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.tbl tr.sub td{background:var(--surface-2)}
+.tbl tr.sub td:first-child{padding-left:34px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;font-variant-numeric:tabular-nums}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:var(--ink-3)}
+.dimmer{color:var(--ink-3);opacity:.55}
+.twoline{display:flex;flex-direction:column;gap:3px}
+.tiny{font-size:11.5px;color:var(--ink-3)}
+.caret{color:var(--ink-3);font-size:10px;padding-right:4px}
+
+/* modal */
+.modal-stage{background:var(--ground);padding:22px;display:flex;justify-content:center}
+.modal{
+  width:100%;max-width:620px;background:var(--surface);border:1px solid var(--line);
+  border-radius:8px;box-shadow:var(--shadow);overflow:hidden;
+}
+.modal-head{
+  padding:14px 18px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.modal-head h3{margin:0;font-size:15px;font-weight:600}
+.modal-body{padding:18px;display:flex;flex-direction:column;gap:18px}
+.modal-foot{
+  padding:13px 18px;border-top:1px solid var(--line);background:var(--surface-2);
+  display:flex;gap:8px;align-items:center;
+}
+.blk{display:flex;flex-direction:column;gap:9px}
+.blk>h4{
+  margin:0;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;
+}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.inp{
+  border:1px solid var(--line);border-radius:5px;padding:7px 10px;font-size:13px;
+  background:var(--surface);display:flex;justify-content:space-between;align-items:center;gap:8px;
+}
+.inp.ro{background:var(--surface-2);color:var(--ink-3)}
+.inp .lab{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:3px;font-weight:600}
+.stack{display:flex;flex-direction:column}
+.req{color:var(--crit)}
+
+.lookup{
+  border:1px solid var(--ok);border-left-width:3px;border-radius:5px;
+  background:var(--ok-soft);padding:11px 13px;display:flex;flex-direction:column;gap:4px;
+}
+.lookup .l1{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;font-weight:600}
+.lookup .l2{font-size:12.5px;color:var(--ink-2)}
+.lookup .l3{font-size:12.5px;font-weight:600;color:var(--ok);display:flex;align-items:center;gap:6px}
+.notice{
+  border:1px solid var(--warn);border-left-width:3px;border-radius:5px;background:var(--warn-soft);
+  padding:9px 12px;font-size:12.5px;color:var(--warn);display:flex;gap:8px;
+}
+.notice.crit{border-color:var(--crit);background:var(--crit-soft);color:var(--crit)}
+
+.partrow{
+  display:grid;grid-template-columns:20px minmax(0,1fr) 62px 150px 24px;gap:8px;align-items:center;
+  border:1px solid var(--line);border-radius:5px;padding:7px 9px;font-size:13px;
+}
+.partrow.bad{border-color:var(--crit)}
+.partrow .idx{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;color:var(--ink-3)}
+.file{
+  display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-3);
+  border:1px dashed var(--line);border-radius:4px;padding:3px 7px;
+}
+.file.has{border-style:solid;color:var(--ok);border-color:var(--ok)}
+.addrow{
+  border:1px dashed var(--line);border-radius:5px;padding:7px;text-align:center;
+  font-size:12.5px;color:var(--ink-3);
+}
+
+/* stepper */
+.stepper{display:flex;flex-direction:column;gap:8px}
+.step{display:flex;align-items:center;gap:9px;font-size:13px}
+.step .dot{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--line);flex:none}
+.step.done .dot{background:var(--ok);border-color:var(--ok)}
+.step.done{color:var(--ink-2)}
+.step.now .dot{border-color:var(--accent);border-right-color:transparent}
+.step.now{font-weight:600}
+.bar{height:4px;border-radius:3px;background:var(--mute-soft);overflow:hidden;flex:1;max-width:160px}
+.bar i{display:block;height:100%;width:62%;background:var(--accent)}
+
+/* panels */
+.panel-grid{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:0}
+@media(max-width:900px){.panel-grid{grid-template-columns:1fr}}
+.panel{border-left:1px solid var(--line);background:var(--surface-2);display:flex;flex-direction:column}
+.panel-head{padding:13px 16px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.panel-head h3{margin:0;font-size:14px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600}
+.panel-sec{padding:14px 16px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:9px}
+.panel-sec>h4{
+  margin:0;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:600;
+}
+.calc{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;line-height:1.65;
+  color:var(--ink-2);background:var(--surface);border:1px solid var(--line-soft);
+  border-radius:5px;padding:9px 11px;
+}
+.calc b{color:var(--ink);font-weight:600}
+.check{display:flex;flex-direction:column;gap:5px;font-size:12.5px}
+.check div{display:flex;align-items:center;gap:7px}
+.check .yes{color:var(--ok);font-weight:700}
+.panel-foot{
+  margin-top:auto;padding:13px 16px;border-top:1px solid var(--line);
+  display:flex;gap:8px;flex-wrap:wrap;background:var(--surface);
+}
+
+/* bulk cards */
+.bulk{border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.bulk-head{
+  display:flex;align-items:center;gap:10px;padding:10px 13px;background:var(--surface-2);
+  border-bottom:1px solid var(--line);font-size:13px;
+}
+.bulk-head .ref{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600;font-size:13px}
+.claim-blk{padding:12px 13px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:9px}
+.claim-blk:last-child{border-bottom:0}
+.claim-line{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px}
+.warr{
+  font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-soft);
+  border-radius:4px;padding:5px 9px;font-family:"IBM Plex Mono",ui-monospace,monospace;
+}
+.itemrow{
+  display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:4px;
+  background:var(--surface-2);font-size:13px;
+}
+.itemrow .nm{flex:1;min-width:0}
+.box{width:13px;height:13px;border:1.5px solid var(--line);border-radius:3px;flex:none}
+.box.on{background:var(--accent);border-color:var(--accent);position:relative}
+.box.on::after{
+  content:"";position:absolute;left:3.5px;top:1px;width:3.5px;height:7px;
+  border:solid var(--surface);border-width:0 1.7px 1.7px 0;transform:rotate(42deg);
+}
+.selbar{
+  display:flex;align-items:center;gap:9px;padding:9px 13px;border-radius:5px;
+  background:var(--accent-soft);color:var(--accent-ink);font-size:12.5px;font-weight:500;
+}
+.shipgrp{
+  border:1px solid var(--line);border-left:3px solid var(--info);border-radius:5px;
+  padding:9px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12.5px;
+}
+
+/* sign in */
+.signin{
+  min-height:400px;display:grid;place-items:center;padding:40px 20px;
+  background:
+    radial-gradient(900px 400px at 50% -10%, var(--accent-soft), transparent 70%),
+    var(--surface);
+}
+.signin-card{
+  width:100%;max-width:352px;display:flex;flex-direction:column;gap:20px;align-items:center;text-align:center;
+}
+.signin-mark{
+  width:44px;height:44px;border-radius:9px;background:var(--accent);position:relative;
+}
+.signin-mark::after{
+  content:"";position:absolute;inset:11px 10px auto 10px;height:3px;background:var(--surface);
+  box-shadow:0 8px 0 var(--surface);border-radius:2px;
+}
+.signin h3{margin:0;font-size:19px;font-weight:600;letter-spacing:-.01em}
+.signin p{margin:0;font-size:13px;color:var(--ink-3);line-height:1.6}
+.gbtn{
+  width:100%;display:flex;align-items:center;justify-content:center;gap:10px;
+  border:1px solid var(--line);border-radius:6px;background:var(--surface);
+  padding:11px 16px;font-size:14px;font-weight:500;box-shadow:var(--shadow);
+}
+.gmark{width:17px;height:17px;border-radius:50%;border:3px solid var(--accent);border-right-color:var(--warn);border-bottom-color:var(--ok);flex:none}
+.signin small{font-size:11.5px;color:var(--ink-3);line-height:1.6}
+
+/* tester banner */
+.tester{
+  display:flex;align-items:center;gap:11px;padding:9px 16px;font-size:12.5px;
+  background:var(--warn-soft);color:var(--warn);border-bottom:1px solid var(--warn);font-weight:500;
+}
+.tester .sel{
+  border:1px solid var(--warn);border-radius:4px;padding:2px 9px;font-weight:600;
+  display:inline-flex;gap:6px;align-items:center;background:var(--surface);
+}
+
+.legend{
+  display:flex;flex-wrap:wrap;gap:8px;padding-top:2px;
+}
+.deck-foot{
+  border-top:1px solid var(--line);margin-top:8px;padding-top:20px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;color:var(--ink-3);
+  display:flex;flex-wrap:wrap;gap:6px 24px;
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<header class="deck-head">
+  <div class="deck-head-in">
+    <div class="eyebrow">Design Review · Draft 1</div>
+    <h1>Warranty Claim Portal</h1>
+    <p class="deck-lede">Mockup seluruh layar yang sudah kita sepakati, untuk mesin hemodialisis Sansin dan Oneject. Antarmuka aplikasi berbahasa Inggris formal sesuai keputusan; catatan di bawah tiap layar berbahasa Indonesia — itu komentar saya kepada Anda, bukan bagian dari produk. Data yang tampil diambil dari file klaim Anda yang sebenarnya.</p>
+    <div class="deck-meta">
+      <span><b>Platform</b> Google Apps Script</span>
+      <span><b>Roles</b> Requester · Production · Administrator · Principal · Tester</span>
+      <span><b>Status</b> Konsep, belum dibangun</span>
+    </div>
+  </div>
+</header>
+
+<div class="deck-body">
+  <nav class="deck-nav">
+    <h2>Screens</h2>
+    <ol>
+      <li><a href="#s1"><span>01</span>Sign In</a></li>
+      <li><a href="#s2"><span>02</span>Submit Claim</a></li>
+      <li><a href="#s3"><span>03</span>Saving Progress</a></li>
+      <li><a href="#s4"><span>04</span>Claim Status · Requester</a></li>
+      <li><a href="#s5"><span>05</span>Claim Status · Admin</a></li>
+      <li><a href="#s6"><span>06</span>Verification Panel</a></li>
+      <li><a href="#s7"><span>07</span>Principal Review</a></li>
+      <li><a href="#s8"><span>08</span>Forward Order</a></li>
+      <li><a href="#s9"><span>09</span>Tester Mode</a></li>
+    </ol>
+  </nav>
+
+  <main class="deck-main">
+
+    <!-- 01 SIGN IN -->
+    <section class="shot" id="s1">
+      <div class="shot-label">Screen 01 — Entry</div>
+      <h2>Sign In</h2>
+      <p class="shot-note">Tidak ada kolom kata sandi. Pengguna menekan satu tombol, memilih akun Google, lalu perannya diambil dari sheet <code>users</code>. Email di luar daftar ditolak dengan pesan yang jelas, bukan halaman kosong. Kalimat kecil di bawah tombol menjelaskan bahwa domain apa pun diterima — itu yang membedakan rancangan ini dari cara login bawaan Apps Script.</p>
+      <div class="frame">
+        <div class="signin">
+          <div class="signin-card">
+            <div class="signin-mark"></div>
+            <div>
+              <h3>Warranty Claim Portal</h3>
+              <p>Sansin &amp; Oneject Hemodialysis Machines</p>
+            </div>
+            <div class="gbtn"><span class="gmark"></span> Sign in with Google</div>
+            <small>Any Google account may sign in. Access is granted according to the role registered for your address.</small>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 SUBMIT -->
+    <section class="shot" id="s2">
+      <div class="shot-label">Screen 02 — Requester</div>
+      <h2>Submit Claim</h2>
+      <p class="shot-note">Momen terpenting di layar ini adalah panel hijau: begitu serial number diketik, sistem langsung memperlihatkan <em>dasar perhitungan garansinya</em>, bukan sekadar label. Di bawahnya dua peringatan bertingkat yang Anda minta — kuning untuk SN yang masih punya klaim aktif, oranye untuk part yang sama sudah pernah diajukan. Keduanya memberi tahu, tidak melarang. Baris sparepart bisa ditambah, dan tiap baris punya slot fotonya sendiri; baris merah adalah yang fotonya belum diisi, dan selama masih ada, tombol <code>Submit Claim</code> tetap mati.</p>
+      <div class="frame">
+        <div class="app-top">
+          <div class="brand"><i></i> Warranty Claim Portal</div>
+          <nav class="app-nav"><a href="#s2" class="on">Claims</a><a href="#s2">New Claim</a></nav>
+          <div class="app-user"><span>Rian Pratama · Requester</span><span class="avatar">RP</span></div>
+        </div>
+        <div class="modal-stage">
+          <div class="modal">
+            <div class="modal-head">
+              <h3>New Warranty Claim</h3>
+              <span class="mono dim">CLM-260830-0012</span>
+            </div>
+            <div class="modal-body">
+
+              <div class="blk">
+                <h4>Submission</h4>
+                <div class="grid2">
+                  <div class="inp ro"><span class="stack"><span class="lab">Requested by</span>Rian Pratama</span></div>
+                  <div class="inp ro"><span class="stack"><span class="lab">Request date</span>30 Aug 2026</span></div>
+                  <div class="inp ro"><span class="stack"><span class="lab">Reference no.</span><span class="mono">CW300826</span></span></div>
+                  <div class="inp ro"><span class="stack"><span class="lab">Claim ID</span><span class="mono">CLM-260830-0012</span></span></div>
+                </div>
+                <div class="tiny">Claims submitted today are grouped under one reference number for the principal.</div>
+              </div>
+
+              <div class="blk">
+                <h4>Unit</h4>
+                <div class="grid2">
+                  <div class="inp"><span class="stack"><span class="lab">Customer <span class="req">*</span></span>RSUD Koja</span><span class="dim">▾</span></div>
+                  <div class="inp"><span class="stack"><span class="lab">Serial number <span class="req">*</span></span><span class="mono">XT2410090</span></span></div>
+                </div>
+                <div class="lookup">
+                  <div class="l1">XT2410090</div>
+                  <div class="l2">Sansin Hemodialysis Machine AKL · assembled Oct 2024</div>
+                  <div class="l3">Principal Warranty — valid until Aug 2026 <span class="dim" style="font-weight:400">(2 days remaining)</span></div>
+                </div>
+                <div class="notice">⚠ This unit has an open claim: <span class="mono">CLM-260826-0003</span> · In Review</div>
+              </div>
+
+              <div class="blk">
+                <h4>Fault</h4>
+                <div class="inp" style="align-items:flex-start"><span class="stack" style="flex:1"><span class="lab">Problem description <span class="req">*</span></span>Machine does not power on; power indicator stays off after mains connection.</span></div>
+              </div>
+
+              <div class="blk">
+                <h4>Spare parts requested <span class="req">*</span></h4>
+                <div class="partrow">
+                  <span class="idx">1</span>
+                  <span>Electrical Mainboard</span>
+                  <span class="mono">1 pcs</span>
+                  <span class="file has">✓ mainboard.jpg</span>
+                  <span class="dim">✕</span>
+                </div>
+                <div class="notice crit">⚠ This part is already requested on <span class="mono">CLM-260826-0003</span> and not yet resolved.</div>
+                <div class="partrow bad">
+                  <span class="idx">2</span>
+                  <span>Power supply</span>
+                  <span class="mono">1 pcs</span>
+                  <span class="file">Choose photo…</span>
+                  <span class="dim">✕</span>
+                </div>
+                <div class="addrow">+ Add spare part</div>
+              </div>
+
+              <div class="blk">
+                <h4>Attachments</h4>
+                <div class="grid2">
+                  <div class="inp"><span class="stack"><span class="lab">Fault photo <span class="req">*</span></span><span class="dim" style="font-size:12.5px">✓ fault-front-panel.jpg</span></span></div>
+                  <div class="inp"><span class="stack"><span class="lab">Service report <span class="req">*</span></span><span class="dim" style="font-size:12.5px">✓ SR-2608-114.pdf</span></span></div>
+                </div>
+              </div>
+
+            </div>
+            <div class="modal-foot">
+              <button class="btn">Save Draft</button>
+              <span class="spacer"></span>
+              <button class="btn">Cancel</button>
+              <button class="btn pri off">Submit Claim</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 STEPPER -->
+    <section class="shot" id="s3">
+      <div class="shot-label">Screen 03 — Requester</div>
+      <h2>Saving Progress</h2>
+      <p class="shot-note">Setiap panggilan ke Apps Script makan 2–5 detik, dan satu klaim mengunggah beberapa file sekaligus. Karena itu prosesnya dipecah jadi langkah yang terlihat, bukan satu spinner tanpa keterangan. Jumlah langkah unggah mengikuti jumlah sparepart, dan langkah <em>Filing documents</em> adalah pemindahan folder dari <code>_DRAFT</code> ke folder bulk harian.</p>
+      <div class="frame">
+        <div class="modal-stage">
+          <div class="modal" style="max-width:440px">
+            <div class="modal-head"><h3>Submitting claim…</h3></div>
+            <div class="modal-body">
+              <div class="stepper">
+                <div class="step done"><span class="dot"></span> Serial number verified</div>
+                <div class="step done"><span class="dot"></span> Part photo 1 of 2 uploaded</div>
+                <div class="step now"><span class="dot"></span> Uploading part photo 2 of 2 <span class="bar"><i></i></span> <span class="mono tiny">62%</span></div>
+                <div class="step"><span class="dot"></span> Upload fault photo</div>
+                <div class="step"><span class="dot"></span> Upload service report</div>
+                <div class="step"><span class="dot"></span> Filing documents</div>
+                <div class="step"><span class="dot"></span> Notify administrator</div>
+              </div>
+            </div>
+            <div class="modal-foot"><span class="tiny">Please keep this window open.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 STATUS REQUESTER -->
+    <section class="shot" id="s4">
+      <div class="shot-label">Screen 04 — Requester</div>
+      <h2>Claim Status · grouped by claim</h2>
+      <p class="shot-note">Tab <em>Needs Action</em> jadi tab pertama, isinya berbeda per peran — untuk Requester berarti draft yang belum diajukan dan klaim yang dikembalikan Admin. Kolom Status memuat dua baris sesuai keputusan Anda: posisi alur di atas, ringkasan hasil per sparepart di bawah. Kolom <em>Age</em> menghitung berapa lama klaim mengendap di status sekarang — berubah oranye setelah tiga hari. Baris kedua sedang dibuka agar terlihat bentuk dua tingkatnya. Kolom Customer tetap tampil, karena satu Requester menangani banyak rumah sakit.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s4" class="on">Claims</a><a href="#s4">New Claim</a></nav>
+            <div class="app-user"><span>Rian Pratama · Requester</span><span class="avatar">RP</span></div>
+          </div>
+          <div class="app-body">
+            <div class="tabs">
+              <button class="on">Needs Action <span class="count">2</span></button>
+              <button>In Progress</button>
+              <button>Completed</button>
+              <button>All</button>
+            </div>
+            <div class="toolbar">
+              <div class="seg"><span class="on">By claim</span><span>By spare part</span></div>
+              <div class="field grow">⌕ Search claim ID, reference, serial number, customer…</div>
+              <div class="field">Last 30 days ▾</div>
+              <div class="field">Customer ▾</div>
+              <span class="spacer"></span>
+              <button class="btn">Export to Excel</button>
+              <button class="btn pri">New Claim</button>
+            </div>
+            <div class="toolbar"><span class="chip"><b>Status</b> Submitted, In Review <u>✕</u></span></div>
+            <table class="tbl">
+              <thead><tr>
+                <th style="width:32px"></th><th>Claim</th><th>Date</th><th>Customer</th>
+                <th>Serial number</th><th>Parts</th><th>Status</th><th style="width:64px">Age</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td class="caret">▸</td>
+                  <td class="twoline"><span class="mono">CLM-260826-0004</span><span class="mono tiny">CW260826</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>RSUD Koja</td>
+                  <td class="twoline"><span class="mono">XT2410090</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Principal Warranty</span></td>
+                  <td>2 items</td>
+                  <td class="twoline"><span class="pill p-rev" style="align-self:flex-start">In Review</span><span class="tiny">1 approved · 1 rejected</span></td>
+                  <td class="num">4 d</td>
+                </tr>
+                <tr>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CLM-260826-0003</span><span class="mono tiny">CW260826</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>Mitra Kasih Cimahi</td>
+                  <td class="twoline"><span class="mono">XT2411194</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Principal Warranty</span></td>
+                  <td>3 items</td>
+                  <td class="twoline"><span class="pill p-sub" style="align-self:flex-start">Submitted</span><span class="tiny">awaiting verification</span></td>
+                  <td class="num">4 d</td>
+                </tr>
+                <tr class="sub"><td colspan="5">Electrical Mainboard</td><td class="mono">1 pcs</td><td class="dim">Pending decision</td><td></td></tr>
+                <tr class="sub"><td colspan="5">Power supply</td><td class="mono">1 pcs</td><td class="dim">Pending decision</td><td></td></tr>
+                <tr class="sub"><td colspan="5">Blood pump rotor</td><td class="mono">2 pcs</td><td class="dim">Pending decision</td><td></td></tr>
+                <tr>
+                  <td class="caret">▸</td>
+                  <td class="twoline"><span class="mono">CLM-260830-0011</span><span class="mono tiny dimmer">not submitted</span></td>
+                  <td>30 Aug 2026</td>
+                  <td>RSUD Tarakan Jakarta</td>
+                  <td class="twoline"><span class="mono">XT2411116</span><span class="pill p-wait flat tiny" style="align-self:flex-start">Manual Verification</span></td>
+                  <td>1 item</td>
+                  <td class="twoline"><span class="pill p-draft" style="align-self:flex-start">Draft</span><span class="tiny">service report missing</span></td>
+                  <td class="num">—</td>
+                </tr>
+                <tr>
+                  <td class="caret">▸</td>
+                  <td class="twoline"><span class="mono">CLM-260828-0009</span><span class="mono tiny">CW280826</span></td>
+                  <td>28 Aug 2026</td>
+                  <td>RS TK. II M. Ridwan Meuraksa</td>
+                  <td class="twoline"><span class="mono">XT2411090</span><span class="pill p-no flat tiny" style="align-self:flex-start">Out of Principal Warranty</span></td>
+                  <td>1 item</td>
+                  <td class="twoline"><span class="pill p-sub" style="align-self:flex-start">Returned to Requester</span><span class="tiny">fault photo unclear</span></td>
+                  <td class="num" style="color:var(--warn)">3 d</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 05 STATUS ADMIN -->
+    <section class="shot" id="s5">
+      <div class="shot-label">Screen 05 — Administrator</div>
+      <h2>Claim Status · flattened by spare part</h2>
+      <p class="shot-note">Sakelar yang sama, mode lain. Satu baris kini sama dengan satu sparepart — format yang persis sama dengan sheet <code>Log</code> lama Anda, sehingga ekspor Excel bisa langsung dipakai untuk laporan. Nilai yang berulang dipudarkan mulai baris kedua supaya mata tetap menangkap batas antar klaim tanpa kehilangan kemampuan menyalin. Admin mendapat kolom tambahan yang tidak dimiliki Requester: <em>Requested by</em> dan <em>Work order</em>.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s5" class="on">Claims</a><a href="#s5">Master Data</a><a href="#s5">Audit Log</a></nav>
+            <div class="app-user"><span>Yayan Arifin · Administrator</span><span class="avatar">YA</span></div>
+          </div>
+          <div class="app-body">
+            <div class="tabs">
+              <button class="on">Needs Action <span class="count">5</span></button>
+              <button>In Progress</button>
+              <button>Completed</button>
+              <button>All</button>
+            </div>
+            <div class="toolbar">
+              <div class="seg"><span>By claim</span><span class="on">By spare part</span></div>
+              <div class="field grow">⌕ Search…</div>
+              <div class="field">Warranty ▾</div>
+              <div class="field">Customer ▾</div>
+              <span class="spacer"></span>
+              <button class="btn">Send Digest Now</button>
+              <button class="btn">Export to Excel</button>
+            </div>
+            <table class="tbl">
+              <thead><tr>
+                <th>Claim</th><th>Serial number</th><th>Customer</th><th>Spare part</th>
+                <th style="width:56px">Qty</th><th>Requested by</th><th>Work order</th><th>Status</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td class="mono">CLM-260826-0004</td><td class="mono">XT2410090</td><td>RSUD Koja</td>
+                  <td>Electrical Mainboard</td><td class="mono">1</td><td class="dim">Rian Pratama</td>
+                  <td class="mono">WO-2608-0041</td><td><span class="pill p-ok">Approved</span></td>
+                </tr>
+                <tr>
+                  <td class="mono dimmer">CLM-260826-0004</td><td class="mono dimmer">XT2410090</td><td class="dimmer">RSUD Koja</td>
+                  <td>Power supply</td><td class="mono">1</td><td class="dimmer">Rian Pratama</td>
+                  <td class="mono dimmer">WO-2608-0041</td>
+                  <td class="twoline"><span class="pill p-no" style="align-self:flex-start">Rejected</span><span class="tiny">not covered under warranty</span></td>
+                </tr>
+                <tr>
+                  <td class="mono">CLM-260826-0005</td><td class="mono">XT2411194</td><td>Mitra Kasih Cimahi</td>
+                  <td>Blood pump rotor</td><td class="mono">2</td><td class="dim">Rian Pratama</td>
+                  <td class="mono">WO-2608-0042</td><td><span class="pill p-wait">Awaiting Part Availability</span></td>
+                </tr>
+                <tr>
+                  <td class="mono">CLM-260826-0007</td><td class="mono">XT2410057</td><td>RSUD dr. Yulidin Away Tapaktuan</td>
+                  <td>Air Detector</td><td class="mono">1</td><td class="dim">Dewi Anggraini</td>
+                  <td class="mono dimmer">— required</td><td><span class="pill p-sub">Submitted</span></td>
+                </tr>
+                <tr>
+                  <td class="mono">CLM-260830-0013</td><td class="mono">C25GPA011</td><td>Internal — Production</td>
+                  <td>Solenoid Valve (imported)</td><td class="mono">1</td><td class="dim">Agus Setiawan</td>
+                  <td class="mono dimmer">optional</td>
+                  <td class="twoline"><span class="pill p-wait" style="align-self:flex-start">Manual Verification</span><span class="tiny">locally assembled unit</span></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="legend">
+              <span class="pill p-draft">Draft</span><span class="pill p-sub">Submitted</span>
+              <span class="pill p-rev">In Review</span><span class="pill p-ok">Approved</span>
+              <span class="pill p-no">Rejected</span><span class="pill p-wait">Awaiting Part Availability</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 VERIFICATION -->
+    <section class="shot" id="s6">
+      <div class="shot-label">Screen 06 — Administrator</div>
+      <h2>Verification Panel</h2>
+      <p class="shot-note">Panel meluncur dari kanan, tabel tetap terlihat di belakangnya. Blok pertama sengaja menampilkan <em>perhitungannya</em>, bukan hanya hasilnya — kalau hanya ada lencana hijau, tidak ada yang bisa memeriksa saat sistem keliru. Sisa hari ikut ditampilkan dan berubah merah di bawah tujuh hari. Tombol <code>Forward to Principal</code> mati sampai Work Order terisi, dengan alasannya tertulis di sebelahnya — bukan tombol mati tanpa penjelasan.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s6" class="on">Claims</a><a href="#s6">Master Data</a><a href="#s6">Audit Log</a></nav>
+            <div class="app-user"><span>Yayan Arifin · Administrator</span><span class="avatar">YA</span></div>
+          </div>
+          <div class="panel-grid">
+            <div class="app-body" style="opacity:.55">
+              <div class="tabs"><button class="on">Needs Action <span class="count">5</span></button><button>In Progress</button><button>Completed</button><button>All</button></div>
+              <table class="tbl">
+                <thead><tr><th>Claim</th><th>Serial number</th><th>Customer</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">CLM-260826-0007</td><td class="mono">XT2410057</td><td>RSUD dr. Yulidin Away Tapaktuan</td><td><span class="pill p-sub">Submitted</span></td></tr>
+                  <tr><td class="mono">CLM-260826-0005</td><td class="mono">XT2411194</td><td>Mitra Kasih Cimahi</td><td><span class="pill p-sub">Submitted</span></td></tr>
+                  <tr><td class="mono">CLM-260830-0013</td><td class="mono">C25GPA011</td><td>Internal — Production</td><td><span class="pill p-wait">Manual Verification</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <aside class="panel">
+              <div class="panel-head">
+                <h3>CLM-260826-0007</h3>
+                <div class="claim-line"><span class="pill p-sub">Submitted</span><span class="tiny">RSUD dr. Yulidin Away Tapaktuan · submitted 4 days ago</span></div>
+              </div>
+              <div class="panel-sec">
+                <h4>Warranty assessment</h4>
+                <div class="calc">
+                  <b>XT2410057</b> · Sansin Hemodialysis Machine AKL<br>
+                  assembled Oct 2024 &nbsp;+&nbsp; 22 months<br>
+                  = expires <b>Aug 2026</b> &nbsp;·&nbsp; today 30 Aug 2026
+                </div>
+                <div class="claim-line">
+                  <span class="pill p-ok">Principal Warranty</span>
+                  <span class="tiny" style="color:var(--warn);font-weight:600">2 days remaining</span>
+                  <span class="spacer"></span>
+                  <button class="btn sm">Override Warranty</button>
+                </div>
+              </div>
+              <div class="panel-sec">
+                <h4>Completeness</h4>
+                <div class="check">
+                  <div><span class="yes">✓</span> Problem description</div>
+                  <div><span class="yes">✓</span> Part photos <span class="mono tiny">1 / 1</span> <a href="#s6" class="tiny" style="color:var(--accent)">view</a></div>
+                  <div><span class="yes">✓</span> Fault photo <a href="#s6" class="tiny" style="color:var(--accent)">view</a></div>
+                  <div><span class="yes">✓</span> Service report <a href="#s6" class="tiny" style="color:var(--accent)">view</a></div>
+                </div>
+              </div>
+              <div class="panel-sec">
+                <h4>Spare parts requested</h4>
+                <div class="itemrow"><span class="nm">Air Detector</span><span class="mono tiny">1 pcs</span></div>
+                <div class="tiny">“The machine is not turning on after transport.”</div>
+              </div>
+              <div class="panel-sec">
+                <h4>Work order <span class="req">*</span></h4>
+                <div class="inp"><span class="dim">Enter work order number…</span></div>
+                <div class="tiny">Required before the claim can be forwarded to the principal.</div>
+              </div>
+              <div class="panel-foot">
+                <button class="btn no">Return to Requester</button>
+                <span class="spacer"></span>
+                <button class="btn pri off">Forward to Principal</button>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 PRINCIPAL -->
+    <section class="shot" id="s7">
+      <div class="shot-label">Screen 07 — Principal</div>
+      <h2>Batch Review</h2>
+      <p class="shot-note">Principal melihat dunia dalam bentuk bulk, jadi layarnya dikelompokkan per nomor referensi harian. Lingkupnya dijaga di server: hanya klaim <em>Principal Warranty</em> yang sudah diverifikasi Admin — klaim garansi internal, draft, dan klaim mentah tidak pernah muncul di sini. Dasar perhitungan garansi ikut tercetak di tiap klaim supaya keputusan mereka bisa diperiksa. <code>Reject</code> tidak bisa ditekan tanpa alasan tertulis, dan keputusan yang sudah dibuat tetap punya tombol <em>Change decision</em> karena diskusi berlanjut di luar aplikasi.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s7" class="on">Claims</a></nav>
+            <div class="app-user"><span>Roland Westley · Principal</span><span class="avatar">RW</span></div>
+          </div>
+          <div class="app-body">
+            <div class="tabs">
+              <button class="on">Needs Action <span class="count">9</span></button>
+              <button>In Progress</button><button>Completed</button><button>All</button>
+            </div>
+            <div class="bulk">
+              <div class="bulk-head">
+                <span class="ref">CW300826</span>
+                <span class="tiny">30 Aug 2026 · 4 claims · 9 parts</span>
+                <span class="spacer"></span>
+                <button class="btn sm">Approve All</button>
+              </div>
+
+              <div class="claim-blk">
+                <div class="claim-line">
+                  <span class="mono" style="font-weight:600">CLM-260826-0004</span>
+                  <span>RSUD Koja</span>
+                  <span class="mono dim">XT2410090</span>
+                  <span class="mono dim">WO-2608-0041</span>
+                  <span class="spacer"></span>
+                  <button class="btn sm">View Evidence</button>
+                </div>
+                <div class="warr">Principal Warranty — assembled Oct 2024 + 22 months = valid until Aug 2026</div>
+                <div class="tiny">“Machine does not power on; power indicator stays off after mains connection.”</div>
+                <div class="itemrow">
+                  <span class="box on"></span>
+                  <span class="nm">Electrical Mainboard</span><span class="mono tiny">1 pcs</span>
+                  <button class="btn sm ok">Approve</button><button class="btn sm no">Reject</button>
+                </div>
+                <div class="itemrow">
+                  <span class="box on"></span>
+                  <span class="nm">Power supply</span><span class="mono tiny">1 pcs</span>
+                  <button class="btn sm ok">Approve</button><button class="btn sm no">Reject</button>
+                </div>
+              </div>
+
+              <div class="claim-blk">
+                <div class="claim-line">
+                  <span class="mono" style="font-weight:600">CLM-260826-0005</span>
+                  <span>Mitra Kasih Cimahi</span>
+                  <span class="mono dim">XT2411194</span>
+                  <span class="mono dim">WO-2608-0042</span>
+                  <span class="spacer"></span>
+                  <button class="btn sm">View Evidence</button>
+                </div>
+                <div class="warr">Principal Warranty — assembled Nov 2024 + 22 months = valid until Sep 2026</div>
+                <div class="itemrow">
+                  <span class="box"></span>
+                  <span class="nm">Blood pump rotor</span><span class="mono tiny">2 pcs</span>
+                  <span class="pill p-ok">Approved</span>
+                  <button class="btn sm">Change decision</button>
+                </div>
+                <div class="itemrow">
+                  <span class="box"></span>
+                  <span class="nm">Wheel (New Version)</span><span class="mono tiny">4 pcs</span>
+                  <span class="pill p-no">Rejected</span>
+                  <span class="tiny">wear item, excluded</span>
+                </div>
+              </div>
+            </div>
+            <div class="selbar">
+              <span class="box on"></span>
+              <b>2 parts selected</b>
+              <span class="spacer"></span>
+              <button class="btn sm ok">Approve</button>
+              <button class="btn sm no">Reject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 08 FORWARD -->
+    <section class="shot" id="s8">
+      <div class="shot-label">Screen 08 — Administrator</div>
+      <h2>Forward Order &amp; Availability</h2>
+      <p class="shot-note">Layar yang lahir dari catatan terakhir Anda. Setelah principal menyetujui, Admin memilih part mana yang berangkat bersama, meneruskannya lewat email ke penerima dari daftar <code>Recipients</code> — orang yang tidak punya akses ke aplikasi — lalu memasukkan sendiri tanggal ketersediaan dan nomor dokumen ketika jawabannya datang. Part yang berbagi nomor dokumen sama otomatis tampil sebagai satu kelompok pengiriman, jadi satu bulk boleh punya beberapa jadwal kirim.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s8">Claims</a><a href="#s8" class="on">Orders</a><a href="#s8">Master Data</a><a href="#s8">Audit Log</a></nav>
+            <div class="app-user"><span>Yayan Arifin · Administrator</span><span class="avatar">YA</span></div>
+          </div>
+          <div class="app-body">
+            <div class="bulk">
+              <div class="bulk-head">
+                <span class="ref">CW300826</span>
+                <span class="tiny">9 approved parts · 4 forwarded · 5 pending</span>
+              </div>
+              <div class="claim-blk">
+                <div class="shipgrp">
+                  <span class="pill p-rev flat">📦 DOC-2609-011</span>
+                  <span>Available <b>15 Sep 2026</b></span>
+                  <span class="tiny">4 parts · forwarded 02 Sep 2026 to Budi Santoso</span>
+                  <span class="spacer"></span>
+                  <button class="btn sm">Mark as Shipped</button>
+                </div>
+                <div class="itemrow"><span class="box"></span><span class="nm">Blood pump rotor · <span class="dim">Mitra Kasih Cimahi</span></span><span class="mono tiny">2 pcs</span><span class="pill p-wait">Awaiting Part Availability</span></div>
+                <div class="itemrow"><span class="box"></span><span class="nm">Air Detector · <span class="dim">RSUD dr. Yulidin Away Tapaktuan</span></span><span class="mono tiny">1 pcs</span><span class="pill p-wait">Awaiting Part Availability</span></div>
+              </div>
+              <div class="claim-blk">
+                <div class="claim-line"><span class="tiny" style="font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)">Not yet forwarded</span></div>
+                <div class="itemrow"><span class="box on"></span><span class="nm">Electrical Mainboard · <span class="dim">RSUD Koja</span></span><span class="mono tiny">1 pcs</span><span class="pill p-ok">Approved</span></div>
+                <div class="itemrow"><span class="box on"></span><span class="nm">Post gear pump · <span class="dim">RSUD Koja</span></span><span class="mono tiny">1 pcs</span><span class="pill p-ok">Approved</span></div>
+                <div class="itemrow"><span class="box"></span><span class="nm">LED indicator · <span class="dim">RSUP Nasional DR Cipto Mangunkusumo</span></span><span class="mono tiny">1 pcs</span><span class="pill p-ok">Approved</span></div>
+              </div>
+            </div>
+            <div class="selbar">
+              <span class="box on"></span>
+              <b>2 parts selected</b>
+              <span class="spacer"></span>
+              <button class="btn sm">Set Availability &amp; Document Ref</button>
+              <button class="btn sm pri">Forward Order…</button>
+            </div>
+            <div class="modal-stage" style="background:transparent;padding:6px 0 0">
+              <div class="modal" style="max-width:430px">
+                <div class="modal-head"><h3>Forward Order</h3><span class="tiny">2 parts</span></div>
+                <div class="modal-body" style="gap:12px">
+                  <div class="inp"><span class="stack"><span class="lab">Recipient</span>Budi Santoso — Sansin Parts</span><span class="dim">▾</span></div>
+                  <div class="inp"><span class="stack"><span class="lab">CC</span><span class="dim">Add recipient…</span></span></div>
+                  <div class="tiny">A copy of this message is stored in the email log as an audit record.</div>
+                </div>
+                <div class="modal-foot"><span class="spacer"></span><button class="btn">Cancel</button><button class="btn pri">Send</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 09 TESTER -->
+    <section class="shot" id="s9">
+      <div class="shot-label">Screen 09 — Tester</div>
+      <h2>Role Simulation</h2>
+      <p class="shot-note">Peran <em>Tester</em> boleh berganti-ganti tampilan peran lain, tapi hanya bisa menyentuh klaim uji — dan klaim uji punya penanda sendiri sejak nomornya: <code>TEST-</code> dan <code>CWT</code>, folder Drive terpisah, serta email yang dibelokkan ke penguji. Spanduk kuning menempel di atas layar supaya tidak pernah ada momen bingung “kenapa saya bisa melihat ini”. Pada klaim asli, tombol aksinya mati beserta alasannya.</p>
+      <div class="frame frame-scroll">
+        <div class="frame-inner">
+          <div class="tester">
+            <span>🧪 TEST MODE</span>
+            <span class="sel">Viewing as Administrator ▾</span>
+            <span class="tiny" style="color:inherit">Signed in as yayang.heriyana@gmail.com · actions are limited to test claims · notifications are redirected to you</span>
+            <span class="spacer"></span>
+            <button class="btn sm">Purge Test Claims</button>
+          </div>
+          <div class="app-top">
+            <div class="brand"><i></i> Warranty Claim Portal</div>
+            <nav class="app-nav"><a href="#s9" class="on">Claims</a><a href="#s9">Master Data</a><a href="#s9">Audit Log</a></nav>
+            <div class="app-user"><span>Tester</span><span class="avatar">YH</span></div>
+          </div>
+          <div class="app-body">
+            <div class="toolbar">
+              <div class="seg"><span class="on">By claim</span><span>By spare part</span></div>
+              <div class="field">☑ Show test claims</div>
+              <span class="spacer"></span>
+            </div>
+            <table class="tbl">
+              <thead><tr><th>Claim</th><th>Reference</th><th>Customer</th><th>Serial number</th><th>Status</th><th style="width:190px">Action</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td class="mono" style="color:var(--warn);font-weight:600">TEST-260830-0002</td>
+                  <td class="mono" style="color:var(--warn)">CWT300826</td>
+                  <td>RSUD Koja</td><td class="mono">XT2410090</td>
+                  <td><span class="pill p-sub">Submitted</span></td>
+                  <td><button class="btn sm pri">Verify</button> <button class="btn sm">Return</button></td>
+                </tr>
+                <tr>
+                  <td class="mono">CLM-260826-0004</td><td class="mono">CW260826</td>
+                  <td>RSUD Koja</td><td class="mono">XT2410090</td>
+                  <td><span class="pill p-rev">In Review</span></td>
+                  <td class="twoline"><button class="btn sm off" style="align-self:flex-start">Verify</button><span class="tiny">Test mode — real claims are read-only</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="deck-foot">
+      <span>Draft 1 · 30 Aug 2026</span>
+      <span>Data contoh diambil dari claim_Warranty_sansin_1.xlsx</span>
+      <span>Belum termasuk: Edit Menu, Master Data</span>
+    </div>
+
+  </main>
+</div>
