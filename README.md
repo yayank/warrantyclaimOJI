@@ -11,6 +11,7 @@ Status: **aplikasi sudah tertulis**, belum di-deploy. Pemasangannya ada di [`doc
 | [`src/`](src) | Aplikasinya — 13 berkas `.gs` dan 3 berkas HTML |
 | [`dist/`](dist) | Bundel salin-tempel: satu `Code.gs` dan satu `main.html` |
 | [`docs/specification.md`](docs/specification.md) | **Spesifikasi lengkap — acuan yang berlaku** |
+| [`docs/architecture.md`](docs/architecture.md) | Bagaimana kode ini bekerja, ditelusuri dari satu permintaan nyata |
 | [`docs/deployment.md`](docs/deployment.md) | Langkah pemasangan, pengujian, dan penanganan masalah |
 | [`docs/ui-mockups.html`](docs/ui-mockups.html) | Mockup 12 layar (visual; unduh lalu buka di browser) |
 | [`tools/`](tools) | Bundler dan tiga penguji yang berjalan di Node tanpa perlu Google |
