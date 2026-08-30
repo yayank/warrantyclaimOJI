@@ -51,7 +51,11 @@ Layanan ini dipakai oleh fitur impor data unit dari Excel.
 
 ## 4. Jalankan `setUp()`
 
-Di editor Apps Script, pilih fungsi `setUp` dari dropdown di atas, lalu **Run**.
+Di panel **Files**, klik **`Code.gs`** lebih dulu. Tombol **▷ Run** dan pemilih fungsi hanya muncul saat berkas `.gs` yang sedang aktif — selama `main.html` atau `appsscript.json` yang terbuka, toolbar hanya menampilkan ikon simpan dan *Execution log*, dan tidak ada yang bisa dijalankan.
+
+Setelah `Code.gs` terbuka, pilih **`setUp`** dari dropdown fungsi di toolbar, lalu klik **▷ Run**.
+
+Daftar fungsinya panjang. Dua tetangganya sengaja jangan dijalankan sekarang: `installTriggers` menyusul setelah deploy (langkah 8), dan `migrateLegacyLog` hanya bila Anda punya sheet `Log` lama (langkah 9).
 
 Google meminta izin, dan layarnya terlihat mengkhawatirkan: *"Google hasn't verified this app"*. Klik **Advanced → Go to … (unsafe) → Allow**. Peringatan itu normal untuk skrip yang Anda tulis sendiri; yang diizinkan adalah skrip Anda mengakses spreadsheet dan Drive Anda sendiri.
 
@@ -158,6 +162,7 @@ node tools/bundle.js                        # membangun ulang dist/
 | Halaman berhenti di layar masuk | `GoogleClientId` belum diisi, atau origin `https://script.google.com` belum didaftarkan |
 | `Found a service identifier used more than once: Drive` | Layanan Drive tercatat dua kali di `appsscript.json` — hapus salah satu bloknya (langkah 3) |
 | `Drive is not defined` saat impor unit | `appsscript.json` belum tersimpan dengan blok `enabledAdvancedServices` |
+| Tidak ada tombol **Run** di toolbar | Berkas HTML atau manifest yang sedang aktif. Klik `Code.gs` di panel Files |
 | Halaman berjudul *"Setup is not finished"* | `setUp()` belum dijalankan. Halaman itu menyebutkan sheet apa yang kurang dan spreadsheet mana yang sedang dituju skrip |
 | `Sheet not found: …` saat menjalankan fungsi dari editor | `setUp()` belum dijalankan pada spreadsheet tersebut |
 | "not registered for this portal" | email belum ada di sheet `users`, atau `Active` bukan `TRUE` |
