@@ -164,6 +164,28 @@ function adoptHeaderless_(s, name) {
 }
 
 /** Reads a whole sheet as objects keyed by header name. */
+/**
+ * A cell value as the rest of the application expects to see it.
+ *
+ * A timestamp this application writes as text — "2026-08-30T11:53:50" — is a
+ * date-time as far as Sheets is concerned, and it is free to store it as one and
+ * hand back a Date. That breaks two things at once. Timestamps are compared as
+ * strings all over the server (the sort order of the claims list, the date
+ * filters, the change detection in saveClaim_), and a Date stringifies to
+ * "Sat Aug 30 2026 …", which sorts and compares as nonsense. Worse,
+ * google.script.run refuses a Date anywhere in a return value: the call fails
+ * and hands the page null, so a single coerced cell empties the whole screen.
+ *
+ * Reading is the one place every value passes through, so it is converted here
+ * rather than at each field that happens to hold a date today.
+ */
+function cellValue_(v) {
+  if (v instanceof Date) {
+    return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  }
+  return v;
+}
+
 function readAll_(name) {
   const s = sheet_(name);
   const last = s.getLastRow();
@@ -176,7 +198,7 @@ function readAll_(name) {
     const row = values[r];
     if (row.every(function (c) { return c === '' || c === null; })) continue;
     const obj = {};
-    for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = row[c];
+    for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
     obj.__row = r + 1;
     out.push(obj);
   }
@@ -254,7 +276,7 @@ function update_(name, keyField, keyValue, changes, expectedVersion) {
 
 function rowToObject_(head, row) {
   const obj = {};
-  for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = row[c];
+  for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
   return obj;
 }
 

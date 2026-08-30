@@ -358,6 +358,28 @@ function adoptHeaderless_(s, name) {
 }
 
 /** Reads a whole sheet as objects keyed by header name. */
+/**
+ * A cell value as the rest of the application expects to see it.
+ *
+ * A timestamp this application writes as text — "2026-08-30T11:53:50" — is a
+ * date-time as far as Sheets is concerned, and it is free to store it as one and
+ * hand back a Date. That breaks two things at once. Timestamps are compared as
+ * strings all over the server (the sort order of the claims list, the date
+ * filters, the change detection in saveClaim_), and a Date stringifies to
+ * "Sat Aug 30 2026 …", which sorts and compares as nonsense. Worse,
+ * google.script.run refuses a Date anywhere in a return value: the call fails
+ * and hands the page null, so a single coerced cell empties the whole screen.
+ *
+ * Reading is the one place every value passes through, so it is converted here
+ * rather than at each field that happens to hold a date today.
+ */
+function cellValue_(v) {
+  if (v instanceof Date) {
+    return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  }
+  return v;
+}
+
 function readAll_(name) {
   const s = sheet_(name);
   const last = s.getLastRow();
@@ -370,7 +392,7 @@ function readAll_(name) {
     const row = values[r];
     if (row.every(function (c) { return c === '' || c === null; })) continue;
     const obj = {};
-    for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = row[c];
+    for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
     obj.__row = r + 1;
     out.push(obj);
   }
@@ -448,7 +470,7 @@ function update_(name, keyField, keyValue, changes, expectedVersion) {
 
 function rowToObject_(head, row) {
   const obj = {};
-  for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = row[c];
+  for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
   return obj;
 }
 
@@ -2013,7 +2035,9 @@ function shapeItem_(i) {
 
 function formatDate_(v) {
   if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
-  return String(v);
+  // A date cell reaches here as the ISO timestamp cellValue_ made of it.
+  const iso = /^(\d{4}-\d{2}-\d{2})T/.exec(String(v));
+  return iso ? iso[1] : String(v);
 }
 
 /** Days spent in the current status — the column that stops claims being forgotten. */
@@ -4019,7 +4043,7 @@ function api(request) {
   try {
     const session = resolveSession_(req.token, req.simulatedRole);
     const data = route_(session, req.action, req.payload || {});
-    return { ok: true, data: data, session: publicSession_(session) };
+    return { ok: true, data: jsonSafe_(data), session: publicSession_(session) };
   } catch (err) {
     return {
       ok: false,
@@ -4029,6 +4053,29 @@ function api(request) {
       current: err && err.stale ? err.current : undefined
     };
   }
+}
+
+/**
+ * The last check before a value crosses to the browser.
+ *
+ * google.script.run accepts primitives, arrays and plain objects and nothing
+ * else: a Date anywhere inside a return value fails the whole call, and the
+ * page is handed null with no error to show. cellValue_ already keeps Dates out
+ * of everything read from a sheet; this covers whatever a future caller builds
+ * in code. NaN and Infinity are not JSON either, and leave as null.
+ */
+function jsonSafe_(value) {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? '' : Utilities.formatDate(value, TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  }
+  if (typeof value === 'number') return isFinite(value) ? value : null;
+  if (Array.isArray(value)) return value.map(jsonSafe_);
+  if (value && typeof value === 'object') {
+    const out = {};
+    Object.keys(value).forEach(function (k) { out[k] = jsonSafe_(value[k]); });
+    return out;
+  }
+  return value;
 }
 
 function publicSession_(session) {

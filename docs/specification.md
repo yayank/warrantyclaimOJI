@@ -566,15 +566,19 @@ Empat hal yang menopang ketiganya:
 
 ## 19. Pengujian
 
-Tiga penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
+Lima penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
 
 ```bash
 node tools/verify-warranty.js units.json    # mesin garansi, 2.610 unit asli
 node tools/verify-access.js                 # pemisahan antar principal
 node tools/verify-templates.js              # perender template email
+node tools/verify-sheets.js                 # baris data tidak dibaca sebagai judul kolom
+node tools/verify-payload.js                # tidak ada Date yang lolos ke browser
 ```
 
-Hasil terakhir: **22 · 22 · 18 pemeriksaan, seluruhnya lolos.**
+Hasil terakhir: **22 · 27 · 18 · 25 · 13 pemeriksaan, seluruhnya lolos.**
+
+Penguji payload menjaga satu kegagalan yang sangat mudah terulang. `google.script.run` menolak `Date` di mana pun dalam nilai kembalian — panggilannya gagal dan halaman menerima `null`, tanpa pesan kesalahan apa pun. Aplikasi ini menulis stempel waktunya sebagai teks `2026-08-30T11:53:50`, dan Sheets berhak menyimpannya sebagai date-time sungguhan lalu mengembalikannya sebagai `Date`. Karena itu `readAll_` mengubah setiap sel `Date` menjadi teks ISO saat dibaca (`cellValue_`), dan `api()` memeriksa sekali lagi sebelum nilainya menyeberang ke browser (`jsonSafe_`). Konversi saat baca sekaligus memperbaiki urutan dan filter tanggal, yang membandingkan stempel waktu sebagai teks.
 
 ## 20. Masih terbuka
 

@@ -170,7 +170,9 @@ function shapeItem_(i) {
 
 function formatDate_(v) {
   if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
-  return String(v);
+  // A date cell reaches here as the ISO timestamp cellValue_ made of it.
+  const iso = /^(\d{4}-\d{2}-\d{2})T/.exec(String(v));
+  return iso ? iso[1] : String(v);
 }
 
 /** Days spent in the current status — the column that stops claims being forgotten. */
