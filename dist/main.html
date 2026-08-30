@@ -365,8 +365,7 @@ input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);cursor:po
       </div>
       <div id="gsi"></div>
       <p class="boot-note">
-        Any Google account may sign in. Access is granted according to the role
-        registered for your address.
+        Access is granted according to the role registered for your address.
       </p>
       <div id="bootError" class="boot-error" hidden></div>
     </div>
@@ -560,17 +559,32 @@ function showSignIn(message) {
   if (message) { box.textContent = message; box.hidden = false; } else { box.hidden = true; }
 }
 
+/**
+ * With no client ID configured, Apps Script has already established who the
+ * visitor is: the page cannot load without a Google account. There is nothing to
+ * sign into, so the portal opens straight away.
+ */
+function startWithBuiltInIdentity() {
+  el('signOut').hidden = true;
+  api('session.bootstrap', {}).then(function (data) {
+    S.session = data.session;
+    S.reference = data.reference;
+    el('boot').hidden = true;
+    el('app').hidden = false;
+    applyDeepLink();
+    renderChrome();
+    navigate(S.page);
+  }).catch(function (err) {
+    showSignIn(err.message);
+  });
+}
+
 window.onGoogleLibraryLoad = function () {
   // Quotes get pasted along with the value often enough to be worth stripping
   // rather than reporting as invalid.
   const clientId = String(window.APP_CLIENT_ID || '').trim().replace(/^["']|["']$/g, '').trim();
 
-  if (!clientId) {
-    showSignIn('This portal is not configured yet: Settings!GoogleClientId is empty. Create an ' +
-      'OAuth client ID in Google Cloud Console, paste it into that cell, then run clearCache() ' +
-      'from the Apps Script editor.');
-    return;
-  }
+  if (!clientId) return;  // handled at load time by startWithBuiltInIdentity
 
   // Catching the shape here turns Google's "Error 401: invalid_client" — which
   // appears on Google's own page, with nothing pointing back at this portal —
@@ -606,6 +620,12 @@ function signIn(credential) {
     S.token = null;
     showSignIn(err.message);
   });
+}
+
+// The sign-in library may never load — it is not needed without a client ID —
+// so the built-in path is started here rather than from its callback.
+if (!String(window.APP_CLIENT_ID || '').trim()) {
+  startWithBuiltInIdentity();
 }
 
 el('signOut').addEventListener('click', function () {

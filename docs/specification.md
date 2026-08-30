@@ -202,6 +202,19 @@ Deployment: **Execute as: Me (pemilik)**, **Who has access: Anyone**. Kombinasi 
 
 ## 9. Mekanisme login
 
+Identitas datang dari salah satu dari dua tempat, dan tidak pernah dari browser.
+
+| Jalur | Syarat | Mengenali |
+|---|---|---|
+| **Bawaan Apps Script** | tidak ada | hanya akun di dalam domain Workspace pemilik |
+| **Google Sign-In** | `Settings!GoogleClientId` terisi | akun Google mana pun |
+
+Portal memakai jalur kedua begitu Client ID terisi, dan jalur pertama bila kosong. Dengan begitu pemasangan bisa langsung berjalan untuk seluruh tim di organisasi, lalu menambahkan akun luar belakangan tanpa mengubah kode.
+
+Identitas bawaan tetap dapat dipercaya — ia berasal dari Google, bukan dari browser. Batasnya satu: untuk akun di luar domain, Google mengembalikan nilai kosong, dan portal menolaknya dengan penjelasan alih-alih menebak.
+
+### Kenapa Google Sign-In tetap dibutuhkan
+
 Apps Script hanya menyediakan dua mode deploy, dan keduanya sendirian tidak memenuhi kebutuhan aplikasi ini.
 
 | Mode | `Session.getActiveUser()` | Akses spreadsheet |
@@ -209,7 +222,7 @@ Apps Script hanya menyediakan dua mode deploy, dan keduanya sendirian tidak meme
 | Execute as: Me | Kosong untuk pengguna di luar domain pemilik | Aman — tidak perlu dibagikan |
 | Execute as: User accessing | Berfungsi untuk semua | Bocor — pengguna wajib punya akses langsung |
 
-Principal memakai email di luar domain organisasi, sehingga mode pertama tidak mengenali mereka; mode kedua membuat pembatasan data per peran mustahil ditegakkan. Jalan keluarnya adalah menegakkan identitas sendiri.
+Principal memakai email di luar domain organisasi, sehingga mode pertama tidak mengenali mereka; mode kedua membuat pembatasan data per peran mustahil ditegakkan. Jalan keluarnya adalah menegakkan identitas sendiri:
 
 ```
 1. doGet menyajikan kerangka halaman berisi tombol Google Sign-In

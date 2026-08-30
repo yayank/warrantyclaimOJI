@@ -47,7 +47,12 @@ const sandbox = {
   readLive_: function (name) { return name === 'Claims' ? CLAIMS : []; },
   readAll_: function (name) { return name === 'users' ? USERS : []; },
   isTrue_: function (v) { return v === true || v === 'TRUE' || v === 'true'; },
-  setting_: function () { return 'test-client-id'; },
+  setting_: function () { return sandbox.__clientId; },
+  Session: {
+    getActiveUser: function () {
+      return { getEmail: function () { return sandbox.__builtInEmail || ''; } };
+    }
+  },
   CacheService: {
     getScriptCache: function () {
       return { get: function () { return null; }, put: function () {} };
@@ -74,6 +79,8 @@ const sandbox = {
     }
   }
 };
+sandbox.__clientId = 'test-client-id';
+sandbox.__builtInEmail = '';
 vm.createContext(sandbox);
 
 const source = ['Config.gs', 'Auth.gs']
@@ -165,6 +172,38 @@ check('a tester simulating a principal is still bound by principal scope',
   // match — which is the safe outcome rather than seeing everything.
   seen('tester@example.com', 'Principal') === '',
   seen('tester@example.com', 'Principal'));
+
+/* ------------------------------- identity without a configured sign-in client */
+
+// With no client ID set, Apps Script's own identity is used instead. It comes
+// from Google rather than the browser, so it is trusted the same way — but it is
+// blank for anyone outside the owner's domain, and that must fail closed.
+sandbox.__clientId = '';
+
+sandbox.__builtInEmail = 'admin@oneject.co.id';
+check('the built-in identity is accepted when no client ID is configured',
+  resolveSession_(null).email === 'admin@oneject.co.id');
+
+check('and still carries the role from the users sheet, not a default',
+  resolveSession_(null).role === 'Administrator');
+
+sandbox.__builtInEmail = '';
+check('a caller Google will not identify is refused, never waved through', (function () {
+  try { resolveSession_(null); return false; } catch (e) { return e.auth === true; }
+})());
+
+sandbox.__builtInEmail = 'nobody@example.com';
+check('an identified but unregistered address is still refused', (function () {
+  try { resolveSession_(null); return false; } catch (e) { return e.auth === true; }
+})());
+
+sandbox.__builtInEmail = 'roland@sansin.com';
+check('the built-in path applies the same principal scope',
+  visibleClaims_(resolveSession_(null)).map(function (c) { return c.ClaimID; }).sort().join(',')
+    === 'C1,C6');
+
+sandbox.__clientId = 'test-client-id';
+sandbox.__builtInEmail = '';
 
 /* ------------------------------------------------------------ edit windows */
 

@@ -8,16 +8,24 @@
  * server verifies here. A role supplied by the client is never trusted.
  */
 
-/** Verifies an ID token and resolves the caller's session. Throws if refused. */
+/**
+ * Resolves the caller's session. Throws if refused.
+ *
+ * Identity comes from one of two places, and never from the browser:
+ *
+ *   Built-in    Apps Script tells us who is signed in. Nothing to configure,
+ *               but it only reports users inside the owner's Workspace domain —
+ *               for anyone else it returns blank.
+ *   Sign-In     A Google Identity Services token the client sends and we verify
+ *               against Google. Works for any account, at the cost of setting up
+ *               an OAuth client once.
+ *
+ * The second is used when Settings!GoogleClientId is filled in, the first when
+ * it is not. That lets a deployment start working immediately and add outside
+ * accounts later without touching the code.
+ */
 function resolveSession_(idToken, simulatedRole) {
-  if (!idToken) throw authError_('Please sign in to continue.');
-
-  const claims = verifyIdToken_(idToken);
-  const email = String(claims.email || '').toLowerCase();
-  if (!email) throw authError_('Your Google account did not return an email address.');
-  if (claims.email_verified === 'false' || claims.email_verified === false) {
-    throw authError_('This Google account has an unverified email address.');
-  }
+  const email = idToken ? emailFromToken_(idToken) : emailFromAppsScript_();
 
   const user = readAll_(SHEET.USERS).filter(function (u) {
     return String(u.Email || '').toLowerCase() === email;
@@ -53,6 +61,45 @@ function resolveSession_(idToken, simulatedRole) {
     session.simulatedRole = wanted;
   }
   return session;
+}
+
+/** Whether sign-in tokens are in use, as opposed to Apps Script's own identity. */
+function usesGoogleSignIn_() {
+  return !!setting_(SETTING_KEY.CLIENT_ID, '');
+}
+
+/**
+ * The signed-in address as Apps Script reports it.
+ *
+ * Blank for anyone outside the owner's Workspace domain — Google withholds it —
+ * so this fails closed rather than letting an unidentified caller through.
+ */
+function emailFromAppsScript_() {
+  let email = '';
+  try { email = String(Session.getActiveUser().getEmail() || '').toLowerCase().trim(); } catch (e) {}
+
+  if (!email) {
+    if (usesGoogleSignIn_()) {
+      throw authError_('Please sign in to continue.');
+    }
+    throw authError_(
+      'Google did not identify you to this portal. That happens for accounts outside ' +
+      'this organisation. Ask the administrator to set Settings!GoogleClientId, which ' +
+      'enables sign-in for any Google account.'
+    );
+  }
+  return email;
+}
+
+/** The address carried by a verified Google Identity Services token. */
+function emailFromToken_(idToken) {
+  const claims = verifyIdToken_(idToken);
+  const email = String(claims.email || '').toLowerCase().trim();
+  if (!email) throw authError_('Your Google account did not return an email address.');
+  if (claims.email_verified === 'false' || claims.email_verified === false) {
+    throw authError_('This Google account has an unverified email address.');
+  }
+  return email;
 }
 
 /**

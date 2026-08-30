@@ -77,7 +77,7 @@ Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah 
 
 ## Keputusan rancangan
 
-**Autentikasi.** Google Sign-In dengan verifikasi ID token di sisi server; web app di-deploy sebagai *Execute as: Me*. Cara ini dipilih karena Principal memakai email di luar domain organisasi, sehingga `Session.getActiveUser()` tidak dapat diandalkan, sementara pembatasan data per peran harus tetap ditegakkan di server.
+**Autentikasi.** Dua jalur, dan identitas tidak pernah datang dari browser pada keduanya. Secara bawaan portal memakai identitas Apps Script sendiri — tanpa pengaturan apa pun, tetapi hanya mengenali akun di dalam domain organisasi. Begitu `Settings!GoogleClientId` diisi, portal berpindah ke Google Sign-In dengan verifikasi ID token di sisi server, yang mengenali akun mana pun termasuk Principal di luar organisasi. Peran selalu dibaca server dari sheet `users`. Web app di-deploy sebagai *Execute as: Me*, sehingga spreadsheet tidak perlu dibagikan kepada siapa pun.
 
 **Peran.** Requester · Production · Administrator · Principal · Tester.
 

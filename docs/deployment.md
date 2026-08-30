@@ -1,6 +1,6 @@
 # Pemasangan
 
-Urutan ini penting: aplikasi tidak bisa dipakai sebelum langkah 6 selesai, karena identitas pengguna ditegakkan lewat Google Sign-In dan itu memerlukan OAuth Client ID.
+Sepuluh langkah pertama sudah membuat portal berjalan penuh untuk seluruh tim di organisasi Anda. Langkah 11 hanya diperlukan bila Principal di luar organisasi ikut memakainya.
 
 ## 1. Siapkan spreadsheet
 
@@ -73,7 +73,61 @@ Tanpa baris ini tidak ada seorang pun yang bisa masuk — termasuk pemilik skrip
 
 Kolom `Principal` hanya wajib untuk akun berperan `Principal`; untuk peran lain biarkan kosong.
 
-## 6. Buat OAuth Client ID
+## 6. Deploy
+
+**Deploy → New deployment → Web app**
+
+| Pengaturan | Nilai |
+|---|---|
+| Execute as | **Me** |
+| Who has access | **Anyone with Google account** |
+
+Kedua pilihan itu disengaja. *Execute as: Me* membuat data tetap milik Anda — tidak ada seorang pun yang perlu diberi akses ke spreadsheet. *Anyone with Google account* memastikan Apps Script mengetahui siapa yang membuka; tanpa akun Google, tidak ada identitas untuk diperiksa.
+
+Peran tidak pernah diambil dari browser: server membacanya sendiri dari sheet `users`, dan alamat yang tidak terdaftar di sana selalu ditolak.
+
+Salin URL hasil deploy ke sheet `Settings`, baris `AppUrl`. URL ini dipakai untuk tautan pintas di dalam email.
+
+## 7. Pasang pemicu terjadwal
+
+Jalankan `installTriggers()` sekali dari editor. Hasilnya:
+
+| Pemicu | Waktu | Tugas |
+|---|---|---|
+| `sendDailyDigest` | 17:00 WIB | rekap klaim harian ke Principal |
+| `dailyMaintenance` | 01:00 WIB | hapus berkas ekspor >7 hari, salin cadangan spreadsheet |
+
+Jam rekap bisa diubah lewat `Settings!DigestHour`, lalu jalankan `installTriggers()` lagi.
+
+## 8. Migrasi data lama (opsional)
+
+Kalau spreadsheet Anda masih memuat sheet `Log` yang lama, jalankan `migrateLegacyLog()` sekali. Fungsi ini memecah 20 baris lama menjadi `Claims` dan `ClaimItems`, memberi ClaimID dan ItemID baru, mempertahankan No Ref lama, dan menandai baris uji (`qwerty` dan sejenisnya) sebagai `IsTest`.
+
+Nama sparepart yang tidak ada padanannya di master tetap disimpan apa adanya tanpa `PartID` — riwayat mencatat apa yang benar-benar diklaim, bukan apa yang ada di master hari ini. Fungsi ini menolak berjalan kalau `Claims` sudah berisi data.
+
+## 9. Siapkan pemetaan principal
+
+Aplikasi melayani lebih dari satu principal, dan pemetaannya menentukan siapa boleh melihat apa.
+
+1. **Sheet `Principals`** — daftar nama principal yang diterima sistem. `setUp()` sudah membuat `Sansin`; tambahkan yang lain lewat layar **Master Data → Principals**.
+2. **Sheet `Population`, kolom `Principal`** — isi nama principal untuk setiap unit. Nilainya harus persis sama dengan nama di sheet `Principals`.
+3. **Sheet `users`, kolom `Principal`** — untuk tiap akun berperan `Principal`, isi principal yang menjadi haknya.
+
+Layar **Master Data → Units** menampilkan peringatan bila ada unit tanpa principal, atau nama principal yang tidak dikenal master. Selama sebuah unit belum terpetakan, klaim atasnya **tidak bisa diteruskan** dan tidak terlihat oleh principal mana pun — ini disengaja, karena menebak berarti berisiko mengirim data satu principal ke principal lain.
+
+## 10. Isi data pendukung
+
+- **`Recipients`** — penerima pesanan di sisi principal, yang tidak punya akses aplikasi. Tanpa ini tombol *Forward Order* tidak bisa dipakai. Kolom `Principal` opsional, untuk memudahkan memilih penerima yang tepat.
+- **`users`** — tambahkan Requester, Production, dan Principal.
+- **Tester** — beri satu email peran `Tester` kalau ingin menguji alur tanpa menyentuh data asli. Hapus barisnya untuk mematikan peran itu; tidak perlu deploy ulang.
+
+## 11. Login untuk akun di luar organisasi — opsional
+
+**Lewati langkah ini kalau semua pengguna memakai akun organisasi Anda.** Portal sudah berjalan tanpa pengaturan apa pun: Apps Script sendiri yang memberi tahu siapa yang sedang membuka, dan perannya diambil dari sheet `users`.
+
+Yang tidak bisa dilakukan cara bawaan itu: mengenali akun **di luar domain Workspace Anda**. Google menyembunyikan alamatnya, dan portal menolak dengan pesan yang menjelaskan hal ini. Jadi kerjakan langkah ini hanya ketika Principal — yang memakai `gmail.com` atau domain perusahaannya sendiri — sudah benar-benar perlu masuk.
+
+Setelah `Settings!GoogleClientId` terisi, portal berpindah sendiri ke cara login ini. Tidak ada kode yang berubah, dan tidak perlu deploy ulang — cukup jalankan `clearCache()`.
 
 Seluruh langkah ini **gratis**. Membuat OAuth Client ID tidak memerlukan akun penagihan, dan aplikasi ini tidak memakai satu pun layanan Google Cloud yang berbayar — Cloud Console hanya dipakai sebagai tempat menerbitkan Client ID.
 
@@ -116,52 +170,6 @@ Ini yang membuat login otomatis berfungsi untuk email domain apa pun, termasuk P
 
 > **Cek sebelum lanjut.** Buka spreadsheet Anda — harus bertambah 14 sheet baru. Kalau tidak muncul di sana, `SPREADSHEET_ID` menunjuk berkas lain dan sheet-nya terbentuk di tempat yang keliru.
 
-## 7. Deploy
-
-**Deploy → New deployment → Web app**
-
-| Pengaturan | Nilai |
-|---|---|
-| Execute as | **Me** |
-| Who has access | **Anyone** |
-
-Kedua pilihan itu disengaja. *Execute as: Me* membuat data tetap milik Anda; *Anyone* diperlukan karena identitas ditegakkan oleh token Google Sign-In, bukan oleh Apps Script — setiap panggilan tetap diverifikasi di server dan email yang tidak terdaftar di sheet `users` selalu ditolak.
-
-Salin URL hasil deploy ke sheet `Settings`, baris `AppUrl`. URL ini dipakai untuk tautan pintas di dalam email.
-
-## 8. Pasang pemicu terjadwal
-
-Jalankan `installTriggers()` sekali dari editor. Hasilnya:
-
-| Pemicu | Waktu | Tugas |
-|---|---|---|
-| `sendDailyDigest` | 17:00 WIB | rekap klaim harian ke Principal |
-| `dailyMaintenance` | 01:00 WIB | hapus berkas ekspor >7 hari, salin cadangan spreadsheet |
-
-Jam rekap bisa diubah lewat `Settings!DigestHour`, lalu jalankan `installTriggers()` lagi.
-
-## 9. Migrasi data lama (opsional)
-
-Kalau spreadsheet Anda masih memuat sheet `Log` yang lama, jalankan `migrateLegacyLog()` sekali. Fungsi ini memecah 20 baris lama menjadi `Claims` dan `ClaimItems`, memberi ClaimID dan ItemID baru, mempertahankan No Ref lama, dan menandai baris uji (`qwerty` dan sejenisnya) sebagai `IsTest`.
-
-Nama sparepart yang tidak ada padanannya di master tetap disimpan apa adanya tanpa `PartID` — riwayat mencatat apa yang benar-benar diklaim, bukan apa yang ada di master hari ini. Fungsi ini menolak berjalan kalau `Claims` sudah berisi data.
-
-## 10. Siapkan pemetaan principal
-
-Aplikasi melayani lebih dari satu principal, dan pemetaannya menentukan siapa boleh melihat apa.
-
-1. **Sheet `Principals`** — daftar nama principal yang diterima sistem. `setUp()` sudah membuat `Sansin`; tambahkan yang lain lewat layar **Master Data → Principals**.
-2. **Sheet `Population`, kolom `Principal`** — isi nama principal untuk setiap unit. Nilainya harus persis sama dengan nama di sheet `Principals`.
-3. **Sheet `users`, kolom `Principal`** — untuk tiap akun berperan `Principal`, isi principal yang menjadi haknya.
-
-Layar **Master Data → Units** menampilkan peringatan bila ada unit tanpa principal, atau nama principal yang tidak dikenal master. Selama sebuah unit belum terpetakan, klaim atasnya **tidak bisa diteruskan** dan tidak terlihat oleh principal mana pun — ini disengaja, karena menebak berarti berisiko mengirim data satu principal ke principal lain.
-
-## 11. Isi data pendukung
-
-- **`Recipients`** — penerima pesanan di sisi principal, yang tidak punya akses aplikasi. Tanpa ini tombol *Forward Order* tidak bisa dipakai. Kolom `Principal` opsional, untuk memudahkan memilih penerima yang tepat.
-- **`users`** — tambahkan Requester, Production, dan Principal.
-- **Tester** — beri satu email peran `Tester` kalau ingin menguji alur tanpa menyentuh data asli. Hapus barisnya untuk mematikan peran itu; tidak perlu deploy ulang.
-
 ## Menguji tanpa merusak data
 
 Masuk sebagai `Tester`, lalu pakai pemilih peran di spanduk kuning. Yang terjadi:
@@ -188,9 +196,9 @@ node tools/bundle.js                        # membangun ulang dist/
 
 | Gejala | Penyebab |
 |---|---|
-| Pesan *"Settings!GoogleClientId is empty"* | Selnya memang belum diisi — kerjakan langkah 6 |
-| Principal ditolak Google padahal Administrator bisa masuk | Audience bertipe **Internal**. Ubah ke **External** |
-| Diminta memasukkan GCP Project number | Tidak perlu. Jangan tekan *Change project* — Client ID boleh berasal dari proyek mana pun |
+| *"Google did not identify you to this portal"* | Akun di luar domain organisasi. Kerjakan langkah 11, atau pakai akun organisasi |
+| Principal ditolak Google padahal Administrator bisa masuk | Audience bertipe **Internal**. Ubah ke **External** (langkah 11) |
+| Diminta memasukkan GCP Project number | Tidak perlu, dan langkah 11 sendiri opsional. Jangan tekan *Change project* |
 | Akun tertentu ditolak Google sebelum sampai ke portal | Publishing status masih **Testing** dan email itu belum ada di daftar *Test users* |
 | `Error 401: invalid_client` di halaman Google | `Settings!GoogleClientId` bukan Client ID yang sah. Jalankan `clearCache()` — ia menampilkan nilai yang sedang terbaca |
 | Sudah diperbaiki tapi error yang sama muncul lagi | Cache Settings bertahan lima menit. Jalankan `clearCache()` |
