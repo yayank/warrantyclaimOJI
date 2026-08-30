@@ -9,12 +9,13 @@ Status: **aplikasi sudah tertulis**, belum di-deploy. Pemasangannya ada di [`doc
 | Berkas | Isi |
 |---|---|
 | [`src/`](src) | Aplikasinya — 13 berkas `.gs` dan 3 berkas HTML |
+| [`dist/`](dist) | Bundel salin-tempel: satu `Code.gs` dan satu `main.html` |
+| [`docs/specification.md`](docs/specification.md) | **Spesifikasi lengkap — acuan yang berlaku** |
 | [`docs/deployment.md`](docs/deployment.md) | Langkah pemasangan, pengujian, dan penanganan masalah |
-| [`docs/specification.html`](docs/specification.html) | Spesifikasi lengkap — PRD di depan, spesifikasi teknis di belakang |
-| [`docs/ui-mockups.html`](docs/ui-mockups.html) | Mockup 12 layar |
-| [`tools/`](tools) | Dua penguji yang berjalan di Node tanpa perlu Google |
+| [`docs/ui-mockups.html`](docs/ui-mockups.html) | Mockup 12 layar (visual; unduh lalu buka di browser) |
+| [`tools/`](tools) | Bundler dan tiga penguji yang berjalan di Node tanpa perlu Google |
 
-GitHub tidak merender HTML langsung dari repo. Untuk melihat kedua dokumen: unduh berkasnya lalu buka di browser, atau aktifkan GitHub Pages pada branch ini.
+Spesifikasi sekarang hidup sebagai markdown di dalam repo supaya hanya ada satu sumber kebenaran yang ikut ter-versi bersama kodenya. Versi HTML-nya sudah dihapus; halaman artifact yang pernah diterbitkan tetap ada sebagai potret Rev 1.
 
 ## Struktur kode
 
@@ -29,16 +30,32 @@ GitHub tidak merender HTML langsung dari repo. Untuk melihat kedua dokumen: undu
 | `MasterData.gs` | CRUD master, impor data unit |
 | `Export.gs` | Ekspor Excel mengikuti filter dan lingkup peran |
 | `Audit.gs` · `Triggers.gs` · `Repo.gs` · `Config.gs` · `Setup.gs` | Jejak audit, pemicu terjadwal, akses sheet, konstanta, pemasangan awal |
+| `Warranty.gs` | juga memetakan setiap serial number ke principal pemiliknya |
 | `index.html` · `Styles.html` · `Script.html` | Kerangka halaman, sistem desain, seluruh antarmuka |
+
+## Menjalankan tanpa memasang apa pun
+
+Kalau clasp tidak bisa dipasang di komputer Anda, salin dua berkas ini ke editor Apps Script:
+
+| Berkas | Disalin sebagai |
+|---|---|
+| `dist/Code.gs` | satu berkas Script bernama **Code.gs** |
+| `dist/main.html` | satu berkas HTML bernama **main** |
+| `dist/appsscript.json` | manifest (Project Settings → Show appsscript.json) |
+
+Yang disunting tetap `src/`. Setelah berubah, jalankan `node tools/bundle.js` untuk membangun ulang `dist/`.
 
 ## Pengujian
 
 ```bash
 node tools/verify-warranty.js units.json    # 22 pemeriksaan
+node tools/verify-access.js                 # 22 pemeriksaan
 node tools/verify-templates.js              # 18 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.
+
+Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah saling melihat klaim, klaim yang belum terpetakan tidak sampai ke siapa pun, dan klaim uji tersembunyi dari semua peran kecuali Tester.
 
 ## Mockup UI
 
@@ -63,6 +80,10 @@ Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit
 
 **Peran.** Requester · Production · Administrator · Principal · Tester.
 
+**Banyak principal.** Sheet `Population` dan `users` punya kolom `Principal`. Klaim mewarisi principal dari unitnya, dan setiap akun Principal hanya melihat klaim principal-nya sendiri — ditegakkan di server, bukan di layar. Klaim yang belum terpetakan tidak bisa diteruskan sampai Administrator menetapkannya.
+
+**Sparepart talangan.** Part dapat ditandai sudah diserahkan dari stok lokal supaya mesin kembali jalan, tanpa menghentikan proses klaim. Alurnya tidak berubah; yang berubah adalah arti pengirimannya — part dari principal mengisi kembali stok, bukan menuju rumah sakit — dan terlihat jelas kalau klaimnya kemudian ditolak.
+
 **Masa garansi principal** dihitung dari serial number, bukan tanggal penjualan:
 
 | Format SN | Contoh | Bulan perakitan | Garansi |
@@ -85,7 +106,7 @@ Draft → Submitted → (verifikasi Admin)
 
 **Penomoran.** `ClaimID` unik per klaim (`CLM-260826-0004`); `No Ref` adalah nomor bulk harian yang dibagi bersama seluruh klaim di tanggal yang sama (`CW300826`), agar principal melihatnya sebagai satu pengajuan kolektif. Klaim uji memakai seri terpisah (`TEST-` dan `CWT`).
 
-**Struktur sheet.** `Claims` · `ClaimItems` · `Attachments` · `AuditLog` · `EmailLog` · `EmailTemplates` · `users` · `Customer` · `sparepart` · `Recipients` · `warranty` · `Population`.
+**Struktur sheet.** `Claims` · `ClaimItems` · `Attachments` · `AuditLog` · `EmailLog` · `EmailTemplates` · `users` · `Principals` · `Customer` · `sparepart` · `Recipients` · `warranty` · `Population`.
 
 Master data dirujuk lewat ID, bukan teks. `Claims` menyimpan `CustomerID` beserta salinan nama saat pengajuan, `ClaimItems` menyimpan `PartID` beserta salinan namanya. Layar menampilkan nama terkini; ekspor audit menampilkan keduanya bila berbeda.
 
@@ -114,7 +135,7 @@ Klaim/CW300826/CLM-260826-0004/01-PART/
 
 **Ketentuan lain.** Antarmuka aplikasi berbahasa Inggris formal. Data tidak pernah dihapus permanen, hanya ditandai. Setiap perubahan tercatat di `AuditLog` dengan identitas asli pelakunya. Zona waktu `Asia/Jakarta`.
 
-Rincian selengkapnya ada di [`docs/specification.html`](docs/specification.html): struktur seluruh sheet berikut nama kolomnya, tabel transisi status, matriks hak akses per field, isi ketujuh template email, mekanisme verifikasi login, batasan Apps Script, dan rencana migrasi data.
+Rincian selengkapnya ada di [`docs/specification.md`](docs/specification.md): struktur seluruh sheet berikut nama kolomnya, tabel transisi status, matriks hak akses per field, isi ketujuh template email, mekanisme verifikasi login, batasan Apps Script, dan rencana migrasi data.
 
 ## Berikutnya
 

@@ -15,13 +15,13 @@ function exportClaims_(session, filter) {
   const flat = (filter && filter.view === 'item');
 
   const header = flat
-    ? ['Claim ID', 'Reference', 'Date', 'Customer', 'Serial number', 'Product',
+    ? ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
       'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Spare part', 'Qty',
-      'Item status', 'Reason', 'Availability date', 'Document ref', 'Shipped at',
-      'Part return', 'Requested by', 'Status', 'Attachments']
-    : ['Claim ID', 'Reference', 'Date', 'Customer', 'Serial number', 'Product',
+      'Item status', 'Advance issue', 'Reason', 'Availability date', 'Document ref',
+      'Shipped at', 'Part return', 'Requested by', 'Status', 'Attachments']
+    : ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
       'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Parts', 'Approved',
-      'Rejected', 'Pending', 'Requested by', 'Status', 'Attachments'];
+      'Rejected', 'Pending', 'Advance issued', 'Requested by', 'Status', 'Attachments'];
 
   const folderLink = claimFolderLink_();
   const rows = [header];
@@ -31,18 +31,21 @@ function exportClaims_(session, filter) {
     if (flat) {
       c.items.forEach(function (i) {
         rows.push([
-          c.claimId, c.refNo, c.submittedAt || c.createdAt, c.customerName, c.serialNumber,
-          c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo, c.problem,
-          i.partName, i.qty, i.itemStatus, i.decisionReason, i.availabilityDate,
-          i.documentRefNo, i.shippedAt, i.partReturnNote, c.requesterName, c.status, link
+          c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
+          c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
+          c.problem, i.partName, i.qty, i.itemStatus,
+          i.advanceIssued ? 'Yes — ' + (i.advanceNote || 'issued from local stock') : '',
+          i.decisionReason, i.availabilityDate, i.documentRefNo, i.shippedAt,
+          i.partReturnNote, c.requesterName, c.status, link
         ]);
       });
     } else {
       rows.push([
-        c.claimId, c.refNo, c.submittedAt || c.createdAt, c.customerName, c.serialNumber,
-        c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo, c.problem,
+        c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
+        c.problem,
         c.items.map(function (i) { return i.partName + ' ×' + i.qty; }).join('; '),
-        c.summary.approved, c.summary.rejected, c.summary.pending,
+        c.summary.approved, c.summary.rejected, c.summary.pending, c.summary.advance,
         c.requesterName, c.status, link
       ]);
     }

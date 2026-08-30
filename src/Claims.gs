@@ -34,6 +34,7 @@ function listClaims_(session, filter) {
     rows = rows.filter(function (r) { return f.warrantyTypes.indexOf(r.warrantyType) !== -1; });
   }
   if (f.customerId) rows = rows.filter(function (r) { return r.customerId === f.customerId; });
+  if (f.principal) rows = rows.filter(function (r) { return r.principal === f.principal; });
   if (f.partId) {
     rows = rows.filter(function (r) {
       return r.items.some(function (i) { return i.partId === f.partId; });
@@ -102,6 +103,7 @@ function shapeClaim_(c, items) {
   const rejected = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.REJECTED; }).length;
   const pending = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.PENDING; }).length;
   const shipped = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.SHIPPED; }).length;
+  const advance = shaped.filter(function (i) { return i.advanceIssued; }).length;
 
   const stamp = c.SubmittedAt || c.CreatedAt || '';
   return {
@@ -113,6 +115,7 @@ function shapeClaim_(c, items) {
     serialNumber: c.SerialNumber,
     productName: c.ProductName,
     assemblyMonth: c.AssemblyMonth,
+    principal: String(c.Principal || ''),
     warrantyType: c.WarrantyType,
     warrantyExpiry: c.WarrantyExpiry,
     warrantyBasis: c.WarrantyBasis,
@@ -132,7 +135,10 @@ function shapeClaim_(c, items) {
     updatedAt: c.UpdatedAt,
     sortDate: String(stamp),
     ageDays: ageDays_(c),
-    summary: { approved: approved, rejected: rejected, pending: pending, shipped: shipped },
+    summary: {
+      approved: approved, rejected: rejected, pending: pending,
+      shipped: shipped, advance: advance
+    },
     items: shaped
   };
 }
@@ -145,6 +151,10 @@ function shapeItem_(i) {
     partName: i.PartName,
     qty: Number(i.Qty || 0),
     itemStatus: i.ItemStatus,
+    advanceIssued: isTrue_(i.AdvanceIssued),
+    advanceIssuedAt: i.AdvanceIssuedAt,
+    advanceIssuedBy: i.AdvanceIssuedBy,
+    advanceNote: i.AdvanceNote,
     decisionBy: i.DecisionBy,
     decisionAt: i.DecisionAt,
     decisionReason: i.DecisionReason,
@@ -228,10 +238,24 @@ function saveClaim_(session, payload) {
       SerialNumber: serial,
       ProductName: productName_(serial),
       AssemblyMonth: warranty.assemblyMonth,
+      Principal: principalFor_(serial),
       ProblemDescription: String(payload.problem || '').trim(),
       UpdatedAt: nowIso_(),
       UpdatedBy: session.email
     };
+
+    // An administrator can attribute a claim the population sheet cannot place.
+    if (session.role === ROLE.ADMIN && payload.principal !== undefined) {
+      const wanted = String(payload.principal || '').trim();
+      if (wanted && principalNames_().indexOf(wanted) === -1) {
+        throw new Error('"' + wanted + '" is not an active principal.');
+      }
+      fields.Principal = wanted;
+    } else if (claim && claim.Principal && !fields.Principal) {
+      // Keep an attribution already made by hand when the sheet still cannot
+      // supply one.
+      fields.Principal = claim.Principal;
+    }
 
     // A manual override stands until the serial number itself changes.
     if (!claim || !isTrue_(claim.WarrantyOverridden) ||
@@ -322,6 +346,9 @@ function syncItems_(session, claim, wanted) {
       ? existing.filter(function (i) { return i.ItemID === w.itemId; })[0]
       : null;
 
+    const advance = !!w.advanceIssued;
+    const advanceNote = String(w.advanceNote || '').trim();
+
     if (current) {
       keep[current.ItemID] = true;
       const changes = [];
@@ -332,11 +359,21 @@ function syncItems_(session, claim, wanted) {
       if (Number(current.Qty) !== qty) {
         changes.push({ field: 'Qty', oldValue: current.Qty, newValue: qty, itemId: current.ItemID });
       }
-      if (changes.length) {
-        update_(SHEET.ITEMS, 'ItemID', current.ItemID, {
-          PartID: part.PartID, PartName: part.Name, Qty: qty,
-          UpdatedAt: nowIso_(), UpdatedBy: session.email
-        });
+      const patch = {
+        PartID: part.PartID, PartName: part.Name, Qty: qty,
+        UpdatedAt: nowIso_(), UpdatedBy: session.email
+      };
+      if (advance !== isTrue_(current.AdvanceIssued)) {
+        changes.push({ field: 'AdvanceIssued', oldValue: isTrue_(current.AdvanceIssued),
+          newValue: advance, itemId: current.ItemID });
+        patch.AdvanceIssued = advance;
+        patch.AdvanceIssuedAt = advance ? nowIso_() : '';
+        patch.AdvanceIssuedBy = advance ? session.email : '';
+      }
+      if (advanceNote !== String(current.AdvanceNote || '')) patch.AdvanceNote = advanceNote;
+
+      if (changes.length || patch.AdvanceNote !== undefined) {
+        update_(SHEET.ITEMS, 'ItemID', current.ItemID, patch);
         auditChanges_(session, 'SaveDraft', claim.ClaimID, changes, '', isTrue_(claim.IsTest));
       }
     } else {
@@ -348,6 +385,10 @@ function syncItems_(session, claim, wanted) {
         PartName: part.Name,
         Qty: qty,
         ItemStatus: ITEM_STATUS.PENDING,
+        AdvanceIssued: advance,
+        AdvanceIssuedAt: advance ? nowIso_() : '',
+        AdvanceIssuedBy: advance ? session.email : '',
+        AdvanceNote: advanceNote,
         DecisionBy: '', DecisionAt: '', DecisionReason: '',
         AvailabilityDate: '', DocumentRefNo: '',
         ForwardedAt: '', ForwardedTo: '', ShippedAt: '', ShippedBy: '',
@@ -570,6 +611,10 @@ function forwardToPrincipal_(session, payload) {
     if (claim.Status !== STATUS.SUBMITTED) throw forbid_('Only a submitted claim can be forwarded.');
     if (claim.WarrantyType !== WARRANTY_TYPE.PRINCIPAL) {
       throw new Error('This unit is not under principal warranty. Process it as an internal warranty claim.');
+    }
+    if (!String(claim.Principal || '').trim()) {
+      throw new Error('This unit is not attributed to a principal, so there is nobody to forward it ' +
+        'to. Set the principal on the claim first.');
     }
     if (!String(payload.workOrderNo || claim.WorkOrderNo || '').trim()) {
       throw new Error('Enter the work order number before forwarding to the principal.');
@@ -890,6 +935,61 @@ function markShipped_(session, payload) {
   });
 }
 
+/**
+ * Records that a part was handed over from local stock before the principal
+ * decided, because the machine could not wait.
+ *
+ * The claim itself carries on unchanged — the flag says the customer already has
+ * the part, so what eventually arrives from the principal replenishes stock
+ * rather than travelling to the hospital. It also marks where the cost lands if
+ * the claim is later rejected.
+ */
+function setAdvanceIssue_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN, ROLE.REQUESTER, ROLE.PRODUCTION]);
+
+  return withLock_(function () {
+    const items = readLive_(SHEET.ITEMS).filter(function (i) {
+      return payload.itemIds.indexOf(i.ItemID) !== -1;
+    });
+    if (!items.length) throw new Error('No spare parts were selected.');
+
+    const issued = payload.issued !== false;
+    const note = String(payload.note || '').trim();
+
+    items.forEach(function (item) {
+      const claim = findBy_(SHEET.CLAIMS, 'ClaimID', item.ClaimID);
+      guardTestScope_(session, claim);
+
+      if (session.role !== ROLE.ADMIN) {
+        // The requester may only record it on a claim of their own that is still
+        // in their hands; afterwards the administrator does it.
+        if (String(claim.RequesterEmail).toLowerCase() !== session.email ||
+          [STATUS.DRAFT, STATUS.RETURNED].indexOf(claim.Status) === -1) {
+          throw forbid_('Ask the administrator to record this on a submitted claim.');
+        }
+      } else if (claim.Status === STATUS.CLOSED) {
+        throw forbid_('This claim is already closed.');
+      }
+
+      update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
+        AdvanceIssued: issued,
+        AdvanceIssuedAt: issued ? nowIso_() : '',
+        AdvanceIssuedBy: issued ? session.email : '',
+        AdvanceNote: issued ? note : '',
+        UpdatedAt: nowIso_(), UpdatedBy: session.email
+      });
+
+      audit_(session, 'AdvanceIssue', {
+        claimId: item.ClaimID, itemId: item.ItemID, field: 'AdvanceIssued',
+        oldValue: isTrue_(item.AdvanceIssued), newValue: issued, reason: note,
+        isTest: isTrue_(claim.IsTest)
+      });
+    });
+
+    return { ok: true, count: items.length };
+  });
+}
+
 function recordPartReturn_(session, payload) {
   requireRole_(session, [ROLE.ADMIN]);
 
@@ -974,6 +1074,7 @@ function claimMailData_(claim, items) {
   return {
     ClaimID: claim.ClaimID,
     RefNo: claim.RefNo,
+    Principal: claim.Principal || '—',
     Customer: claim.CustomerName,
     SerialNumber: claim.SerialNumber,
     WarrantyBasis: claim.WarrantyBasis,
@@ -984,7 +1085,10 @@ function claimMailData_(claim, items) {
     Items: items.map(function (i) {
       return {
         PartName: i.PartName, Qty: i.Qty, ItemStatus: i.ItemStatus,
-        DecisionReason: i.DecisionReason || ''
+        DecisionReason: i.DecisionReason || '',
+        // Tells the principal the machine is already running on a part supplied
+        // locally, so what they send is a replacement for stock.
+        AdvanceIssue: isTrue_(i.AdvanceIssued) ? 'already supplied from local stock' : ''
       };
     })
   };

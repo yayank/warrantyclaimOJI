@@ -18,6 +18,7 @@ const SHEET = {
   CUSTOMER: 'Customer',
   PART: 'sparepart',
   RECIPIENTS: 'Recipients',
+  PRINCIPALS: 'Principals',
   SETTINGS: 'Settings',
   WARRANTY: 'warranty',
   POPULATION: 'Population'
@@ -28,7 +29,7 @@ const SCHEMA = {};
 SCHEMA[SHEET.CLAIMS] = [
   'ClaimID', 'RefNo', 'IsTest',
   'CustomerID', 'CustomerName',
-  'SerialNumber', 'ProductName', 'AssemblyMonth',
+  'SerialNumber', 'ProductName', 'AssemblyMonth', 'Principal',
   'WarrantyType', 'WarrantyExpiry', 'WarrantyBasis',
   'WarrantyOverridden', 'WarrantyOverrideReason',
   'ProblemDescription', 'WorkOrderNo', 'Status',
@@ -41,6 +42,7 @@ SCHEMA[SHEET.CLAIMS] = [
 
 SCHEMA[SHEET.ITEMS] = [
   'ItemID', 'ClaimID', 'PartID', 'PartName', 'Qty', 'ItemStatus',
+  'AdvanceIssued', 'AdvanceIssuedAt', 'AdvanceIssuedBy', 'AdvanceNote',
   'DecisionBy', 'DecisionAt', 'DecisionReason',
   'AvailabilityDate', 'DocumentRefNo',
   'ForwardedAt', 'ForwardedTo',
@@ -70,15 +72,16 @@ SCHEMA[SHEET.TEMPLATES] = [
   'TemplateCode', 'Name', 'Subject', 'Body', 'Version', 'Active', 'UpdatedBy', 'UpdatedAt'
 ];
 
-SCHEMA[SHEET.USERS] = ['Email', 'Name', 'Role', 'Active', 'CreatedAt'];
+SCHEMA[SHEET.USERS] = ['Email', 'Name', 'Role', 'Principal', 'Active', 'CreatedAt'];
 SCHEMA[SHEET.CUSTOMER] = ['CustomerID', 'Name', 'Active'];
 SCHEMA[SHEET.PART] = ['PartID', 'Name', 'Active'];
-SCHEMA[SHEET.RECIPIENTS] = ['RecipientID', 'Name', 'Email', 'Company', 'Active', 'Notes'];
+SCHEMA[SHEET.RECIPIENTS] = ['RecipientID', 'Name', 'Email', 'Company', 'Principal', 'Active', 'Notes'];
+SCHEMA[SHEET.PRINCIPALS] = ['PrincipalID', 'Name', 'Active', 'Notes'];
 SCHEMA[SHEET.SETTINGS] = ['Key', 'Value'];
 SCHEMA[SHEET.WARRANTY] = ['SellingInDate', 'Material', 'Batch', 'Status', 'exp', 'Expired'];
 SCHEMA[SHEET.POPULATION] = [
   'Delivery', 'SellingInDate', 'Material', 'ItemDescription', 'Batch',
-  'DeliveryQuantity', 'ShipToParty'
+  'DeliveryQuantity', 'ShipToParty', 'Principal'
 ];
 
 /** Roles. */
@@ -121,6 +124,13 @@ const ATTACHMENT_KIND = { PART: 'PART', FAULT: 'FAULT', REPORT: 'REPORT' };
 
 /** Sansin machines carry a 22 month principal warranty from the assembly month. */
 const XT_WARRANTY_MONTHS = 22;
+
+/**
+ * The principal a unit belongs to when the population sheet does not say.
+ * The portal serves several principals; a claim that cannot be attributed to
+ * one is routed to nobody until an administrator resolves it.
+ */
+const UNASSIGNED_PRINCIPAL = '';
 
 /** The customer every Production claim is pinned to. */
 const PRODUCTION_CUSTOMER = 'Internal — Production';

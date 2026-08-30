@@ -162,23 +162,44 @@ function warrantyIndex_() {
   return index;
 }
 
-/** Product description for a serial number, taken from the population sheet. */
-function productName_(serial) {
+/**
+ * Product description and owning principal for a serial number, both taken from
+ * the population sheet. The portal serves several principals, and which one a
+ * unit belongs to decides who may see the claim and who receives it.
+ */
+function populationIndex_() {
   const cache = CacheService.getScriptCache();
-  let index = cache.get('productIndex');
-  if (index) {
-    index = JSON.parse(index);
-  } else {
-    index = {};
-    readAll_(SHEET.POPULATION).forEach(function (r) {
-      const sn = String(r.Batch || '').trim().toUpperCase();
-      if (sn && !index[sn]) index[sn] = r.ItemDescription;
-    });
-    try {
-      cache.put('productIndex', JSON.stringify(index), 1800);
-    } catch (e) { /* oversized; recomputed next call */ }
-  }
-  return index[String(serial || '').trim().toUpperCase()] || '';
+  const hit = cache.get('populationIndex');
+  if (hit) return JSON.parse(hit);
+
+  const index = {};
+  readAll_(SHEET.POPULATION).forEach(function (r) {
+    const sn = String(r.Batch || '').trim().toUpperCase();
+    if (!sn || index[sn]) return;
+    index[sn] = {
+      product: String(r.ItemDescription || ''),
+      principal: String(r.Principal || '').trim()
+    };
+  });
+  try {
+    cache.put('populationIndex', JSON.stringify(index), 1800);
+  } catch (e) { /* oversized; recomputed next call */ }
+  return index;
+}
+
+function productName_(serial) {
+  const hit = populationIndex_()[String(serial || '').trim().toUpperCase()];
+  return hit ? hit.product : '';
+}
+
+/**
+ * Which principal owns this unit. An empty result is deliberate: a claim that
+ * cannot be attributed is never routed to a principal on a guess — the
+ * administrator assigns it instead.
+ */
+function principalFor_(serial) {
+  const hit = populationIndex_()[String(serial || '').trim().toUpperCase()];
+  return hit && hit.principal ? hit.principal : UNASSIGNED_PRINCIPAL;
 }
 
 /**
@@ -208,6 +229,7 @@ function lookupSerial_(session, serial) {
   return {
     serial: sn,
     productName: productName_(sn),
+    principal: principalFor_(sn),
     warranty: warranty,
     openClaims: openClaims.map(function (c) {
       return { claimId: c.ClaimID, status: c.Status, customer: c.CustomerName };

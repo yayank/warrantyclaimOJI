@@ -48,6 +48,7 @@ function publicSession_(session) {
     name: session.name,
     role: session.role,
     actualRole: session.actualRole,
+    principal: session.principal,
     isTester: session.isTester,
     simulatedRole: session.simulatedRole
   };
@@ -79,6 +80,7 @@ function route_(session, action, payload) {
     case 'claims.forwardOrder': return forwardOrder_(session, payload);
     case 'claims.shipped': return markShipped_(session, payload);
     case 'claims.partReturn': return recordPartReturn_(session, payload);
+    case 'claims.advanceIssue': return setAdvanceIssue_(session, payload);
     case 'claims.delete': return deleteClaim_(session, payload);
     case 'claims.lookup': return lookupSerial_(session, payload.serialNumber);
     case 'claims.attachment': return attachmentData_(session, payload.attachmentId);
@@ -90,6 +92,7 @@ function route_(session, action, payload) {
     case 'master.units': return listUnits_(session, payload);
     case 'master.importPreview': return previewUnitImport_(session, payload);
     case 'master.import': return importUnits_(session, payload);
+    case 'master.unknownPrincipals': return unknownPrincipals_(session);
 
     /* email templates and archive */
     case 'templates.list': return listTemplates_(session);

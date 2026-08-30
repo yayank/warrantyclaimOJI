@@ -10,6 +10,7 @@ function setUp() {
   ensureSheets_();
   seedSettings_();
   seedProductionCustomer_();
+  seedPrincipal_();
   assignMasterIds_();
   const folder = rootFolder_();
   return [
@@ -36,6 +37,21 @@ function seedSettings_() {
   CacheService.getScriptCache().remove('settings');
 }
 
+/**
+ * The portal serves several principals, but every unit already on file belongs
+ * to Sansin, so that entry is created to give the existing data somewhere to
+ * point. Add the rest from the Master Data screen.
+ */
+function seedPrincipal_() {
+  if (readAll_(SHEET.PRINCIPALS).length) return;
+  insert_(SHEET.PRINCIPALS, {
+    PrincipalID: 'PRN-001',
+    Name: 'Sansin',
+    Active: true,
+    Notes: 'Created by setUp(); rename or add others as needed'
+  });
+}
+
 function seedProductionCustomer_() {
   const found = readAll_(SHEET.CUSTOMER).some(function (c) { return c.Name === PRODUCTION_CUSTOMER; });
   if (found) return;
@@ -52,7 +68,7 @@ function seedProductionCustomer_() {
  * thing that left four part names in the old Log sheet with no master entry.
  */
 function assignMasterIds_() {
-  [MASTER.customers, MASTER.parts].forEach(function (def) {
+  [MASTER.customers, MASTER.parts, MASTER.principals].forEach(function (def) {
     const rows = readAll_(def.sheet);
     const sheet = sheet_(def.sheet);
     const head = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -135,6 +151,7 @@ function migrateLegacyLog() {
         SerialNumber: serial.toUpperCase(),
         ProductName: productName_(serial),
         AssemblyMonth: warranty.assemblyMonth,
+        Principal: principalFor_(serial),
         WarrantyType: warranty.type,
         WarrantyExpiry: warranty.expiry,
         WarrantyBasis: warranty.basis,
@@ -166,6 +183,7 @@ function migrateLegacyLog() {
       PartName: partName,
       Qty: Number(row[col('qty')] || 1) || 1,
       ItemStatus: legacyItemStatus_(String(row[col('Status')] || '').trim()),
+      AdvanceIssued: false, AdvanceIssuedAt: '', AdvanceIssuedBy: '', AdvanceNote: '',
       DecisionBy: String(row[col('Approval')] || '').trim(),
       DecisionAt: '', DecisionReason: String(row[col('reason')] || '').trim(),
       AvailabilityDate: row[col('available date')] instanceof Date
@@ -181,12 +199,17 @@ function migrateLegacyLog() {
   insertMany_(SHEET.ITEMS, items);
 
   const orphans = items.filter(function (i) { return !i.PartID && i.PartName; });
+  const unattributed = claims.filter(function (c) { return !c.Principal; }).length;
   return [
     'Migrated ' + claims.length + ' claims and ' + items.length + ' items.',
     orphans.length
       ? orphans.length + ' item(s) kept a part name with no master entry: ' +
         orphans.map(function (i) { return i.PartName; }).filter(unique_).join(', ')
-      : 'Every part name matched a master entry.'
+      : 'Every part name matched a master entry.',
+    unattributed
+      ? unattributed + ' claim(s) could not be attributed to a principal — fill the Principal ' +
+        'column on the Population sheet, or set it on each claim.'
+      : 'Every claim was attributed to a principal.'
   ].join('\n');
 }
 

@@ -38,13 +38,14 @@ const DEFAULT_TEMPLATES = [
       'A new warranty claim has been submitted and is awaiting verification.',
       '',
       'Claim        {{ClaimID}}',
+      'Principal    {{Principal}}',
       'Customer     {{Customer}}',
       'Serial no.   {{SerialNumber}}',
       'Warranty     {{WarrantyBasis}}',
       'Problem      {{Problem}}',
       '',
       'Parts requested',
-      '{{#Items}}  · {{PartName}} — {{Qty}} pcs',
+      '{{#Items}}  · {{PartName}} — {{Qty}} pcs {{AdvanceIssue}}',
       '{{/Items}}',
       'Submitted by {{RequesterName}} on {{SubmittedAt}}.'
     ].join('\n')
@@ -53,10 +54,14 @@ const DEFAULT_TEMPLATES = [
     code: TEMPLATE.DAILY_DIGEST,
     name: 'Daily Submission',
     title: 'WARRANTY CLAIM SUBMISSION',
+    // A batch belongs to exactly one principal, and the name is carried on the
+    // message so a forwarded copy is never ambiguous about whose units these are.
     subject: '[Warranty Claim] Daily Submission {{RefNo}} — {{ClaimCount}} claims',
     required: ['{{ClaimID}}', '{{RefNo}}', '{{WarrantyBasis}}'],
     body: [
       'The following warranty claims have been verified and are submitted for your review.',
+      '',
+      'Principal: {{Principal}}',
       '',
       '{{#Claims}}',
       'Claim {{ClaimID}} — {{Customer}}',
@@ -65,11 +70,14 @@ const DEFAULT_TEMPLATES = [
       '  Work order      {{WorkOrder}}',
       '  Problem         {{Problem}}',
       '  Parts requested',
-      '{{#Items}}    · {{PartName}} — {{Qty}} pcs',
+      '{{#Items}}    · {{PartName}} — {{Qty}} pcs {{AdvanceIssue}}',
       '{{/Items}}',
       '{{/Claims}}',
       'Total {{ClaimCount}} claims, {{PartCount}} parts.',
-      'Verified by {{VerifiedBy}}.'
+      'Verified by {{VerifiedBy}}.',
+      '',
+      'Parts marked as already supplied from local stock are fitted and running;',
+      'the replacement replenishes our stock rather than travelling to site.'
     ].join('\n')
   },
   {
@@ -114,7 +122,7 @@ const DEFAULT_TEMPLATES = [
       'The following parts have been approved under warranty and are requested for delivery.',
       '',
       '{{#Items}}',
-      '{{PartName}} — {{Qty}} pcs',
+      '{{PartName}} — {{Qty}} pcs {{AdvanceIssue}}',
       '  Claim {{ClaimID}} · {{Customer}} · {{SerialNumber}}',
       '  Work order {{WorkOrder}}',
       '{{/Items}}',
@@ -331,9 +339,18 @@ function adminEmails_() {
     .map(function (u) { return u.Email; });
 }
 
-function principalEmails_() {
+/**
+ * Recipients for one principal. The portal serves several, so a digest is never
+ * addressed to "the principals" — only to the accounts belonging to the
+ * principal whose units the batch contains.
+ */
+function principalEmails_(principal) {
+  const wanted = String(principal || '').trim();
   return readAll_(SHEET.USERS)
-    .filter(function (u) { return u.Role === ROLE.PRINCIPAL && isTrue_(u.Active); })
+    .filter(function (u) {
+      return u.Role === ROLE.PRINCIPAL && isTrue_(u.Active) &&
+        String(u.Principal || '').trim() === wanted;
+    })
     .map(function (u) { return u.Email; });
 }
 
@@ -408,7 +425,7 @@ function sendTestTemplate_(session, code) {
   requireRole_(session, [ROLE.ADMIN]);
   const sample = {
     ClaimID: 'CLM-260830-0004', RefNo: 'CW300826', Customer: 'RSUD Koja',
-    SerialNumber: 'XT2410090',
+    Principal: 'Sansin', SerialNumber: 'XT2410090',
     WarrantyBasis: 'assembled Oct 2024 + 22 months = valid until Aug 2026',
     WorkOrder: 'WO-2608-0041', Problem: 'Machine does not power on',
     RequesterName: 'Rian Pratama', SubmittedAt: '30 Aug 2026 14:25',
@@ -424,7 +441,8 @@ function sendTestTemplate_(session, code) {
         WorkOrder: 'WO-2608-0041' },
       { PartName: 'Power supply', Qty: 1, ItemStatus: 'Rejected',
         DecisionReason: 'Not covered under warranty', ClaimID: 'CLM-260830-0004',
-        Customer: 'RSUD Koja', SerialNumber: 'XT2410090', WorkOrder: 'WO-2608-0041' }
+        Customer: 'RSUD Koja', SerialNumber: 'XT2410090', WorkOrder: 'WO-2608-0041',
+        AdvanceIssue: 'already supplied from local stock' }
     ],
     Changes: [{ Field: 'Customer', OldValue: 'RSUD Kojaa', NewValue: 'RSUD Koja' }]
   };

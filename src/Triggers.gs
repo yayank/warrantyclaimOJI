@@ -22,7 +22,10 @@ function sendDailyDigest() {
 
 /**
  * Collects claims that have been forwarded but not yet notified and sends one
- * message per reference number.
+ * message per principal per reference number.
+ *
+ * The split by principal is not cosmetic: the portal serves several, and a
+ * digest carrying another principal's units would disclose them.
  *
  * PrincipalNotifiedAt is what makes this safe to re-run: a claim already
  * included is skipped, and a claim whose send failed keeps an empty marker so
@@ -40,14 +43,23 @@ function dispatchDigest_(session) {
   const items = readLive_(SHEET.ITEMS);
   const batches = {};
   pending.forEach(function (c) {
-    (batches[c.RefNo] = batches[c.RefNo] || []).push(c);
+    const principal = String(c.Principal || '').trim();
+    if (!principal) return;  // unattributed: an administrator has to place it first
+    const key = principal + '\u0000' + c.RefNo;
+    (batches[key] = batches[key] || []).push(c);
   });
 
-  const to = principalEmails_();
   let sent = 0;
+  let skipped = 0;
 
-  Object.keys(batches).forEach(function (refNo) {
-    const claims = batches[refNo];
+  Object.keys(batches).forEach(function (key) {
+    const parts = key.split('\u0000');
+    const principal = parts[0];
+    const refNo = parts[1];
+    const claims = batches[key];
+
+    const to = principalEmails_(principal);
+    if (!to.length) { skipped += claims.length; return; }
     const verifiers = {};
     const shaped = claims.map(function (c) {
       verifiers[c.UpdatedBy || ''] = true;
@@ -55,8 +67,13 @@ function dispatchDigest_(session) {
       return {
         ClaimID: c.ClaimID, Customer: c.CustomerName, SerialNumber: c.SerialNumber,
         WarrantyBasis: c.WarrantyBasis, WorkOrder: c.WorkOrderNo || '—',
-        Problem: c.ProblemDescription,
-        Items: own.map(function (i) { return { PartName: i.PartName, Qty: i.Qty }; })
+        Problem: c.ProblemDescription, Principal: principal,
+        Items: own.map(function (i) {
+          return {
+            PartName: i.PartName, Qty: i.Qty,
+            AdvanceIssue: isTrue_(i.AdvanceIssued) ? '(already supplied from local stock)' : ''
+          };
+        })
       };
     });
 
@@ -71,6 +88,7 @@ function dispatchDigest_(session) {
       linkLabel: 'Review This Batch',
       data: {
         RefNo: refNo,
+        Principal: principal,
         ClaimCount: claims.length,
         PartCount: partCount,
         VerifiedBy: Object.keys(verifiers).filter(String).join(', '),
@@ -91,7 +109,7 @@ function dispatchDigest_(session) {
     }
   });
 
-  return { sent: sent, claims: pending.length };
+  return { sent: sent, claims: pending.length, skipped: skipped };
 }
 
 /** Administrator button for a batch that cannot wait for 17:00. */
@@ -99,7 +117,9 @@ function sendDigestNow_(session) {
   requireRole_(session, [ROLE.ADMIN]);
   const result = dispatchDigest_(session);
   audit_(session, 'ForwardToPrincipal', {
-    field: 'DailyDigest', newValue: result.sent + ' batch(es), ' + result.claims + ' claim(s)'
+    field: 'DailyDigest',
+    newValue: result.sent + ' batch(es), ' + result.claims + ' claim(s)' +
+      (result.skipped ? ', ' + result.skipped + ' with no principal account' : '')
   });
   return result;
 }

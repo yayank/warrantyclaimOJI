@@ -12,8 +12,22 @@ const MASTER = {
   users: { sheet: SHEET.USERS, key: 'Email', label: 'Name' },
   customers: { sheet: SHEET.CUSTOMER, key: 'CustomerID', label: 'Name', prefix: 'CUS' },
   parts: { sheet: SHEET.PART, key: 'PartID', label: 'Name', prefix: 'PART' },
-  recipients: { sheet: SHEET.RECIPIENTS, key: 'RecipientID', label: 'Name', prefix: 'RCP' }
+  recipients: { sheet: SHEET.RECIPIENTS, key: 'RecipientID', label: 'Name', prefix: 'RCP' },
+  principals: { sheet: SHEET.PRINCIPALS, key: 'PrincipalID', label: 'Name', prefix: 'PRN' }
 };
+
+/**
+ * Principals are held by name rather than by ID, because the name is what
+ * arrives in the population sheet the principal itself supplies. The master list
+ * is the set of names the portal accepts; anything else in an import is flagged
+ * rather than silently creating a new principal.
+ */
+function principalNames_() {
+  return readAll_(SHEET.PRINCIPALS)
+    .filter(function (p) { return isTrue_(p.Active); })
+    .map(function (p) { return String(p.Name).trim(); })
+    .filter(Boolean);
+}
 
 /** Lists master data every screen needs, cached because it barely changes. */
 function referenceData_(session) {
@@ -34,7 +48,10 @@ function referenceData_(session) {
   const recipients = session.role === ROLE.ADMIN
     ? readAll_(SHEET.RECIPIENTS).filter(function (r) { return isTrue_(r.Active); })
       .map(function (r) {
-        return { id: String(r.RecipientID), name: r.Name, email: r.Email, company: r.Company };
+        return {
+          id: String(r.RecipientID), name: r.Name, email: r.Email,
+          company: r.Company, principal: String(r.Principal || '').trim()
+        };
       })
     : [];
 
@@ -46,6 +63,7 @@ function referenceData_(session) {
       STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED],
     warrantyTypes: [WARRANTY_TYPE.PRINCIPAL, WARRANTY_TYPE.OUT, WARRANTY_TYPE.MANUAL,
       WARRANTY_TYPE.INTERNAL],
+    principals: principalNames_(),
     productionCustomer: PRODUCTION_CUSTOMER
   };
 }
@@ -86,6 +104,15 @@ function masterUsage_(kind) {
   } else if (kind === 'recipients') {
     readLive_(SHEET.ITEMS).forEach(function (i) {
       if (i.ForwardedTo) counts[i.ForwardedTo] = (counts[i.ForwardedTo] || 0) + 1;
+    });
+  } else if (kind === 'principals') {
+    const byName = {};
+    readLive_(SHEET.CLAIMS).forEach(function (c) {
+      const n = String(c.Principal || '').trim();
+      if (n) byName[n] = (byName[n] || 0) + 1;
+    });
+    readAll_(SHEET.PRINCIPALS).forEach(function (p) {
+      counts[p.PrincipalID] = byName[String(p.Name).trim()] || 0;
     });
   }
   return counts;
@@ -140,6 +167,16 @@ function validateUsers_(record, existing) {
   const roles = [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL, ROLE.TESTER];
   if (roles.indexOf(record.Role) === -1) throw new Error('Choose a valid role.');
 
+  // Without a principal, a Principal account has no claims to see and no digest
+  // to receive, so the account would simply not work.
+  if (record.Role === ROLE.PRINCIPAL) {
+    const principal = String(record.Principal || '').trim();
+    if (!principal) throw new Error('A Principal account must be assigned to a principal.');
+    if (principalNames_().indexOf(principal) === -1) {
+      throw new Error('"' + principal + '" is not an active principal.');
+    }
+  }
+
   // Losing the last administrator would lock everyone out of master data.
   const admins = readAll_(SHEET.USERS).filter(function (u) {
     return u.Role === ROLE.ADMIN && isTrue_(u.Active);
@@ -162,7 +199,7 @@ function nextMasterId_(def) {
 
 function clearReferenceCache_() {
   const cache = CacheService.getScriptCache();
-  cache.removeAll(['settings', 'warrantyIndex', 'productIndex']);
+  cache.removeAll(['settings', 'warrantyIndex', 'populationIndex']);
 }
 
 /* ------------------------------------------------------------- unit data */
@@ -184,6 +221,7 @@ function listUnits_(session, filter) {
         sellingInDate: formatDate_(r.SellingInDate),
         material: r.Material,
         product: productName_(r.Batch),
+        principal: principalFor_(r.Batch),
         computedType: w.type,
         computedBasis: w.basis
       };
@@ -247,5 +285,26 @@ function previewUnitImport_(session, payload) {
     currentWarranty: Math.max(0, sheet_(SHEET.WARRANTY).getLastRow() - 1),
     currentPopulation: Math.max(0, sheet_(SHEET.POPULATION).getLastRow() - 1),
     fileName: payload.fileName
+  };
+}
+
+/**
+ * Principal names present in the population sheet that the master list does not
+ * recognise. Those units route to nobody, so this is worth surfacing.
+ */
+function unknownPrincipals_(session) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const known = principalNames_();
+  const seen = {};
+  readAll_(SHEET.POPULATION).forEach(function (r) {
+    const n = String(r.Principal || '').trim();
+    if (n && known.indexOf(n) === -1) seen[n] = (seen[n] || 0) + 1;
+  });
+  const blank = readAll_(SHEET.POPULATION).filter(function (r) {
+    return r.Batch && !String(r.Principal || '').trim();
+  }).length;
+  return {
+    unknown: Object.keys(seen).map(function (n) { return { name: n, units: seen[n] }; }),
+    unattributed: blank
   };
 }

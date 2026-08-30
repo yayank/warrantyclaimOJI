@@ -32,9 +32,17 @@ function resolveSession_(idToken, simulatedRole) {
     name: user.Name || email,
     role: actualRole,
     actualRole: actualRole,
+    // Which principal this account belongs to. Only meaningful for the
+    // Principal role, where it decides which claims exist at all.
+    principal: String(user.Principal || '').trim(),
     isTester: actualRole === ROLE.TESTER,
     simulatedRole: null
   };
+
+  if (actualRole === ROLE.PRINCIPAL && !session.principal) {
+    throw authError_('No principal is assigned to ' + email +
+      '. An administrator must set it before you can sign in.');
+  }
 
   if (session.isTester) {
     const wanted = simulatedRole || ROLE.ADMIN;
@@ -126,6 +134,10 @@ function visibleClaims_(session) {
         return true;
 
       case ROLE.PRINCIPAL:
+        // Their own units only: the portal serves several principals and none of
+        // them may see another's claims. A claim with no principal attributed
+        // reaches nobody until an administrator assigns one.
+        if (!c.Principal || c.Principal !== session.principal) return false;
         // Principal warranty only, and only once an administrator has verified it.
         return c.WarrantyType === WARRANTY_TYPE.PRINCIPAL &&
           [STATUS.IN_REVIEW, STATUS.FULFILMENT, STATUS.CLOSED].indexOf(c.Status) !== -1;
