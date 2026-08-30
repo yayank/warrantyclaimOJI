@@ -557,13 +557,25 @@ function showSignIn(message) {
 }
 
 window.onGoogleLibraryLoad = function () {
-  if (!window.APP_CLIENT_ID) {
+  const clientId = String(window.APP_CLIENT_ID || '').trim();
+
+  if (!clientId) {
     showSignIn('This portal has not been configured yet: no Google Client ID is set in the ' +
       'Settings sheet.');
     return;
   }
+
+  // Catching the shape here turns Google's "Error 401: invalid_client" — which
+  // appears on Google's own page, with nothing pointing back at this portal —
+  // into a message that names the sheet and the cell to fix.
+  if (!/^[0-9]+-[A-Za-z0-9_]+\.apps\.googleusercontent\.com$/.test(clientId)) {
+    showSignIn('The Google Client ID in the Settings sheet does not look valid: "' + clientId +
+      '". It should end in .apps.googleusercontent.com. Correct Settings!GoogleClientId, ' +
+      'then run clearCache() from the Apps Script editor — settings are cached for five minutes.');
+    return;
+  }
   google.accounts.id.initialize({
-    client_id: window.APP_CLIENT_ID,
+    client_id: clientId,
     callback: function (response) { signIn(response.credential); },
     auto_select: true
   });

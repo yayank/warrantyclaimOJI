@@ -83,6 +83,16 @@ Kolom `Principal` hanya wajib untuk akun berperan `Principal`; untuk peran lain 
    - Authorized JavaScript origins: `https://script.google.com`
 5. Salin **Client ID** ke sheet `Settings`, baris `GoogleClientId`
 
+Bentuknya selalu seperti ini — angka, tanda hubung, huruf, lalu akhiran tetap:
+
+```
+407408718192-a1b2c3d4e5f6g7h8i9j0klmnop.apps.googleusercontent.com
+```
+
+Yang **bukan** Client ID dan sering tersalin keliru: **Client secret** (diawali `GOCSPX-`) dan **project number** (angka saja). Keduanya menghasilkan `Error 401: invalid_client` di halaman Google.
+
+> **Nilai Settings di-cache lima menit.** Setelah memperbaiki sel ini, jalankan `clearCache()` dari editor supaya perubahannya langsung terpakai. Fungsi itu juga melaporkan nilai yang sedang terbaca dan apakah bentuknya sah.
+
 Ini yang membuat login otomatis berfungsi untuk email domain apa pun, termasuk Principal di luar organisasi Anda, tanpa perlu membagikan spreadsheet kepada siapa pun.
 
 > **Cek sebelum lanjut.** Buka spreadsheet Anda — harus bertambah 14 sheet baru. Kalau tidak muncul di sana, `SPREADSHEET_ID` menunjuk berkas lain dan sheet-nya terbentuk di tempat yang keliru.
@@ -159,6 +169,8 @@ node tools/bundle.js                        # membangun ulang dist/
 
 | Gejala | Penyebab |
 |---|---|
+| `Error 401: invalid_client` di halaman Google | `Settings!GoogleClientId` bukan Client ID yang sah. Jalankan `clearCache()` — ia menampilkan nilai yang sedang terbaca |
+| Sudah diperbaiki tapi error yang sama muncul lagi | Cache Settings bertahan lima menit. Jalankan `clearCache()` |
 | Halaman berhenti di layar masuk | `GoogleClientId` belum diisi, atau origin `https://script.google.com` belum didaftarkan |
 | `Found a service identifier used more than once: Drive` | Layanan Drive tercatat dua kali di `appsscript.json` — hapus salah satu bloknya (langkah 3) |
 | `Drive is not defined` saat impor unit | `appsscript.json` belum tersimpan dengan blok `enabledAdvancedServices` |

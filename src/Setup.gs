@@ -22,6 +22,29 @@ function setUp() {
   ].join('\n');
 }
 
+/**
+ * Forgets cached settings and reference data.
+ *
+ * Settings are cached for five minutes, which is right in normal use and
+ * exactly wrong while setting up: a corrected Client ID appears not to take
+ * effect and the same authorization error keeps coming back. Run this from the
+ * editor after changing anything in the Settings sheet.
+ */
+function clearCache() {
+  CacheService.getScriptCache().removeAll([
+    'settings', 'warrantyIndex', 'populationIndex'
+  ]);
+  const id = setting_(SETTING_KEY.CLIENT_ID, '');
+  return [
+    'Cache cleared.',
+    'GoogleClientId is now read as: ' + (id || '(empty)'),
+    /\.apps\.googleusercontent\.com$/.test(id)
+      ? 'That has the shape of a valid OAuth client ID.'
+      : 'That does NOT look like an OAuth client ID — it should end in ' +
+        '.apps.googleusercontent.com'
+  ].join('\n');
+}
+
 function seedSettings_() {
   const defaults = {};
   defaults[SETTING_KEY.CLIENT_ID] = '';
