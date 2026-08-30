@@ -203,6 +203,28 @@ function principalFor_(serial) {
 }
 
 /**
+ * Whether the population sheet carries this unit at all.
+ *
+ * The population sheet is the register of units the portal serves: it is what
+ * says who the unit belongs to and what it is. A serial number missing from it
+ * is either a typo or a unit nobody has imported yet, and in both cases the
+ * claim would reach no principal — so the claim form offers the register rather
+ * than a blank box, and says who to ask when a unit is not on it.
+ */
+function isRegisteredUnit_(serial) {
+  const sn = String(serial || '').trim().toUpperCase();
+  return !!(sn && populationIndex_()[sn]);
+}
+
+/** Every registered unit, serial number first, for the claim form's unit list. */
+function populationUnits_() {
+  const index = populationIndex_();
+  return Object.keys(index).sort().map(function (sn) {
+    return { serial: sn, product: index[sn].product, principal: index[sn].principal };
+  });
+}
+
+/**
  * Everything the claim form shows the moment a serial number is typed: product,
  * warranty verdict with its working shown, and any open claim on the same unit.
  */
@@ -228,6 +250,7 @@ function lookupSerial_(session, serial) {
 
   return {
     serial: sn,
+    registered: isRegisteredUnit_(sn),
     productName: productName_(sn),
     principal: principalFor_(sn),
     warranty: warranty,

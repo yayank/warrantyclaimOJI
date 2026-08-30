@@ -486,6 +486,14 @@ function submitClaim_(session, payload) {
       throw new Error('This claim still needs ' + problems.join(', ') + '.');
     }
 
+    // A unit the population sheet does not carry belongs to no principal, so a
+    // claim on it would be forwarded to nobody. The administrator registers the
+    // unit — or corrects the serial number — before this can go anywhere.
+    if (!isRegisteredUnit_(claim.SerialNumber)) {
+      throw new Error('Serial number ' + claim.SerialNumber + ' is not in the unit list, ' +
+        'so this claim cannot be routed to a principal. ' + administratorContact_());
+    }
+
     // The reference number belongs to the day of submission, not the day the
     // draft was started, or the principal's daily batch would contain claims
     // that were not submitted that day.

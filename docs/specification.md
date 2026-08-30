@@ -107,6 +107,19 @@ Empat hal yang membentuk alur ini dan mudah terlewat:
 - **Penolakan tidak final.** Diskusi berlanjut di luar aplikasi, dan keputusan dapat diubah kapan saja dengan alasan tertulis.
 - **Klaim ditutup saat part dikirim.** Pengembalian part rusak dicatat sesudahnya sebagai keterangan.
 
+### Isian Customer dan Serial Number
+
+Keduanya adalah **dropdown yang bisa dicari**: kotak teks yang menyaring daftarnya sambil diketik. Daftar Customer berisi 1.386 nama dan daftar unit beberapa ribu serial number — pada ukuran itu `<select>` biasa hanya bisa digulung, tidak bisa dipakai.
+
+| Field | Sumber daftar | Isian di luar daftar |
+|---|---|---|
+| Customer | master `Customer` yang aktif | Ditolak. Kotak menampilkan “tidak ada yang cocok” beserta nama dan alamat email Administrator, lalu isian dikembalikan ke pilihan terakhir yang sah |
+| Serial number | kolom `Batch` pada sheet `Population` | Boleh diketik dan boleh disimpan sebagai draft, **tetapi tidak bisa di-submit**. Layar menyebutkan bahwa unit itu tidak terdaftar dan siapa Administrator yang harus dihubungi |
+
+Alasannya bukan sekadar rapi: unit yang tidak ada di `Population` tidak punya principal, jadi klaimnya tidak akan sampai ke siapa pun. Aturan ini ditegakkan di server pada `claims.submit`, bukan hanya di layar — pesannya memuat nama dan email Administrator aktif dari sheet `users`.
+
+Daftar unit diambil sekali per sesi lewat `claims.units`, bukan ikut dalam payload login: setiap layar butuh daftar customer, hanya formulir klaim yang butuh beberapa ribu serial number.
+
 ## 5. Sparepart talangan
 
 Di lapangan, mesin sering tidak bisa menunggu keputusan principal. Sparepart diambil dari stok lokal supaya alat kembali jalan, sementara klaim tetap berjalan.
@@ -345,7 +358,7 @@ Ketujuh template bawaan tertanam di kode dan aktif sejak awal. Sheet ini hanya m
 | Sheet | Kolom | Peran |
 |---|---|---|
 | `warranty` | `SellingInDate` · `Material` · `Batch` · `Status` · `exp` · `Expired` | Tabel pengecualian untuk SN `XT`; kolom `Status` diabaikan |
-| `Population` | `Delivery` · `SellingInDate` · `Material` · `ItemDescription` · `Batch` · `DeliveryQuantity` · `ShipToParty` · **`Principal`** | Sumber nama produk **dan pemetaan principal** |
+| `Population` | `Delivery` · `SellingInDate` · `Material` · `ItemDescription` · `Batch` · `DeliveryQuantity` · `ShipToParty` · **`Principal`** | Sumber nama produk, **pemetaan principal**, dan daftar unit yang boleh diklaim (kolom `Batch`) |
 
 Keduanya diperbarui lewat impor Excel dengan pratinjau perubahan.
 

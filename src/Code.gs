@@ -146,6 +146,7 @@ function route_(session, action, payload) {
     case 'claims.advanceIssue': return setAdvanceIssue_(session, payload);
     case 'claims.delete': return deleteClaim_(session, payload);
     case 'claims.lookup': return lookupSerial_(session, payload.serialNumber);
+    case 'claims.units': return unitOptions_(session);
     case 'claims.attachment': return attachmentData_(session, payload.attachmentId);
     case 'claims.export': return exportClaims_(session, payload);
 

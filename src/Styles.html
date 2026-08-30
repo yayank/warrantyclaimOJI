@@ -129,6 +129,25 @@ label.field>span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media(max-width:560px){.grid2{grid-template-columns:1fr}}
 
+/* Searchable dropdown: a text box that filters a list too long to scroll. */
+.combo{position:relative;min-width:0}
+.combo-box{width:100%}
+.combo-pop{position:absolute;z-index:55;top:calc(100% + 3px);left:0;right:0;max-height:236px;
+  overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:5px;
+  box-shadow:var(--shadow-lg)}
+.combo-opt{display:flex;flex-direction:column;gap:1px;padding:6px 10px;font-size:13px;
+  cursor:pointer;border-bottom:1px solid var(--line-soft)}
+.combo-opt:last-child{border-bottom:0}
+.combo-opt.on,.combo-opt:hover{background:var(--accent-soft);color:var(--accent-ink)}
+.combo-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.combo-h{font-size:11px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.combo-opt.on .combo-h,.combo-opt:hover .combo-h{color:inherit;opacity:.75}
+.combo-more{padding:6px 10px;font-size:11.5px;color:var(--ink-3);background:var(--surface-2);
+  border-top:1px solid var(--line-soft)}
+.combo-none{padding:9px 11px;font-size:12px;line-height:1.55;color:var(--warn);
+  background:var(--warn-soft)}
+.combo-none a{color:inherit;font-weight:600}
+
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto}
 .tabs button{font-size:13px;background:none;border:0;cursor:pointer;padding:8px 12px;
   color:var(--ink-3);border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px;
