@@ -1,13 +1,15 @@
 /**
- * verify-merge.js — checks that one machine claimed twice in a day is one claim.
+ * verify-unit.js — the two rules that read a machine's claims as one story.
  *
  * The principal receives the day's batch as a unit. Two claims for one serial
  * number inside it read as a double order, so the second submission joins the
- * first instead of standing beside it — but only while the first is still
- * untouched. Once anyone has acted on it, adding parts underneath them rewrites
- * a decision that has already been taken.
+ * first — but only while the first is still untouched. Once anyone has acted on
+ * it, adding parts underneath them rewrites a decision already taken.
  *
- *   node tools/verify-merge.js
+ * And an administrator looking at a new claim needs to know whether this part
+ * was already sent to this machine, which is the same question asked backwards.
+ *
+ *   node tools/verify-unit.js
  */
 
 'use strict';
@@ -90,19 +92,21 @@ const sandbox = {
   adminEmails_: function () { return ['admin@oneject.co.id']; },
   claimMailData_: function () { return {}; },
   formatDate_: function (v) { return String(v); },
+  productName_: function () { return 'SWS-4000'; },
   TEMPLATE: { CLAIM_SUBMIT: 'CLAIM_SUBMIT' }
 };
 vm.createContext(sandbox);
 vm.runInContext(
   ['Config.gs', 'Claims.gs']
     .map(function (f) { return fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'); })
-    .concat(['globalThis.__api = { submitClaim_ };'])
+    .concat(['globalThis.__api = { submitClaim_, unitHistory_ };'])
     .join('\n'),
   sandbox, { filename: 'merge' }
 );
 
-const { submitClaim_ } = sandbox.__api;
+const { submitClaim_, unitHistory_ } = sandbox.__api;
 const rian = { email: 'rian@rs.co.id', role: 'Requester', isTester: false };
+const admin = { email: 'admin@oneject.co.id', role: 'Administrator', isTester: false };
 
 let pass = 0;
 const failures = [];
@@ -197,6 +201,34 @@ ITEMS.push(item('I2', 'C2'));
 evidenceFor('C2', ['I2']);
 out = submitClaim_(rian, { claimId: 'C2' });
 check('a real claim never merges into a test one', out.claimId === 'C2', out.claimId);
+
+/* --------------------------------------------- the history of one machine */
+
+reset();
+CLAIMS.push(claim('C1', { Status: 'Closed', SubmittedAt: '2026-07-01T09:00:00' }));
+CLAIMS.push(claim('C2', { Status: 'In Review' }));
+CLAIMS.push(claim('C3', { SerialNumber: 'XT9999999' }));       // a different machine
+CLAIMS.push(claim('C4', { IsTest: true }));                    // a test claim
+ITEMS.push(item('I1', 'C1', { ItemStatus: 'Shipped', PartReturnAt: '2026-07-10T09:00:00' }));
+ITEMS.push(item('I2', 'C2'));                                  // Rotor again
+ITEMS.push(item('I3', 'C2', { PartID: 'P2', PartName: 'Cell' }));
+ITEMS.push(item('I4', 'C3'));
+ITEMS.push(item('I5', 'C4'));
+
+const hist = unitHistory_(admin, 'xt2410090');
+check('the history finds the unit however the serial was typed',
+  hist.parts.length === 3, hist.parts.length + ' parts');
+check('it counts the claims on that machine only', hist.claims === 2, String(hist.claims));
+check('a test claim never appears in a real history',
+  !hist.parts.some(function (p) { return p.claimId === 'C4'; }));
+check('another machine is not in it',
+  !hist.parts.some(function (p) { return p.claimId === 'C3'; }));
+check('newest first', hist.parts[0].claimId === 'C2', hist.parts[0].claimId);
+check('the part asked for twice is named — that is what a double order looks like',
+  hist.repeated.length === 1 && hist.repeated[0].partName === 'Rotor' &&
+  hist.repeated[0].times === 2, JSON.stringify(hist.repeated));
+check('and a part still owed back is flagged',
+  hist.parts.filter(function (p) { return p.claimId === 'C1'; })[0].partReturnAt !== '');
 
 /* -------------------------------------------------------------------- report */
 

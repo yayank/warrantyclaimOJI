@@ -876,6 +876,8 @@ function renderPanelActions(c) {
   }
 
   if (s.role === ROLE.ADMIN) {
+    // Asked in front of every claim: was this part already sent to this machine?
+    buttons.push(btn('Unit history', '', function () { showUnitHistory(c.serialNumber); }));
     if (c.status !== STATUS.CLOSED) {
       buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
     }
@@ -973,6 +975,64 @@ function showAttachment(attachmentId) {
   }).catch(function (e) {
     box.remove();
     fail(e);
+  });
+}
+
+/**
+ * Everything ever claimed against one machine.
+ *
+ * A part sent to this unit before is either a double order or a repair that
+ * did not hold, so the repeats are counted at the top — spotting them halfway
+ * down a list is exactly what does not happen when you are busy.
+ */
+function showUnitHistory(serial) {
+  openModal({
+    title: 'Unit history',
+    meta: serial,
+    size: 'wide',
+    body: '<div id="unitHist">' + skeleton(4) + '</div>',
+    actions: [{ label: 'Close', close: true }],
+    onOpen: function () {
+      api('claims.unitHistory', { serialNumber: serial }).then(function (d) {
+        const host = el('unitHist');
+        if (!host) return;
+        host.innerHTML =
+          '<p class="tiny">' + h(d.productName || 'unit') + ' · ' + d.claims + ' claim' +
+            (d.claims === 1 ? '' : 's') + ' · ' + d.parts.length + ' spare part' +
+            (d.parts.length === 1 ? '' : 's') + ' ever requested</p>' +
+          (d.repeated.length
+            ? '<div class="notice">⚠ Requested more than once on this unit: ' +
+              d.repeated.map(function (r) {
+                return h(r.partName) + ' <b>×' + r.times + '</b>';
+              }).join(', ') + '</div>'
+            : '') +
+          (d.parts.length
+            ? '<div class="tablewrap"><table class="data"><thead><tr>' +
+              '<th>Date</th><th>Claim</th><th>Customer</th><th>Spare part</th><th>Qty</th>' +
+              '<th>Part status</th><th>Fulfilment</th><th>Faulty part back</th>' +
+              '</tr></thead><tbody>' +
+              d.parts.map(function (p) {
+                return '<tr><td class="tiny">' + h(fmtDate(p.submittedAt)) + '</td>' +
+                  '<td class="stack"><span class="mono">' + h(p.claimId) + '</span>' +
+                    '<span class="mono tiny">' + h(p.refNo || '—') + '</span></td>' +
+                  '<td class="tiny">' + h(p.customerName) + '</td>' +
+                  '<td>' + h(p.partName) + '</td>' +
+                  '<td class="mono">' + p.qty + '</td>' +
+                  '<td class="stack">' + itemPill(p.itemStatus) +
+                    (p.advanceIssued
+                      ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
+                    '</td>' +
+                  '<td class="tiny">' + h(p.fulfilmentRoute || '—') + '</td>' +
+                  '<td class="tiny">' + (p.partReturnAt ? h(fmtDate(p.partReturnAt))
+                    : p.awaitingReturn ? '<b style="color:var(--warn)">outstanding</b>' : '—') +
+                    '</td></tr>';
+              }).join('') + '</tbody></table></div>'
+            : '<div class="empty">Nothing has been claimed against this unit before.</div>');
+      }).catch(function (e) {
+        const host = el('unitHist');
+        if (host) host.innerHTML = '<div class="empty">' + h(e.message) + '</div>';
+      });
+    }
   });
 }
 

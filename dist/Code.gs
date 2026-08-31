@@ -2212,6 +2212,61 @@ function getClaim_(session, claimId) {
   return shaped;
 }
 
+/**
+ * Every spare part ever claimed against one machine.
+ *
+ * The question in front of a new claim is whether this pump was already sent
+ * last month. If it was, that is either a double order or a repair that did not
+ * hold, and both are worth knowing before approving another one. So the part
+ * asked for more than once is counted at the top rather than left to be spotted
+ * halfway down the list.
+ */
+function unitHistory_(session, serial) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const sn = String(serial || '').trim().toUpperCase();
+  if (!sn) return { serial: '', productName: '', claims: 0, parts: [], repeated: [] };
+
+  const claims = {};
+  readLive_(SHEET.CLAIMS).forEach(function (c) {
+    if (String(c.SerialNumber || '').trim().toUpperCase() !== sn) return;
+    // A tester's claims and real ones are never mixed into one history.
+    if (isTrue_(c.IsTest) !== session.isTester) return;
+    claims[c.ClaimID] = c;
+  });
+
+  const parts = readLive_(SHEET.ITEMS)
+    .filter(function (i) { return claims[i.ClaimID]; })
+    .map(function (i) {
+      const c = claims[i.ClaimID];
+      return {
+        claimId: i.ClaimID, refNo: c.RefNo, claimStatus: c.Status,
+        customerName: c.CustomerName, workOrderNo: c.WorkOrderNo,
+        submittedAt: c.SubmittedAt || c.CreatedAt,
+        partId: i.PartID, partName: i.PartName, qty: Number(i.Qty || 0),
+        itemStatus: i.ItemStatus, decisionReason: i.DecisionReason,
+        shippedAt: i.ShippedAt, fulfilmentRoute: i.FulfilmentRoute || '',
+        advanceIssued: isTrue_(i.AdvanceIssued),
+        partReturnAt: i.PartReturnAt,
+        awaitingReturn: i.ItemStatus === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim()
+      };
+    })
+    .sort(function (a, b) { return String(b.submittedAt).localeCompare(String(a.submittedAt)); });
+
+  const times = {};
+  parts.forEach(function (p) { times[p.partName] = (times[p.partName] || 0) + 1; });
+
+  return {
+    serial: sn,
+    productName: productName_(sn),
+    claims: Object.keys(claims).length,
+    parts: parts,
+    repeated: Object.keys(times)
+      .filter(function (n) { return times[n] > 1; })
+      .map(function (n) { return { partName: n, times: times[n] }; })
+      .sort(function (a, b) { return b.times - a.times; })
+  };
+}
+
 /* ----------------------------------------------------------------- write */
 
 /**
@@ -2501,6 +2556,13 @@ function submitClaim_(session, payload) {
     // draft was started, or the principal's daily batch would contain claims
     // that were not submitted that day.
     const refNo = todayRef_(isTrue_(claim.IsTest));
+
+    // The same machine claimed twice in one day is one claim with more parts on
+    // it, not two. The principal receives the day's batch as a unit, and two
+    // claims for one serial number inside it read as a double order.
+    const twin = mergeTargetFor_(session, claim, refNo);
+    if (twin) return mergeIntoClaim_(session, claim, twin, items);
+
     const updated = update_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, {
       RefNo: refNo,
       Status: STATUS.SUBMITTED,
@@ -2532,6 +2594,85 @@ function submitClaim_(session, payload) {
 
     return getClaim_(session, claim.ClaimID);
   });
+}
+
+/**
+ * The claim this one should join, or null.
+ *
+ * Same requester, same unit, same day's reference — and still untouched. Once
+ * an administrator or the principal has acted on the earlier claim, adding
+ * parts underneath them rewrites a decision that has already been taken, so
+ * the second claim stands on its own instead.
+ */
+function mergeTargetFor_(session, claim, refNo) {
+  const sn = String(claim.SerialNumber || '').trim().toUpperCase();
+  if (!sn) return null;
+
+  return readLive_(SHEET.CLAIMS).filter(function (c) {
+    return c.ClaimID !== claim.ClaimID &&
+      String(c.RefNo || '') === refNo &&
+      String(c.SerialNumber || '').trim().toUpperCase() === sn &&
+      String(c.RequesterEmail || '').toLowerCase() === session.email &&
+      c.Status === STATUS.SUBMITTED &&
+      isTrue_(c.IsTest) === isTrue_(claim.IsTest);
+  })[0] || null;
+}
+
+/**
+ * Moves this claim's parts and files onto the earlier one, then retires it.
+ *
+ * A part already on the target is not added twice: the same spare part cannot
+ * appear on one claim more than once, and asking for two of something is a
+ * quantity rather than a second row.
+ */
+function mergeIntoClaim_(session, claim, target, items) {
+  const already = {};
+  readLive_(SHEET.ITEMS)
+    .filter(function (i) { return i.ClaimID === target.ClaimID; })
+    .forEach(function (i) { already[String(i.PartID)] = i; });
+
+  let moved = 0;
+  let combined = 0;
+
+  items.forEach(function (item) {
+    const twin = already[String(item.PartID)];
+    if (twin) {
+      update_(SHEET.ITEMS, 'ItemID', twin.ItemID, {
+        Qty: Number(twin.Qty || 0) + Number(item.Qty || 0),
+        UpdatedAt: nowIso_(), UpdatedBy: session.email
+      });
+      update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
+        Deleted: true, UpdatedAt: nowIso_(), UpdatedBy: session.email
+      });
+      combined++;
+      return;
+    }
+    update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
+      ClaimID: target.ClaimID, UpdatedAt: nowIso_(), UpdatedBy: session.email
+    });
+    moved++;
+  });
+
+  // The evidence goes with the parts it is evidence for.
+  readAll_(SHEET.ATTACHMENTS)
+    .filter(function (a) { return a.ClaimID === claim.ClaimID; })
+    .forEach(function (a) {
+      update_(SHEET.ATTACHMENTS, 'AttachmentID', a.AttachmentID, { ClaimID: target.ClaimID });
+    });
+
+  update_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, {
+    Deleted: true, DeletedBy: session.email, DeletedAt: nowIso_(),
+    UpdatedAt: nowIso_(), UpdatedBy: session.email
+  });
+
+  audit_(session, 'Submit', {
+    claimId: target.ClaimID, field: 'MergedFrom',
+    oldValue: claim.ClaimID,
+    newValue: moved + ' part(s) moved, ' + combined + ' merged by quantity',
+    isTest: isTrue_(claim.IsTest)
+  });
+
+  return getClaim_(session, target.ClaimID);
 }
 
 function returnClaim_(session, payload) {
@@ -4333,6 +4474,7 @@ function route_(session, action, payload) {
     case 'claims.delete': return deleteClaim_(session, payload);
     case 'claims.lookup': return lookupSerial_(session, payload.serialNumber);
     case 'claims.units': return unitOptions_(session);
+    case 'claims.unitHistory': return unitHistory_(session, payload.serialNumber);
     case 'claims.attachment': return attachmentData_(session, payload.attachmentId);
     case 'claims.export': return exportClaims_(session, payload);
 
