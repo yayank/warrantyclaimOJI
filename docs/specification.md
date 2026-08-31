@@ -312,6 +312,7 @@ Dua belas sheet operasional ditambah dua sheet rujukan.
 | DecisionBy · DecisionAt · DecisionReason | teks · datetime · teks | Alasan wajib untuk penolakan dan setiap perubahan keputusan |
 | AvailabilityDate | tanggal | Diisi Administrator |
 | DocumentRefNo | teks | Diisi Administrator; kesamaan nilai membentuk kelompok pengiriman |
+| **FulfilmentRoute** | enum | `Principal order` · `Purchase request` · `From stock`; kosong sampai Administrator memutuskan |
 | ForwardedAt · ForwardedTo | datetime · teks | Penerusan pesanan ke pihak luar |
 | ShippedAt · ShippedBy | datetime · teks | Penandaan pengiriman |
 | PartReturnNote · PartReturnAt | teks · datetime | Catatan, bukan syarat penutupan |
@@ -391,7 +392,8 @@ Sekarang indeks disimpan sebagai potongan bernomor (`cachePutLarge_`), dan dipeg
 |---|---|---|---|
 | Pending | Approved / Rejected | Principal atau Administrator | Penolakan wajib beralasan |
 | Approved / Rejected | keputusan sebaliknya | Principal | Kapan saja, alasan wajib, tercatat |
-| Approved | Order Forwarded | Administrator | Email terkirim ke penerima terpilih |
+| Approved | Order Forwarded | Administrator | **Hanya garansi principal.** Email terkirim ke penerima terpilih |
+| Approved | Awaiting Part Availability | Administrator | Jalur internal: PR diajukan, atau dipenuhi dari stok |
 | Order Forwarded | Awaiting Part Availability | Administrator | `AvailabilityDate` dan `DocumentRefNo` terisi |
 | Awaiting Part Availability | Shipped | Administrator | Penandaan pengiriman |
 
@@ -426,6 +428,20 @@ Requester dan Production berada di lapangan: mereka meminta sparepart, dan mekan
 | Filter garansi | Menyaring berdasarkan pembedaan yang tidak mereka lihat |
 
 Principal tetap melihat penilaian garansi dan History — itu dasar keputusan mereka. Yang **tidak** mereka lihat adalah penanda sparepart talangan (*issued in advance* dan catatan stoknya): itu stok Administrator, bukan urusan principal. Filter garansi juga ditiadakan, karena mereka hanya pernah melihat klaim garansi principal.
+
+### Pemenuhan di luar garansi principal
+
+Unit yang masih garansi principal dipesan ke principal — dan itu satu-satunya jalur yang melibatkan mereka. Begitu unitnya di luar garansi principal, principal tidak memasok apa pun, jadi partnya harus datang dari tempat lain. Layar **Orders** karena itu dibagi dua:
+
+| Bagian | Isinya | Tindakan Administrator |
+|---|---|---|
+| Principal orders | klaim dengan `WarrantyType = Principal Warranty` | *Set Availability & Document Ref*, *Forward Order* |
+| Purchase request or stock | selebihnya (`Internal Warranty`, `Out of Principal Warranty`) | *Raise purchase request*, *Fulfil from stock* |
+
+- **Purchase request** bentuknya sama persis dengan penjadwalan order principal — sebuah nomor untuk dirujuk dan tanggal untuk ditunggu — jadi transisinya pun sama: `Awaiting Part Availability`, lalu `Shipped`.
+- **Fulfil from stock** dicatat lebih dulu dan dikirim belakangan. Partnya memang ada di rak, tetapi belum berpindah; tanggal pengiriman seharusnya menyebut hari barangnya benar-benar keluar.
+
+Rutenya disimpan di kolom baru `ClaimItems!FulfilmentRoute` (`Principal order` · `Purchase request` · `From stock`). Pemisahannya tidak hanya di layar: `forwardOrder_` menolak meneruskan part yang klaimnya bukan garansi principal — satu part internal di dalam satu batch membatalkan seluruh penerusan, karena meneruskan sebagian diam-diam lebih buruk daripada menolak seluruhnya. `tools/verify-fulfilment.js` menguji ketiga transisi ini.
 
 ## 12. Matriks hak akses
 
@@ -622,7 +638,7 @@ Empat hal yang menopang ketiganya:
 
 ## 19. Pengujian
 
-Tujuh penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
+Delapan penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
 
 ```bash
 node tools/verify-warranty.js units.json    # mesin garansi, 2.610 unit asli
@@ -632,9 +648,10 @@ node tools/verify-sheets.js                 # baris data tidak dibaca sebagai ju
 node tools/verify-payload.js                # tidak ada Date yang lolos ke browser
 node tools/verify-tabs.js                   # tidak ada klaim yang lolos dari semua tab
 node tools/verify-cache.js                  # sheet unit dibaca sekali, bukan tiap pertanyaan
+node tools/verify-fulfilment.js             # part tidak pernah salah jalur
 ```
 
-Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 179 · 11 pemeriksaan, seluruhnya lolos.**
+Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 180 · 11 · 18 pemeriksaan, seluruhnya lolos.**
 
 Penguji payload menjaga satu kegagalan yang sangat mudah terulang. `google.script.run` menolak `Date` di mana pun dalam nilai kembalian — panggilannya gagal dan halaman menerima `null`, tanpa pesan kesalahan apa pun. Aplikasi ini menulis stempel waktunya sebagai teks `2026-08-30T11:53:50`, dan Sheets berhak menyimpannya sebagai date-time sungguhan lalu mengembalikannya sebagai `Date`. Karena itu `readAll_` mengubah setiap sel `Date` menjadi teks ISO saat dibaca (`cellValue_`), dan `api()` memeriksa sekali lagi sebelum nilainya menyeberang ke browser (`jsonSafe_`). Konversi saat baca sekaligus memperbaiki urutan dan filter tanggal, yang membandingkan stempel waktu sebagai teks.
 

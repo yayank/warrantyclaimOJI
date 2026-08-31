@@ -164,6 +164,7 @@ function route_(session, action, payload) {
     case 'claims.decide': return decideItems_(session, payload);
     case 'claims.availability': return setAvailability_(session, payload);
     case 'claims.forwardOrder': return forwardOrder_(session, payload);
+    case 'claims.fulfilStock': return fulfilFromStock_(session, payload);
     case 'claims.shipped': return markShipped_(session, payload);
     case 'claims.partReturn': return recordPartReturn_(session, payload);
     case 'claims.advanceIssue': return setAdvanceIssue_(session, payload);

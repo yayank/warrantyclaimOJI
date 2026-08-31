@@ -2136,20 +2136,50 @@ function renderSelectionBar() {
   if (!ids.length) { host.innerHTML = ''; return; }
 
   const isAdmin = S.session.role === ROLE.ADMIN;
+  const track = selectedTrack();
+
+  // Which buttons appear follows what is selected. A principal order and a
+  // purchase request are different things to do with a part, and a selection
+  // spanning both has no single right answer — so it offers none.
+  let admin = '';
+  if (isAdmin && track === 'principal') {
+    admin = '<button class="btn sm" id="selAvail" type="button">Set Availability &amp; Document Ref</button>' +
+      '<button class="btn sm pri" id="selForward" type="button">Forward Order…</button>';
+  } else if (isAdmin && track === 'internal') {
+    admin = '<button class="btn sm" id="selStock" type="button">Fulfil from stock…</button>' +
+      '<button class="btn sm pri" id="selPr" type="button">Raise purchase request…</button>';
+  } else if (isAdmin && track === 'mixed') {
+    admin = '<span class="tiny">Principal orders and internal parts are selected together — ' +
+      'choose one list at a time.</span>';
+  }
+
   host.innerHTML = '<div class="selbar"><b>' + ids.length + ' part' +
     (ids.length === 1 ? '' : 's') + ' selected</b><span class="spacer"></span>' +
     '<button class="btn sm ok" id="selApprove" type="button">Approve</button>' +
     '<button class="btn sm no" id="selReject" type="button">Reject</button>' +
-    (isAdmin ? '<button class="btn sm" id="selAvail" type="button">Set Availability &amp; Document Ref</button>' +
-      '<button class="btn sm pri" id="selForward" type="button">Forward Order…</button>' : '') +
-    '</div>';
+    admin + '</div>';
 
   el('selApprove').addEventListener('click', function () { bulkDecision('approve'); });
   el('selReject').addEventListener('click', function () { bulkDecision('reject'); });
-  if (isAdmin) {
-    el('selAvail').addEventListener('click', promptAvailability);
-    el('selForward').addEventListener('click', promptForwardOrder);
-  }
+  if (el('selAvail')) el('selAvail').addEventListener('click', function () { promptAvailability(false); });
+  if (el('selForward')) el('selForward').addEventListener('click', promptForwardOrder);
+  if (el('selPr')) el('selPr').addEventListener('click', function () { promptAvailability(true); });
+  if (el('selStock')) el('selStock').addEventListener('click', promptStock);
+}
+
+/** 'principal', 'internal', 'mixed' or '' — which list the selection came from. */
+function selectedTrack() {
+  let principal = false;
+  let internal = false;
+  S.rows.forEach(function (c) {
+    c.items.forEach(function (i) {
+      if (!S.selection[i.itemId]) return;
+      if (isPrincipalClaim(c)) principal = true; else internal = true;
+    });
+  });
+  if (principal && internal) return 'mixed';
+  if (principal) return 'principal';
+  return internal ? 'internal' : '';
 }
 
 function bulkDecision(decision) {
@@ -2199,10 +2229,40 @@ function renderOrders() {
     return;
   }
 
-  const batches = {};
-  S.rows.forEach(function (c) { (batches[c.refNo] = batches[c.refNo] || []).push(c); });
+  // A unit still under principal warranty is ordered from the principal. One
+  // that is not never reaches them: the part is raised as a purchase request or
+  // taken from stock, and mixing the two lists invites forwarding the wrong one.
+  const principal = S.rows.filter(isPrincipalClaim);
+  const internal = S.rows.filter(function (c) { return !isPrincipalClaim(c); });
 
-  const html = Object.keys(batches).sort().reverse().map(function (ref) {
+  el('view').innerHTML = '<div class="toolbar"><h2 style="margin:0;font-size:16px">Approved parts</h2>' +
+    '<span class="spacer"></span><button class="btn" id="doExport" type="button">Export to Excel</button>' +
+    '</div>' +
+    orderSection('Principal orders', 'Ordered from the principal under their warranty.', principal) +
+    orderSection('Purchase request or stock',
+      'These units are outside principal warranty, so the principal supplies nothing. ' +
+      'Raise a purchase request, or fulfil the part from stock.', internal) +
+    '<div id="selbar"></div>';
+
+  wireOrders();
+}
+
+function isPrincipalClaim(c) { return c.warrantyType === WARRANTY.PRINCIPAL; }
+
+function orderSection(title, note, rows) {
+  return '<div class="blk"><h3>' + h(title) + '</h3>' +
+    '<p class="tiny" style="margin:0">' + h(note) + '</p>' +
+    (rows.length
+      ? orderBatches(rows)
+      : '<div class="tablewrap"><div class="empty">Nothing waiting here.</div></div>') +
+    '</div>';
+}
+
+function orderBatches(rows) {
+  const batches = {};
+  rows.forEach(function (c) { (batches[c.refNo] = batches[c.refNo] || []).push(c); });
+
+  return Object.keys(batches).sort().reverse().map(function (ref) {
     const claims = batches[ref];
     const groups = {};
     const loose = [];
@@ -2216,9 +2276,9 @@ function renderOrders() {
       });
     });
 
-    return '<div class="bulk"><div class="bulk-head"><span class="ref">' + h(ref) + '</span>' +
-      '<span class="tiny">' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') + '</span>' +
-      '</div>' +
+    return '<div class="bulk"><div class="bulk-head"><span class="ref">' + h(ref || 'no reference') +
+      '</span><span class="tiny">' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') +
+      '</span></div>' +
       Object.keys(groups).map(function (doc) {
         const entries = groups[doc];
         const date = entries[0].item.availabilityDate;
@@ -2237,11 +2297,9 @@ function renderOrders() {
         : '') +
     '</div>';
   }).join('');
+}
 
-  el('view').innerHTML = '<div class="toolbar"><h2 style="margin:0;font-size:16px">Approved parts</h2>' +
-    '<span class="spacer"></span><button class="btn" id="doExport" type="button">Export to Excel</button>' +
-    '</div>' + html + '<div id="selbar"></div>';
-
+function wireOrders() {
   el('view').querySelectorAll('.pick').forEach(function (box) {
     box.addEventListener('change', function () {
       if (box.checked) S.selection[box.value] = true; else delete S.selection[box.value];
@@ -2282,32 +2340,78 @@ function orderRow(entry) {
     '<span class="nm">' + h(i.partName) + ' · <span class="dim">' + h(c.customerName) + '</span></span>' +
     '<span class="mono tiny">' + i.qty + ' pcs</span>' +
     itemPill(i.itemStatus) +
+    (i.fulfilmentRoute && i.fulfilmentRoute !== 'Principal order'
+      ? '<span class="pill flat p-wait">' + h(i.fulfilmentRoute) + '</span>' : '') +
     '<button class="btn sm ghost" data-open="' + h(c.claimId) + '" type="button">' +
       h(c.claimId) + '</button>' +
     '</div>';
 }
 
-function promptAvailability() {
+/**
+ * A purchase request is the same transaction as a principal order's schedule —
+ * a number to quote and a date to expect it by — so it is the same form, and
+ * the same transition underneath. Only the words and the route differ.
+ */
+function promptAvailability(isPr) {
   const ids = Object.keys(S.selection);
   openModal({
-    title: 'Set availability & document reference',
+    title: isPr ? 'Raise purchase request' : 'Set availability & document reference',
     size: 'narrow',
     body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') + ' selected.</p>' +
-      '<label class="field"><span>Availability date <b class="req">*</b></span>' +
-      '<input type="date" id="avail"></label>' +
-      '<label class="field"><span>Document reference <b class="req">*</b></span>' +
-      '<input type="text" id="doc" placeholder="DOC-2609-011"></label>' +
-      '<p class="tiny">Parts sharing a document reference are shown together as one shipment.</p>',
+      '<label class="field"><span>' + (isPr ? 'Expected availability' : 'Availability date') +
+      ' <b class="req">*</b></span><input type="date" id="avail"></label>' +
+      '<label class="field"><span>' + (isPr ? 'PR number' : 'Document reference') +
+      ' <b class="req">*</b></span><input type="text" id="doc" placeholder="' +
+      (isPr ? 'PR-2609-011' : 'DOC-2609-011') + '"></label>' +
+      '<p class="tiny">Parts sharing a ' + (isPr ? 'PR number' : 'document reference') +
+      ' are shown together as one shipment.</p>',
     actions: [
       { label: 'Cancel', close: true },
-      { label: 'Apply', primary: true, onClick: function (close) {
+      { label: isPr ? 'Raise PR' : 'Apply', primary: true, onClick: function (close) {
         const date = el('avail').value;
         const doc = el('doc').value.trim();
         if (!date || !doc) { toast('Both fields are required.', 'err'); return; }
-        api('claims.availability', { itemIds: ids, availabilityDate: date, documentRefNo: doc })
-          .then(function () {
-            close(); S.selection = {}; toast('Schedule recorded.', 'ok'); loadOrders();
-          }).catch(fail);
+        api('claims.availability', {
+          itemIds: ids, availabilityDate: date, documentRefNo: doc,
+          route: isPr ? 'Purchase request' : ''
+        }).then(function () {
+          close(); S.selection = {};
+          toast(isPr ? 'Purchase request recorded.' : 'Schedule recorded.', 'ok');
+          loadOrders();
+        }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/**
+ * The part is on the shelf, but it has not moved yet — so it is recorded now
+ * and marked shipped when it actually goes out, which is what the shipping
+ * date is supposed to mean.
+ */
+function promptStock() {
+  const ids = Object.keys(S.selection);
+  openModal({
+    title: 'Fulfil from stock',
+    size: 'narrow',
+    body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') +
+      ' will be taken from stock rather than ordered.</p>' +
+      '<label class="field"><span>Expected to go out</span>' +
+      '<input type="date" id="avail"></label>' +
+      '<label class="field"><span>Reference or note</span>' +
+      '<input type="text" id="doc" placeholder="e.g. stock issue note"></label>' +
+      '<p class="tiny">Nothing is shipped yet. Mark the parts as shipped when they leave, ' +
+      'so the shipping date is the day they actually did.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Fulfil from stock', primary: true, onClick: function (close) {
+        api('claims.fulfilStock', {
+          itemIds: ids,
+          availabilityDate: el('avail').value,
+          note: el('doc').value.trim()
+        }).then(function () {
+          close(); S.selection = {}; toast('Recorded as coming from stock.', 'ok'); loadOrders();
+        }).catch(fail);
       } }
     ]
   });

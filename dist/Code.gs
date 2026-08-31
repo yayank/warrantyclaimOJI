@@ -58,7 +58,7 @@ SCHEMA[SHEET.ITEMS] = [
   'ItemID', 'ClaimID', 'PartID', 'PartName', 'Qty', 'ItemStatus',
   'AdvanceIssued', 'AdvanceIssuedAt', 'AdvanceIssuedBy', 'AdvanceNote',
   'DecisionBy', 'DecisionAt', 'DecisionReason',
-  'AvailabilityDate', 'DocumentRefNo',
+  'AvailabilityDate', 'DocumentRefNo', 'FulfilmentRoute',
   'ForwardedAt', 'ForwardedTo',
   'ShippedAt', 'ShippedBy',
   'PartReturnNote', 'PartReturnAt',
@@ -138,6 +138,20 @@ const ITEM_STATUS = {
   FORWARDED: 'Order Forwarded',
   AWAITING: 'Awaiting Part Availability',
   SHIPPED: 'Shipped'
+};
+
+/**
+ * How an approved part is going to be obtained.
+ *
+ * A claim still under principal warranty is ordered from the principal, and
+ * that is the only route that involves them. Once a unit is out of their
+ * warranty the part has to come from somewhere else: raised as a purchase
+ * request, or taken off the shelf. Blank until an administrator decides.
+ */
+const FULFILMENT = {
+  PRINCIPAL: 'Principal order',
+  PR: 'Purchase request',
+  STOCK: 'From stock'
 };
 
 const WARRANTY_TYPE = {
@@ -2156,6 +2170,7 @@ function shapeItem_(i) {
     decisionReason: i.DecisionReason,
     availabilityDate: i.AvailabilityDate ? formatDate_(i.AvailabilityDate) : '',
     documentRefNo: i.DocumentRefNo,
+    fulfilmentRoute: i.FulfilmentRoute || '',
     forwardedAt: i.ForwardedAt,
     forwardedTo: i.ForwardedTo,
     shippedAt: i.ShippedAt,
@@ -2797,6 +2812,9 @@ function setAvailability_(session, payload) {
   const date = String(payload.availabilityDate || '').trim();
   const docRef = String(payload.documentRefNo || '').trim();
   if (!date || !docRef) throw new Error('Enter both the availability date and the document reference.');
+  // A purchase request is the same shape as a principal order — a number and a
+  // date to expect it by — so it is the same transition, differently routed.
+  const route = payload.route === FULFILMENT.PR ? FULFILMENT.PR : FULFILMENT.PRINCIPAL;
 
   return withLock_(function () {
     const items = readLive_(SHEET.ITEMS).filter(function (i) {
@@ -2813,6 +2831,7 @@ function setAvailability_(session, payload) {
       }
       update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
         AvailabilityDate: date, DocumentRefNo: docRef,
+        FulfilmentRoute: item.FulfilmentRoute || route,
         ItemStatus: ITEM_STATUS.AWAITING,
         UpdatedAt: nowIso_(), UpdatedBy: session.email
       });
@@ -2846,6 +2865,13 @@ function forwardOrder_(session, payload) {
       guardTestScope_(session, claim);
       if (item.ItemStatus !== ITEM_STATUS.APPROVED) {
         throw new Error('Only approved parts that have not yet been forwarded can be sent.');
+      }
+      // A unit out of principal warranty is not the principal's to supply, so
+      // the part never reaches their order list — it is raised as a purchase
+      // request or taken from stock instead.
+      if (claim.WarrantyType !== WARRANTY_TYPE.PRINCIPAL) {
+        throw new Error(claim.ClaimID + ' is not under principal warranty — ' +
+          'raise a purchase request or fulfil it from stock instead.');
       }
       claims[claim.ClaimID] = claim;
       return {
@@ -2892,6 +2918,47 @@ function forwardOrder_(session, payload) {
     });
 
     return { ok: true, count: items.length, to: to };
+  });
+}
+
+/**
+ * Marks approved parts as coming off the shelf rather than being ordered.
+ *
+ * Recorded first and shipped afterwards, deliberately: the part is on the shelf
+ * but it has not moved yet, and the shipping date should say when it did.
+ */
+function fulfilFromStock_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+
+  return withLock_(function () {
+    const items = readLive_(SHEET.ITEMS).filter(function (i) {
+      return payload.itemIds.indexOf(i.ItemID) !== -1;
+    });
+    if (!items.length) throw new Error('No spare parts were selected.');
+
+    const note = String(payload.note || '').trim();
+    const date = String(payload.availabilityDate || '').trim();
+
+    items.forEach(function (item) {
+      const claim = findBy_(SHEET.CLAIMS, 'ClaimID', item.ClaimID);
+      guardTestScope_(session, claim);
+      if ([ITEM_STATUS.APPROVED, ITEM_STATUS.AWAITING].indexOf(item.ItemStatus) === -1) {
+        throw new Error('Only an approved part can be fulfilled from stock.');
+      }
+      update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
+        FulfilmentRoute: FULFILMENT.STOCK,
+        ItemStatus: ITEM_STATUS.AWAITING,
+        AvailabilityDate: date || item.AvailabilityDate,
+        DocumentRefNo: note || item.DocumentRefNo,
+        UpdatedAt: nowIso_(), UpdatedBy: session.email
+      });
+      audit_(session, 'SetAvailability', {
+        claimId: item.ClaimID, itemId: item.ItemID, field: 'FulfilmentRoute',
+        oldValue: item.FulfilmentRoute, newValue: FULFILMENT.STOCK, reason: note,
+        isTest: isTrue_(claim.IsTest)
+      });
+    });
+    return { ok: true, count: items.length };
   });
 }
 
@@ -4244,6 +4311,7 @@ function route_(session, action, payload) {
     case 'claims.decide': return decideItems_(session, payload);
     case 'claims.availability': return setAvailability_(session, payload);
     case 'claims.forwardOrder': return forwardOrder_(session, payload);
+    case 'claims.fulfilStock': return fulfilFromStock_(session, payload);
     case 'claims.shipped': return markShipped_(session, payload);
     case 'claims.partReturn': return recordPartReturn_(session, payload);
     case 'claims.advanceIssue': return setAdvanceIssue_(session, payload);

@@ -44,7 +44,7 @@ SCHEMA[SHEET.ITEMS] = [
   'ItemID', 'ClaimID', 'PartID', 'PartName', 'Qty', 'ItemStatus',
   'AdvanceIssued', 'AdvanceIssuedAt', 'AdvanceIssuedBy', 'AdvanceNote',
   'DecisionBy', 'DecisionAt', 'DecisionReason',
-  'AvailabilityDate', 'DocumentRefNo',
+  'AvailabilityDate', 'DocumentRefNo', 'FulfilmentRoute',
   'ForwardedAt', 'ForwardedTo',
   'ShippedAt', 'ShippedBy',
   'PartReturnNote', 'PartReturnAt',
@@ -124,6 +124,20 @@ const ITEM_STATUS = {
   FORWARDED: 'Order Forwarded',
   AWAITING: 'Awaiting Part Availability',
   SHIPPED: 'Shipped'
+};
+
+/**
+ * How an approved part is going to be obtained.
+ *
+ * A claim still under principal warranty is ordered from the principal, and
+ * that is the only route that involves them. Once a unit is out of their
+ * warranty the part has to come from somewhere else: raised as a purchase
+ * request, or taken off the shelf. Blank until an administrator decides.
+ */
+const FULFILMENT = {
+  PRINCIPAL: 'Principal order',
+  PR: 'Purchase request',
+  STOCK: 'From stock'
 };
 
 const WARRANTY_TYPE = {
