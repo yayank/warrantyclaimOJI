@@ -44,7 +44,20 @@ function claimFolder_(claim) {
   const parent = claim.RefNo
     ? childFolder_(base, claim.RefNo)
     : childFolder_(base, FOLDER.DRAFT);
-  return childFolder_(parent, claim.ClaimID);
+  const folder = childFolder_(parent, claim.ClaimID);
+
+  // Remember where it is, so the walk above happens once per claim rather than
+  // once per file. The note is written without bumping RowVersion: the browser
+  // is holding the claim it just saved and is about to submit it.
+  claim.DriveFolderId = folder.getId();
+  if (claim.ClaimID) {
+    try {
+      setCell_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, 'DriveFolderId', claim.DriveFolderId);
+    } catch (e) {
+      // The folder is usable either way; the next upload will walk again.
+    }
+  }
+  return folder;
 }
 
 function kindFolder_(claim, kind) {

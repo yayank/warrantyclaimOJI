@@ -484,6 +484,32 @@ function update_(name, keyField, keyValue, changes, expectedVersion) {
   return rowToObject_(head, current);
 }
 
+/**
+ * Writes one cell without touching RowVersion.
+ *
+ * A note the server makes for its own benefit — where a claim's Drive folder
+ * ended up — is not an edit anybody made, and bumping the version for it would
+ * make the copy the browser is already holding stale: it would upload a file
+ * and then be told its claim had moved on.
+ */
+function setCell_(name, keyField, keyValue, field, value) {
+  const s = sheet_(name);
+  const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const keyCol = head.indexOf(keyField);
+  const col = head.indexOf(field);
+  if (keyCol === -1 || col === -1) return false;
+
+  const last = s.getLastRow();
+  const keys = last > 1 ? s.getRange(2, keyCol + 1, last - 1, 1).getValues() : [];
+  for (let i = 0; i < keys.length; i++) {
+    if (String(keys[i][0]) === String(keyValue)) {
+      s.getRange(i + 2, col + 1).setValue(value);
+      return true;
+    }
+  }
+  return false;
+}
+
 function rowToObject_(head, row) {
   const obj = {};
   for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
@@ -1306,7 +1332,20 @@ function claimFolder_(claim) {
   const parent = claim.RefNo
     ? childFolder_(base, claim.RefNo)
     : childFolder_(base, FOLDER.DRAFT);
-  return childFolder_(parent, claim.ClaimID);
+  const folder = childFolder_(parent, claim.ClaimID);
+
+  // Remember where it is, so the walk above happens once per claim rather than
+  // once per file. The note is written without bumping RowVersion: the browser
+  // is holding the claim it just saved and is about to submit it.
+  claim.DriveFolderId = folder.getId();
+  if (claim.ClaimID) {
+    try {
+      setCell_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, 'DriveFolderId', claim.DriveFolderId);
+    } catch (e) {
+      // The folder is usable either way; the next upload will walk again.
+    }
+  }
+  return folder;
 }
 
 function kindFolder_(claim, kind) {
@@ -2381,8 +2420,10 @@ function saveClaim_(session, payload) {
         RowVersion: 1
       }, fields);
       insert_(SHEET.CLAIMS, claim);
-      claim.DriveFolderId = claimFolder_(claim).getId();
-      update_(SHEET.CLAIMS, 'ClaimID', claimId, { DriveFolderId: claim.DriveFolderId });
+      // No Drive folder yet. Making one costs four Drive round trips — root,
+      // test, _DRAFT, the claim — and most of that time is spent before the
+      // requester has attached anything to put in it. The first upload creates
+      // it and writes the id back, so a claim that never gets a file never pays.
       audit_(session, 'Create', { claimId: claimId, isTest: isTest });
     } else {
       const changes = [];

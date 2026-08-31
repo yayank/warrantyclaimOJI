@@ -562,8 +562,17 @@ function seesAdvanceIssue() {
 }
 
 function warrantyPill(type) {
-  // One word for the field roles: they do not act on the difference.
-  if (!seesInternals()) return '<span class="pill flat p-ok">Warranty</span>';
+  // The field roles do not act on the difference between principal and
+  // internal cover, but they do need to know when there is no cover at all.
+  if (!seesInternals()) {
+    if (type === WARRANTY.OUT) {
+      return '<span class="pill flat p-no">Out of warranty</span>';
+    }
+    if (type === WARRANTY.MANUAL) {
+      return '<span class="pill flat p-wait">Being checked</span>';
+    }
+    return '<span class="pill flat p-ok">Warranty</span>';
+  }
   const cls = type === WARRANTY.PRINCIPAL ? 'p-ok'
     : type === WARRANTY.OUT ? 'p-no'
       : type === WARRANTY.INTERNAL ? 'p-rev' : 'p-wait';

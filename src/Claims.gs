@@ -376,8 +376,10 @@ function saveClaim_(session, payload) {
         RowVersion: 1
       }, fields);
       insert_(SHEET.CLAIMS, claim);
-      claim.DriveFolderId = claimFolder_(claim).getId();
-      update_(SHEET.CLAIMS, 'ClaimID', claimId, { DriveFolderId: claim.DriveFolderId });
+      // No Drive folder yet. Making one costs four Drive round trips — root,
+      // test, _DRAFT, the claim — and most of that time is spent before the
+      // requester has attached anything to put in it. The first upload creates
+      // it and writes the id back, so a claim that never gets a file never pays.
       audit_(session, 'Create', { claimId: claimId, isTest: isTest });
     } else {
       const changes = [];

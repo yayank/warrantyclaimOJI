@@ -274,6 +274,32 @@ function update_(name, keyField, keyValue, changes, expectedVersion) {
   return rowToObject_(head, current);
 }
 
+/**
+ * Writes one cell without touching RowVersion.
+ *
+ * A note the server makes for its own benefit — where a claim's Drive folder
+ * ended up — is not an edit anybody made, and bumping the version for it would
+ * make the copy the browser is already holding stale: it would upload a file
+ * and then be told its claim had moved on.
+ */
+function setCell_(name, keyField, keyValue, field, value) {
+  const s = sheet_(name);
+  const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const keyCol = head.indexOf(keyField);
+  const col = head.indexOf(field);
+  if (keyCol === -1 || col === -1) return false;
+
+  const last = s.getLastRow();
+  const keys = last > 1 ? s.getRange(2, keyCol + 1, last - 1, 1).getValues() : [];
+  for (let i = 0; i < keys.length; i++) {
+    if (String(keys[i][0]) === String(keyValue)) {
+      s.getRange(i + 2, col + 1).setValue(value);
+      return true;
+    }
+  }
+  return false;
+}
+
 function rowToObject_(head, row) {
   const obj = {};
   for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
