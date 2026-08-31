@@ -2137,6 +2137,17 @@ function runLookup(serial) {
     '<div class="tiny">Checking…</div></div>';
 
   api('claims.lookup', { serialNumber: serial }).then(function (data) {
+    // Editing an existing claim: the open-claim warning is not asked for.
+    //
+    // The claim being edited is itself an open claim on this unit, so the
+    // warning fires against the requester's own work — and the per-row "already
+    // requested on CLM-…" flag turns every part red for the same reason. There
+    // is nothing here for them to act on: they are not starting a second claim,
+    // they are finishing this one.
+    if (FORM.claim) {
+      data = Object.assign({}, data, { openClaims: [], openParts: {} });
+    }
+
     FORM.lookup = data;
     const w = data.warranty;
     const cls = w.type === WARRANTY.PRINCIPAL ? 'ok'

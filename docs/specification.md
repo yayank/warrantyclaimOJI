@@ -402,6 +402,14 @@ Penanda `AdvanceIssued` **berdiri di luar rangkaian ini** — bisa dipasang atau
 
 Kolom Status pada tabel menampilkan **posisi alur**; hasil keputusan tampil terpisah sebagai ringkasan seperti `2 approved · 1 rejected · 1 issued in advance`.
 
+### Peringatan klaim terbuka hanya untuk klaim baru
+
+Saat serial number diketik, portal memberi tahu kalau unit itu punya klaim lain yang masih terbuka, dan menandai baris sparepart yang sudah diminta di klaim itu. Berguna untuk klaim baru — di situlah order ganda bermula.
+
+**Saat menyunting klaim, peringatan itu tidak ditampilkan.** Klaim yang sedang disunting itu sendiri adalah klaim terbuka atas unit tersebut, jadi peringatannya menuduh requester bersaing dengan dirinya sendiri, dan penanda per baris membuat seluruh sparepart-nya merah karena alasan yang sama. Tidak ada yang bisa mereka tindaklanjuti: mereka bukan sedang memulai klaim kedua, mereka sedang menyelesaikan yang ini.
+
+Server tetap menghitung dan melaporkannya seperti biasa — yang berubah hanya apa yang ditampilkan layar, karena ini memang perkara tampilan.
+
 ### Klaim tidak tertutup sebelum part rusak kembali
 
 Part pengganti dikirim, dan part rusaknya seharusnya kembali. Menutup klaim begitu part barunya terkirim menghapus satu-satunya catatan bahwa masih ada yang terutang — dan part yang dikirim tanpa penggantinya kembali justru itulah yang biasanya hilang.
