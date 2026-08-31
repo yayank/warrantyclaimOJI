@@ -510,8 +510,19 @@ ITEM_CLASS[ITEM.FORWARDED] = 'p-rev';
 ITEM_CLASS[ITEM.AWAITING] = 'p-wait';
 ITEM_CLASS[ITEM.SHIPPED] = 'p-ok';
 
+/**
+ * "Returned to Requester" is how the workflow describes the move. To the
+ * requester holding it, the useful word is what has become of their claim.
+ * The stored status is untouched — this is only what the screen says.
+ */
+function statusLabel(status) {
+  if (status === STATUS.RETURNED && !seesInternals()) return 'Revised!';
+  return status;
+}
+
 function statusPill(status) {
-  return '<span class="pill ' + (STATUS_CLASS[status] || 'p-draft') + '">' + h(status) + '</span>';
+  return '<span class="pill ' + (STATUS_CLASS[status] || 'p-draft') + '">' +
+    h(statusLabel(status)) + '</span>';
 }
 function itemPill(status) {
   return '<span class="pill ' + (ITEM_CLASS[status] || 'p-draft') + '">' + h(status) + '</span>';
@@ -820,7 +831,8 @@ function renderClaims() {
         '<button type="button" data-view="item"' + (S.view === 'item' ? ' class="on"' : '') + '>By spare part</button>',
       '</div>',
       '<input type="text" id="q" class="grow" placeholder="Search claim ID, reference, serial number, customer…" value="' + h(S.filters.search) + '">',
-      selectFilter('statusFilter', 'All statuses', S.reference.statuses, S.filters.statuses[0] || ''),
+      selectFilter('statusFilter', 'All statuses', S.reference.statuses,
+        S.filters.statuses[0] || '', statusLabel),
       S.session.role === ROLE.ADMIN
         ? selectFilter('warrantyFilter', 'All warranties', S.reference.warrantyTypes,
           S.filters.warrantyTypes[0] || '')
@@ -847,11 +859,17 @@ function tabButton(id, label, count) {
     h(label) + (count ? ' <span class="count">' + count + '</span>' : '') + '</button>';
 }
 
-function selectFilter(id, blank, options, value) {
+/**
+ * The value sent to the server is always the stored one; `label` only changes
+ * what the reader sees, so a filter never stops matching what it filters.
+ */
+function selectFilter(id, blank, options, value, label) {
+  const shown = label || function (o) { return o; };
   return '<select id="' + id + '" style="width:auto;min-width:150px">' +
     '<option value="">' + h(blank) + '</option>' +
     options.map(function (o) {
-      return '<option value="' + h(o) + '"' + (o === value ? ' selected' : '') + '>' + h(o) + '</option>';
+      return '<option value="' + h(o) + '"' + (o === value ? ' selected' : '') + '>' +
+        h(shown(o)) + '</option>';
     }).join('') + '</select>';
 }
 
@@ -880,7 +898,7 @@ function principalFilter() {
 function activeChips() {
   const chips = [];
   if (S.filters.statuses.length) {
-    chips.push(chip('Status', S.filters.statuses.join(', '), 'statuses'));
+    chips.push(chip('Status', S.filters.statuses.map(statusLabel).join(', '), 'statuses'));
   }
   if (S.filters.warrantyTypes.length) {
     chips.push(chip('Warranty', S.filters.warrantyTypes.join(', '), 'warrantyTypes'));

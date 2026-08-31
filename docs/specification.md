@@ -438,6 +438,8 @@ Requester dan Production berada di lapangan: mereka meminta sparepart, dan mekan
 | Baris **Principal** | Unit ini milik principal mana, dan fakta bahwa belum terpetakan, adalah pekerjaan Administrator |
 | Filter garansi | Menyaring berdasarkan pembedaan yang tidak mereka lihat |
 
+Satu hal justru ditambahkan untuk mereka: status `Returned to Requester` terbaca **“Revised!”**. Kalimat alur kerjanya menggambarkan perpindahannya; yang berguna bagi orang yang sedang memegang klaim itu adalah apa yang terjadi pada klaimnya. Statusnya sendiri tidak berubah — hanya kata yang ditampilkan, jadi filter dan penyaringan tetap mencocokkan nilai yang tersimpan.
+
 Principal tetap melihat penilaian garansi dan History — itu dasar keputusan mereka. Yang **tidak** mereka lihat adalah penanda sparepart talangan (*issued in advance* dan catatan stoknya): itu stok Administrator, bukan urusan principal. Filter garansi juga ditiadakan, karena mereka hanya pernah melihat klaim garansi principal.
 
 ### Pemenuhan di luar garansi principal
