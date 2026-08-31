@@ -105,7 +105,7 @@ Empat hal yang membentuk alur ini dan mudah terlewat:
 - **Work Order adalah gerbang** menuju principal, bukan syarat pengiriman. Principal menerima klaim yang sudah punya nomor kerja internal.
 - **Keputusan diambil per sparepart**, bukan per klaim.
 - **Penolakan tidak final.** Diskusi berlanjut di luar aplikasi, dan keputusan dapat diubah kapan saja dengan alasan tertulis.
-- **Klaim ditutup saat part dikirim.** Pengembalian part rusak dicatat sesudahnya sebagai keterangan.
+- **Klaim ditutup setelah part rusaknya kembali**, bukan saat part barunya dikirim — lihat bagian 11.
 
 ### Isian yang bisa dicari
 
@@ -396,10 +396,21 @@ Sekarang indeks disimpan sebagai potongan bernomor (`cachePutLarge_`), dan dipeg
 | Approved | Awaiting Part Availability | Administrator | Jalur internal: PR diajukan, atau dipenuhi dari stok |
 | Order Forwarded | Awaiting Part Availability | Administrator | `AvailabilityDate` dan `DocumentRefNo` terisi |
 | Awaiting Part Availability | Shipped | Administrator | Penandaan pengiriman |
+| Shipped | Closed | otomatis | **Hanya setelah part rusaknya dikembalikan** |
 
 Penanda `AdvanceIssued` **berdiri di luar rangkaian ini** — bisa dipasang atau dicabut kapan saja sebelum klaim ditutup, tanpa mengubah status item.
 
 Kolom Status pada tabel menampilkan **posisi alur**; hasil keputusan tampil terpisah sebagai ringkasan seperti `2 approved · 1 rejected · 1 issued in advance`.
+
+### Klaim tidak tertutup sebelum part rusak kembali
+
+Part pengganti dikirim, dan part rusaknya seharusnya kembali. Menutup klaim begitu part barunya terkirim menghapus satu-satunya catatan bahwa masih ada yang terutang — dan part yang dikirim tanpa penggantinya kembali justru itulah yang biasanya hilang.
+
+`recomputeClaimStatus_` karena itu menahan klaim di `In Fulfilment` selama masih ada item berstatus `Shipped` yang `PartReturnAt`-nya kosong. Satu item saja cukup menahan seluruh klaim. Administrator mencatatnya lewat tombol **Record part return** di panel — jalurnya (`claims.partReturn`) sudah ada sejak awal, tetapi tidak pernah ada layar yang memanggilnya — dan pencatatan itulah yang menutup klaimnya.
+
+Klaim yang seluruh partnya ditolak tetap tertutup seperti biasa: tidak ada yang pernah dikirim, jadi tidak ada yang terutang.
+
+Penandanya (`↩ to return`) tampil di tabel dan di panel untuk semua peran; item yang sudah kembali menampilkan tanggalnya. `tools/verify-closing.js` menguji aturan ini.
 
 ### Tab pada layar klaim
 
@@ -638,7 +649,7 @@ Empat hal yang menopang ketiganya:
 
 ## 19. Pengujian
 
-Delapan penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
+Sembilan penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
 
 ```bash
 node tools/verify-warranty.js units.json    # mesin garansi, 2.610 unit asli
@@ -649,6 +660,7 @@ node tools/verify-payload.js                # tidak ada Date yang lolos ke brows
 node tools/verify-tabs.js                   # tidak ada klaim yang lolos dari semua tab
 node tools/verify-cache.js                  # sheet unit dibaca sekali, bukan tiap pertanyaan
 node tools/verify-fulfilment.js             # part tidak pernah salah jalur
+node tools/verify-closing.js                # klaim tidak tertutup selama part masih terutang
 ```
 
 Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 180 · 11 · 18 pemeriksaan, seluruhnya lolos.**

@@ -128,6 +128,13 @@ function summaryText(s) {
   return bits.join(' · ');
 }
 
+/** A replacement went out; the faulty part has not come back yet. */
+function returnBadge(awaiting) {
+  if (!awaiting) return '';
+  return '<span class="pill p-sub" title="The faulty part has not been returned">' +
+    '\u21a9 to return</span>';
+}
+
 function toast(message, kind) {
   const node = document.createElement('div');
   node.className = 'toast ' + (kind || 'info');
@@ -549,6 +556,7 @@ function itemTable() {
       cells.push('<td class="stack">' + itemPill(i.itemStatus) +
         (i.advanceIssued && seesAdvanceIssue()
           ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
+        returnBadge(i.awaitingReturn) +
         '</td>',
         '<td class="tiny">' + h(i.decisionReason || '') + '</td>');
       body.push('<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>');
@@ -714,6 +722,10 @@ function renderClaimPanel(c) {
               (i.advanceNote ? ' — ' + h(i.advanceNote) : '') +
               '. What arrives from the principal replenishes stock.</div>'
             : '') +
+          returnBadge(i.awaitingReturn) +
+          (i.partReturnAt
+            ? '<span class="tiny">faulty part returned ' + h(fmtDate(i.partReturnAt)) + '</span>'
+            : '') +
           (i.decisionReason ? '<div class="tiny" style="width:100%">' + h(i.decisionReason) + '</div>' : '') +
           (i.availabilityDate ? '<div class="tiny" style="width:100%">Available ' +
             h(fmtDate(i.availabilityDate)) + ' · ' + h(i.documentRefNo) + '</div>' : '') +
@@ -849,6 +861,9 @@ function renderPanelActions(c) {
     if (c.status !== STATUS.CLOSED) {
       buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
     }
+    if (c.summary && c.summary.awaitingReturn) {
+      buttons.push(btn('Record part return', 'pri', function () { promptPartReturn(c); }));
+    }
     if (!c.principal && c.status !== STATUS.CLOSED) {
       buttons.push(btn('Assign principal', 'pri', function () { promptPrincipal(c); }));
     }
@@ -944,6 +959,38 @@ function showAttachment(attachmentId) {
 }
 
 /* ---------------------------------------------------------- prompts */
+
+/**
+ * The faulty part coming back is what finishes a claim. Until it is recorded
+ * the claim stays open, because nothing else remembers that it is owed.
+ */
+function promptPartReturn(claim) {
+  const owed = claim.items.filter(function (i) { return i.awaitingReturn; });
+  openModal({
+    title: 'Record part return',
+    size: 'narrow',
+    body: '<p class="tiny">A claim stays open until every part sent has had its faulty ' +
+      'one returned.</p>' +
+      owed.map(function (i) {
+        return '<label class="itemrow"><input type="radio" name="ret" class="ret" value="' +
+          h(i.itemId) + '"><span class="nm">' + h(i.partName) + '</span>' +
+          '<span class="mono tiny">' + i.qty + ' pcs</span></label>';
+      }).join('') +
+      '<label class="field"><span>Note</span>' +
+      '<input type="text" id="retNote" placeholder="condition, who brought it back"></label>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Record return', primary: true, onClick: function (close) {
+        const picked = document.querySelector('.ret:checked');
+        if (!picked) { toast('Choose which part came back.', 'err'); return; }
+        api('claims.partReturn', { itemId: picked.value, note: el('retNote').value.trim() })
+          .then(function () {
+            close(); toast('Part return recorded.', 'ok'); reopen(claim.claimId); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
 
 function promptReturn(c) {
   openModal({

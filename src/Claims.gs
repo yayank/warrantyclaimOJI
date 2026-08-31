@@ -109,6 +109,7 @@ function shapeClaim_(c, items) {
   const pending = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.PENDING; }).length;
   const shipped = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.SHIPPED; }).length;
   const advance = shaped.filter(function (i) { return i.advanceIssued; }).length;
+  const awaitingReturn = shaped.filter(function (i) { return i.awaitingReturn; }).length;
 
   const stamp = c.SubmittedAt || c.CreatedAt || '';
   return {
@@ -142,7 +143,7 @@ function shapeClaim_(c, items) {
     ageDays: ageDays_(c),
     summary: {
       approved: approved, rejected: rejected, pending: pending,
-      shipped: shipped, advance: advance
+      shipped: shipped, advance: advance, awaitingReturn: awaitingReturn
     },
     items: shaped
   };
@@ -170,6 +171,8 @@ function shapeItem_(i) {
     forwardedTo: i.ForwardedTo,
     shippedAt: i.ShippedAt,
     partReturnNote: i.PartReturnNote,
+    partReturnAt: i.PartReturnAt,
+    awaitingReturn: i.ItemStatus === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim(),
     rowVersion: Number(i.RowVersion || 0)
   };
 }
@@ -778,6 +781,13 @@ function recomputeClaimStatus_(session, claimId) {
   }).length;
   const shipped = items.filter(function (i) { return i.ItemStatus === ITEM_STATUS.SHIPPED; }).length;
 
+  // A replacement has gone out and the faulty part has not come back. Closing
+  // here would erase the only record that something is still owed — and a part
+  // sent without its old one returned is exactly what goes missing.
+  const awaitingReturn = items.filter(function (i) {
+    return i.ItemStatus === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim();
+  }).length;
+
   let next = claim.Status;
   let notify = false;
 
@@ -786,6 +796,8 @@ function recomputeClaimStatus_(session, claimId) {
     // approved part has shipped.
     next = approvedLike === 0 ? STATUS.CLOSED : STATUS.FULFILMENT;
     notify = [STATUS.IN_REVIEW, STATUS.INTERNAL].indexOf(claim.Status) !== -1;
+    // A claim where everything was rejected still closes: nothing was ever sent.
+    if (next === STATUS.CLOSED && awaitingReturn) next = STATUS.FULFILMENT;
   }
 
   if (next !== claim.Status) {
@@ -797,7 +809,7 @@ function recomputeClaimStatus_(session, claimId) {
       isTest: isTrue_(claim.IsTest)
     });
   }
-  return { notify: notify, status: next };
+  return { notify: notify, status: next, awaitingReturn: awaitingReturn };
 }
 
 /* ---------------------------------------------------------- fulfilment */
@@ -1057,7 +1069,10 @@ function recordPartReturn_(session, payload) {
       claimId: item.ClaimID, itemId: item.ItemID, field: 'PartReturnNote',
       oldValue: item.PartReturnNote, newValue: payload.note, isTest: isTrue_(claim.IsTest)
     });
-    return { ok: true };
+    // The outstanding return may have been the only thing holding the claim
+    // open, so this is the moment it can finish.
+    recomputeClaimStatus_(session, item.ClaimID);
+    return getClaim_(session, item.ClaimID);
   });
 }
 
