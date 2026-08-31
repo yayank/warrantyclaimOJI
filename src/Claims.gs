@@ -53,11 +53,12 @@ function matchesTab_(session, row, tab) {
   if (tab === 'all') return true;
   if (tab === 'completed') return row.status === STATUS.CLOSED;
   if (tab === 'progress') {
-    // Anything not finished and not waiting on the viewer. A draft is the
-    // requester's own work, so it is their action rather than their progress —
-    // needsAction_ already says so, and saying it twice here hid every draft
-    // from the administrator, who has no other tab that would show one.
-    return row.status !== STATUS.CLOSED && !needsAction_(session, row);
+    // A draft has not been submitted, so nothing about it is in progress: it is
+    // the requester's own unfinished work, and an administrator seeing it in
+    // their working tabs reads as work waiting on somebody. Drafts other than
+    // your own are reachable from All.
+    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 &&
+      !needsAction_(session, row);
   }
   if (tab === 'action') return needsAction_(session, row);
   return true;

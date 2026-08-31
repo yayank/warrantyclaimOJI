@@ -152,7 +152,9 @@ const SETTING_KEY = {
   CLIENT_ID: 'GoogleClientId',
   ROOT_FOLDER: 'DriveRootFolderId',
   DIGEST_HOUR: 'DigestHour',
-  APP_URL: 'AppUrl'
+  APP_URL: 'AppUrl',
+  /** Whether the portal sends email at all. Everything is still logged. */
+  EMAIL_ENABLED: 'EmailNotifications'
 };
 
 const FOLDER = {

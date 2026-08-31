@@ -406,10 +406,26 @@ Tiga tab membagi habis pekerjaan, dan sisanya ada di **All**:
 | Tab | Isinya |
 |---|---|
 | Needs Action | klaim yang menunggu peran yang sedang melihat |
-| In Progress | belum selesai, dan tidak menunggu peran yang sedang melihat |
+| In Progress | sudah diajukan, belum selesai, dan tidak menunggu peran yang sedang melihat |
 | Completed | `Closed` |
+| All | semuanya, termasuk draft milik orang lain |
 
-Aturannya harus membagi habis: setiap klaim yang terlihat oleh sebuah peran wajib masuk **tepat satu** dari ketiganya. Sebelumnya `Draft` dikecualikan dari In Progress untuk semua peran sekaligus sudah bukan Needs Action bagi Administrator — akibatnya draft tidak muncul di tab mana pun kecuali All, dan tidak ada yang menjelaskan kenapa. `tools/verify-tabs.js` menguji seluruh kombinasi peran × status × status item terhadap aturan ini.
+`Draft` sengaja berada di luar ketiga tab kerja kecuali bagi pemiliknya sendiri: klaim yang belum diajukan tidak sedang berjalan dan tidak menunggu siapa pun selain penulisnya. Bagi Administrator draft hanya muncul di **All**. `tools/verify-tabs.js` menguji seluruh kombinasi peran × status × status item: sebuah klaim tidak pernah berada di dua tab kerja sekaligus, dan draft milik orang lain tidak berada di satu pun.
+
+### Apa yang dilihat tiap peran
+
+Requester dan Production berada di lapangan: mereka meminta sparepart, dan mekanisme di dalam portal bukan sesuatu yang bisa mereka tindaklanjuti. Karena itu bagi keduanya:
+
+| Yang disembunyikan | Alasan |
+|---|---|
+| Jenis garansi | Ditampilkan satu kata, **Warranty**. Perbedaan Principal / Out of Principal / Internal adalah cara Administrator merutekan klaim, bukan sesuatu yang diputuskan pemohon |
+| Perhitungan garansi (`WarrantyBasis`) | Perhitungan yang bukan mereka buat dan tidak bisa mereka ubah |
+| “overridden by administrator” dan alasannya | Sama |
+| Bagian **History** | Jejak audit menjawab “siapa mengubah apa” — pertanyaan Administrator |
+| Baris **Principal** | Unit ini milik principal mana, dan fakta bahwa belum terpetakan, adalah pekerjaan Administrator |
+| Filter garansi | Menyaring berdasarkan pembedaan yang tidak mereka lihat |
+
+Principal tetap melihat penilaian garansi dan History — itu dasar keputusan mereka. Yang **tidak** mereka lihat adalah penanda sparepart talangan (*issued in advance* dan catatan stoknya): itu stok Administrator, bukan urusan principal. Filter garansi juga ditiadakan, karena mereka hanya pernah melihat klaim garansi principal.
 
 ## 12. Matriks hak akses
 
@@ -425,7 +441,7 @@ Aturannya harus membagi habis: setiap klaim yang terlihat oleh sebuah peran waji
 | Foto kerusakan · Service Report | ✓ | ✓ | ✓ | ○ |
 | **Advance issue** | — | — | ✓ (s/d Closed) | ○ |
 | **Principal klaim** | ○ | ○ | ✓ | ○ |
-| Status garansi | ○ | ○ | ✓ **R** | ○ |
+| Status garansi | — ² | — ² | ✓ **R** | ○ |
 | Work Order | — | — | ✓ **R** | ○ |
 | Keputusan per sparepart | ○ | ○ | ○ ¹ | ✓ **R** |
 | Availability Date · Document Ref | ○ | ○ | ✓ | ○ |
@@ -433,6 +449,8 @@ Aturannya harus membagi habis: setiap klaim yang terlihat oleh sebuah peran waji
 | Master data | — | — | ✓ | — |
 
 ¹ Administrator memutuskan hanya di jalur garansi internal.
+
+² Requester dan Production melihat satu kata, **Warranty** — bukan jenisnya. Lihat *Apa yang dilihat tiap peran* di bagian 11.
 
 Untuk Requester dan Production, kolom bertanda ✓ hanya dapat diubah selama status `Draft` atau `Returned to Requester`.
 
@@ -541,6 +559,10 @@ Placeholder `{{Principal}}` tersedia di semua template; `{{AdvanceIssue}}` di da
 Perulangan: `{{#Items}}…{{/Items}}` untuk daftar sparepart, `{{#Claims}}…{{/Claims}}` untuk rekap harian, `{{#Changes}}…{{/Changes}}` untuk daftar perubahan.
 
 **Rekap harian dipecah per principal per nomor referensi.** Klaim yang principal-nya belum terpetakan tidak ikut terkirim dan dilaporkan sebagai *skipped*.
+
+### Notifikasi email bisa dimatikan
+
+Ada saklar **Send email notifications** di layar Email Log (Administrator). Saat dimatikan, alur klaim berjalan seperti biasa dan setiap pesan tetap dicatat — statusnya `Not sent` dengan alasan yang tertulis, bukan seolah-olah terkirim. Nilainya disimpan di `Settings!EmailNotifications`, dan perubahannya tercatat di `AuditLog`.
 
 ### Layar Email Log
 

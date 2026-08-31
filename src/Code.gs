@@ -187,6 +187,7 @@ function route_(session, action, payload) {
     case 'templates.restore': return restoreTemplate_(session, payload.code);
     case 'templates.test': return sendTestTemplate_(session, payload.code);
     case 'email.log': return listEmailLog_(session, payload);
+    case 'email.setEnabled': return setEmailEnabled_(session, payload.enabled);
     case 'email.digestNow': return sendDigestNow_(session);
 
     /* audit and test mode */

@@ -88,7 +88,27 @@ function statusPill(status) {
 function itemPill(status) {
   return '<span class="pill ' + (ITEM_CLASS[status] || 'p-draft') + '">' + h(status) + '</span>';
 }
+/**
+ * Who is shown how the portal works.
+ *
+ * Which kind of warranty a unit carries, who overrode it and why, who was
+ * notified and when — all of that is the administrator's business, and the
+ * principal's where it concerns their own units. A requester in a hospital
+ * asked for a part: to them the machine is under warranty or it is not, and
+ * the rest is noise they cannot act on.
+ */
+function seesInternals() {
+  return S.session.role !== ROLE.REQUESTER && S.session.role !== ROLE.PRODUCTION;
+}
+
+/** The advance-issue markers belong to whoever owns the stock. */
+function seesAdvanceIssue() {
+  return S.session.role === ROLE.ADMIN;
+}
+
 function warrantyPill(type) {
+  // One word for the field roles: they do not act on the difference.
+  if (!seesInternals()) return '<span class="pill flat p-ok">Warranty</span>';
   const cls = type === WARRANTY.PRINCIPAL ? 'p-ok'
     : type === WARRANTY.OUT ? 'p-no'
       : type === WARRANTY.INTERNAL ? 'p-rev' : 'p-wait';
@@ -104,7 +124,7 @@ function summaryText(s) {
   if (s.approved) bits.push(s.approved + ' approved');
   if (s.rejected) bits.push(s.rejected + ' rejected');
   if (s.pending) bits.push(s.pending + ' pending');
-  if (s.advance) bits.push(s.advance + ' issued in advance');
+  if (s.advance && seesAdvanceIssue()) bits.push(s.advance + ' issued in advance');
   return bits.join(' · ');
 }
 
@@ -366,7 +386,10 @@ function renderClaims() {
       '</div>',
       '<input type="text" id="q" class="grow" placeholder="Search claim ID, reference, serial number, customer…" value="' + h(S.filters.search) + '">',
       selectFilter('statusFilter', 'All statuses', S.reference.statuses, S.filters.statuses[0] || ''),
-      selectFilter('warrantyFilter', 'All warranties', S.reference.warrantyTypes, S.filters.warrantyTypes[0] || ''),
+      S.session.role === ROLE.ADMIN
+        ? selectFilter('warrantyFilter', 'All warranties', S.reference.warrantyTypes,
+          S.filters.warrantyTypes[0] || '')
+        : '',
       customerFilter(),
       principalFilter(),
       '<span class="spacer"></span>',
@@ -524,7 +547,8 @@ function itemTable() {
       ];
       if (showWo) cells.push('<td class="mono' + faded + '">' + h(c.workOrderNo || '—') + '</td>');
       cells.push('<td class="stack">' + itemPill(i.itemStatus) +
-        (i.advanceIssued ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
+        (i.advanceIssued && seesAdvanceIssue()
+          ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
         '</td>',
         '<td class="tiny">' + h(i.decisionReason || '') + '</td>');
       body.push('<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>');
@@ -648,20 +672,30 @@ function renderClaimPanel(c) {
   const s = S.session;
   const sec = [];
 
+  // The working — the assembly month, the months added, the exception that
+  // overrode it, who overrode it — is how the administrator defends a decision.
+  // To a requester it is a calculation they did not make and cannot change.
   sec.push(
-    '<div class="panel-sec"><h3>Warranty assessment</h3>' +
+    '<div class="panel-sec"><h3>' + (seesInternals() ? 'Warranty assessment' : 'Unit') + '</h3>' +
       '<div class="calc"><b>' + h(c.serialNumber) + '</b>' +
-        (c.productName ? ' · ' + h(c.productName) : '') + '<br>' + h(c.warrantyBasis) + '</div>' +
+        (c.productName ? ' · ' + h(c.productName) : '') +
+        (seesInternals() ? '<br>' + h(c.warrantyBasis) : '') + '</div>' +
       '<div class="row">' + warrantyPill(c.warrantyType) +
-        (c.warrantyOverridden ? '<span class="tiny" style="color:var(--warn);font-weight:600">🔧 overridden by administrator</span>' : '') +
+        (c.warrantyOverridden && seesInternals()
+          ? '<span class="tiny" style="color:var(--warn);font-weight:600">🔧 overridden by administrator</span>'
+          : '') +
         '</div>' +
-      (c.warrantyOverrideReason ? '<div class="tiny">' + h(c.warrantyOverrideReason) + '</div>' : '') +
+      (c.warrantyOverrideReason && seesInternals()
+        ? '<div class="tiny">' + h(c.warrantyOverrideReason) + '</div>' : '') +
     '</div>'
   );
 
   sec.push(
     '<div class="panel-sec"><h3>Claim</h3>' +
-      kv('Principal', c.principal || '— not attributed') +
+      // Which principal a unit routes to, and the fact that it routes to none
+      // yet, is the administrator's problem to solve, not the requester's.
+      (S.session.role === ROLE.REQUESTER || S.session.role === ROLE.PRODUCTION
+        ? '' : kv('Principal', c.principal || '— not attributed')) +
       kv('Customer', c.customerName) + kv('Requested by', c.requesterName) +
       kv('Reference', c.refNo || '—') + kv('Work order', c.workOrderNo || '—') +
       (c.returnReason ? kv('Returned because', c.returnReason) : '') +
@@ -674,7 +708,7 @@ function renderClaimPanel(c) {
       c.items.map(function (i) {
         return '<div class="itemrow"><span class="nm">' + h(i.partName) + '</span>' +
           '<span class="mono tiny">' + i.qty + ' pcs</span>' + itemPill(i.itemStatus) +
-          (i.advanceIssued
+          (i.advanceIssued && seesAdvanceIssue()
             ? '<span class="pill flat p-sub">issued in advance</span>' +
               '<div class="tiny" style="width:100%">Supplied from local stock' +
               (i.advanceNote ? ' — ' + h(i.advanceNote) : '') +
@@ -690,7 +724,9 @@ function renderClaimPanel(c) {
 
   sec.push(evidenceSection(c));
 
-  if (c.audit && c.audit.length) {
+  // The audit trail answers "who changed what, and why" — an administrator's
+  // question. The requester's own claim tells them everything they can act on.
+  if (c.audit && c.audit.length && seesInternals()) {
     sec.push('<div class="panel-sec"><h3>History</h3><div class="audit">' +
       c.audit.slice(0, 12).map(function (a) {
         return '<div class="entry"><div>' + h(a.action) +
@@ -2778,12 +2814,21 @@ function saveTemplate() {
  */
 function loadEmailLog() {
   el('view').innerHTML = skeleton(6);
-  api('email.log', { limit: 200 }).then(function (rows) {
+  api('email.log', { limit: 200 }).then(function (data) {
+    const rows = data.rows || [];
     const failed = rows.filter(function (r) { return r.status !== 'Sent'; }).length;
     el('view').innerHTML =
       '<div class="toolbar"><h2 style="margin:0;font-size:16px">Email Log</h2>' +
         '<span class="tiny">' + rows.length + ' message' + (rows.length === 1 ? '' : 's') +
-        (failed ? ' · ' + failed + ' not delivered' : '') + '</span></div>' +
+        (failed ? ' · ' + failed + ' not delivered' : '') + '</span>' +
+        '<span class="spacer"></span>' +
+        '<label class="row" style="gap:7px;font-size:12.5px">' +
+          '<input type="checkbox" id="mailOn"' + (data.enabled ? ' checked' : '') + '>' +
+          '<span>Send email notifications</span></label>' +
+      '</div>' +
+      (data.enabled ? '' :
+        '<div class="notice">⚠ Email notifications are switched off. Claims still move ' +
+        'through the workflow and every message is still recorded below — nothing is sent.</div>') +
       (rows.length
         ? '<div class="tablewrap"><table class="data"><thead><tr>' +
           '<th>Sent</th><th>Template</th><th>To</th><th>Subject</th>' +
@@ -2803,7 +2848,7 @@ function loadEmailLog() {
           }).join('') +
           '</tbody></table></div>'
         : '<div class="tablewrap"><div class="empty">Nothing has been sent yet.</div></div>') +
-      '<p class="tiny">Every message the portal attempts is recorded here, delivered or not. ' +
+      '<p class="tiny">Every message the portal attempts is recorded here, sent or not. ' +
         'In test mode nothing reaches the real recipients — the message is redirected to the ' +
         'tester\'s own address and marked <b>[TEST]</b>.</p>';
 
@@ -2812,6 +2857,16 @@ function loadEmailLog() {
         const row = rows.filter(function (r) { return r.emailId === tr.dataset.email; })[0];
         if (row) showEmail(row);
       });
+    });
+
+    el('mailOn').addEventListener('change', function () {
+      const wanted = this.checked;
+      api('email.setEnabled', { enabled: wanted })
+        .then(function () {
+          toast(wanted ? 'Email notifications are on.' : 'Email notifications are off.', 'ok');
+          loadEmailLog();
+        })
+        .catch(function (e) { fail(e); loadEmailLog(); });
     });
   }).catch(fail);
 }

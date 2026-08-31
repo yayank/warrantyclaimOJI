@@ -57,7 +57,7 @@ function tabsFor(role, r) {
   });
 }
 
-/* ------------------------------------- every claim lands in exactly one tab */
+/* --------------------------------- a claim is never in two tabs at once */
 
 const STATUSES = [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.RETURNED, STATUS.IN_REVIEW,
   STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED];
@@ -69,8 +69,15 @@ ROLES.forEach(function (role) {
   STATUSES.forEach(function (status) {
     ITEMS.forEach(function (itemStatus) {
       const found = tabsFor(role, row(status, itemStatus));
-      check(role + ' · ' + status + ' · ' + itemStatus + ' lands in exactly one tab',
-        found.length === 1, found.length ? 'in ' + found.join(' and ') : 'in no tab at all');
+      // A draft is deliberately outside the three working tabs unless it is
+      // your own to finish: nothing about an unsubmitted claim is in progress,
+      // and it waits on nobody but its author. It is reachable from All.
+      const wanted = status === STATUS.DRAFT && !needsAction_(session(role), row(status, itemStatus))
+        ? 0 : 1;
+      check(role + ' · ' + status + ' · ' + itemStatus + ' lands in ' +
+        (wanted ? 'exactly one tab' : 'no working tab, only All'),
+        found.length === wanted,
+        found.length ? 'in ' + found.join(' and ') : 'in no tab at all');
     });
   });
 });
@@ -83,8 +90,12 @@ check('a draft is the requester\'s to finish',
 check('a draft is not the administrator\'s to act on',
   !needsAction_(session(ROLE.ADMIN), row(STATUS.DRAFT)));
 
-check('but the administrator still sees it, under In Progress',
-  tabsFor(ROLE.ADMIN, row(STATUS.DRAFT))[0] === 'progress');
+check('and it is in none of the administrator\'s working tabs',
+  tabsFor(ROLE.ADMIN, row(STATUS.DRAFT)).length === 0,
+  tabsFor(ROLE.ADMIN, row(STATUS.DRAFT)).join(', '));
+
+check('the administrator reaches it from All instead',
+  matchesTab_(session(ROLE.ADMIN), row(STATUS.DRAFT), 'all'));
 
 check('a returned claim is back with the requester',
   tabsFor(ROLE.REQUESTER, row(STATUS.RETURNED))[0] === 'action');
