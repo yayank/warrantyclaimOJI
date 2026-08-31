@@ -22,7 +22,7 @@ vm.createContext(sandbox);
 vm.runInContext(
   ['Config.gs', 'Claims.gs']
     .map(function (f) { return fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'); })
-    .concat(['globalThis.__api = { matchesTab_, needsAction_, STATUS, ITEM_STATUS, ROLE };'])
+    .concat(['globalThis.__api = { matchesTab_, needsAction_, awaitingReturnOnly_, STATUS, ITEM_STATUS, ROLE };'])
     .join('\n'),
   sandbox, { filename: 'tabs' }
 );
@@ -35,11 +35,21 @@ function session(role) {
   return { email: OWNER, role: role, isTester: false, principal: 'Sansin' };
 }
 
-function row(status, itemStatus) {
+/**
+ * `owed` is how many shipped parts have not had their faulty one returned —
+ * the only thing separating a claim that is finished from one that is over.
+ */
+function row(status, itemStatus, owed) {
+  const item = { itemId: 'I1', itemStatus: itemStatus || ITEM_STATUS.PENDING };
   return {
     claimId: 'C1', status: status, principal: 'Sansin',
     warrantyType: 'Principal Warranty', requesterEmail: OWNER,
-    items: [{ itemId: 'I1', itemStatus: itemStatus || ITEM_STATUS.PENDING }]
+    items: [item],
+    summary: {
+      approved: 0, rejected: 0, shipped: 0, advance: 0,
+      pending: item.itemStatus === ITEM_STATUS.PENDING ? 1 : 0,
+      awaitingReturn: owed || 0
+    }
   };
 }
 
@@ -52,7 +62,7 @@ function check(name, condition, detail) {
 
 /** Which of the three working tabs a claim lands in, for this role. */
 function tabsFor(role, r) {
-  return ['action', 'progress', 'completed'].filter(function (tab) {
+  return ['action', 'progress', 'completed', 'closed'].filter(function (tab) {
     return matchesTab_(session(role), r, tab);
   });
 }
@@ -80,8 +90,8 @@ ROLES.forEach(function (role) {
         draftOfSomeoneElse ? found.length === 0 : found.length >= 1,
         'in ' + (found.join(' and ') || 'no tab at all'));
 
-      check(role + ' · ' + status + ' · ' + itemStatus + ' is never both live and completed',
-        !(found.indexOf('completed') !== -1 && found.indexOf('progress') !== -1));
+      check(role + ' · ' + status + ' · ' + itemStatus + ' is never both live and finished',
+        !(found.indexOf('closed') !== -1 && found.indexOf('progress') !== -1));
     });
   });
 });
@@ -131,10 +141,33 @@ check('once decided it is no longer theirs to act on',
 check('fulfilment with an approved part is the administrator\'s',
   tabsFor(ROLE.ADMIN, row(STATUS.FULFILMENT, ITEM_STATUS.APPROVED)).indexOf('action') !== -1);
 
-check('a closed claim is completed for everyone, and only completed',
+check('a closed claim reads as Closed for everyone, and only Closed',
   ROLES.every(function (r) {
-    return tabsFor(r, row(STATUS.CLOSED, ITEM_STATUS.SHIPPED)).join() === 'completed';
+    return tabsFor(r, row(STATUS.CLOSED, ITEM_STATUS.SHIPPED)).join() === 'closed';
   }));
+
+/* ------------------------------ finished, and over, are not the same thing */
+
+const owing = row(STATUS.FULFILMENT, ITEM_STATUS.SHIPPED, 1);
+const settled = row(STATUS.CLOSED, ITEM_STATUS.SHIPPED, 0);
+
+check('the warranty is done but the faulty part is still out — Completed',
+  tabsFor(ROLE.ADMIN, owing).join() === 'completed', tabsFor(ROLE.ADMIN, owing).join(', '));
+
+check('and it is not in In Progress as well — the tab would read longer than the work',
+  tabsFor(ROLE.ADMIN, owing).indexOf('progress') === -1);
+
+check('once the part is back the claim is Closed, not Completed',
+  tabsFor(ROLE.ADMIN, settled).join() === 'closed', tabsFor(ROLE.ADMIN, settled).join(', '));
+
+check('a claim still deciding parts is neither',
+  tabsFor(ROLE.ADMIN, row(STATUS.IN_REVIEW, ITEM_STATUS.PENDING, 0)).indexOf('completed') === -1);
+
+check('nor is one whose approved part has not shipped yet',
+  tabsFor(ROLE.ADMIN, row(STATUS.FULFILMENT, ITEM_STATUS.APPROVED, 0)).indexOf('completed') === -1);
+
+check('a draft is never Completed, whatever it carries',
+  tabsFor(ROLE.ADMIN, row(STATUS.DRAFT, ITEM_STATUS.SHIPPED, 1)).indexOf('completed') === -1);
 
 check('All shows what the three working tabs show',
   STATUSES.every(function (status) {

@@ -156,10 +156,40 @@ function toast(message, kind) {
 
 /* ================================================================= api */
 
+/**
+ * Whether the portal is talking to the spreadsheet.
+ *
+ * Every read and every write in the application goes through api(), so this is
+ * the one place that knows. A round trip to Apps Script takes seconds — long
+ * enough that without something moving on screen the page looks stuck, and the
+ * second click that follows is a duplicate request nobody wanted.
+ *
+ * It counts rather than flags: uploads and lookups overlap, and the bar has to
+ * stay up until the last of them is done.
+ */
+let NET_BUSY = 0;
+
+function netStart() {
+  NET_BUSY++;
+  const bar = el('netbar');
+  if (bar) bar.hidden = false;
+  document.body.setAttribute('aria-busy', 'true');
+}
+
+function netEnd() {
+  NET_BUSY = Math.max(0, NET_BUSY - 1);
+  if (NET_BUSY) return;
+  const bar = el('netbar');
+  if (bar) bar.hidden = true;
+  document.body.removeAttribute('aria-busy');
+}
+
 function api(action, payload) {
+  netStart();
   return new Promise(function (resolve, reject) {
     google.script.run
       .withSuccessHandler(function (res) {
+        netEnd();
         if (!res || res.ok) {
           if (res && res.session) S.session = res.session;
           resolve(res ? res.data : null);
@@ -174,7 +204,10 @@ function api(action, payload) {
         err.current = res.current;
         reject(err);
       })
-      .withFailureHandler(function (e) { reject(new Error(e && e.message ? e.message : String(e))); })
+      .withFailureHandler(function (e) {
+        netEnd();
+        reject(new Error(e && e.message ? e.message : String(e)));
+      })
       .api({
         token: S.token,
         simulatedRole: S.session && S.session.isTester ? S.session.simulatedRole : null,
@@ -398,6 +431,7 @@ function renderClaims() {
     // deciding, and it is easy to lose among claims that are waiting on others.
     s.role === ROLE.ADMIN ? tabButton('internal', 'Internal Verification') : '',
     tabButton('completed', 'Completed'),
+    tabButton('closed', 'Closed'),
     tabButton('all', 'All'),
     '</div>',
     '<div class="toolbar">',
@@ -2188,6 +2222,7 @@ function renderBatches() {
     tabButton('action', 'Needs Action', S.counts.action),
     tabButton('progress', 'In Progress'),
     tabButton('completed', 'Completed'),
+    tabButton('closed', 'Closed'),
     tabButton('all', 'All'),
     '</div>',
     '<div class="toolbar">',

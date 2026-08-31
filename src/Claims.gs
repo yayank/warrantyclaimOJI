@@ -51,7 +51,14 @@ function listClaims_(session, filter) {
 
 function matchesTab_(session, row, tab) {
   if (tab === 'all') return true;
-  if (tab === 'completed') return row.status === STATUS.CLOSED;
+
+  // Two different kinds of finished. The warranty work can be done — every part
+  // decided, every approved one shipped — while the faulty part is still out
+  // there. That claim is not closed; somebody still owes something, and it is
+  // the one list worth keeping in front of an administrator.
+  if (tab === 'completed') return awaitingReturnOnly_(row);
+  if (tab === 'closed') return row.status === STATUS.CLOSED;
+
   if (tab === 'internal') return row.status === STATUS.INTERNAL;
   if (tab === 'progress') {
     // Everything submitted and not yet finished — including what is waiting on
@@ -59,12 +66,29 @@ function matchesTab_(session, row, tab) {
     // out of it: a claim disappearing from In Progress the moment it needed
     // attention is how work stops being tracked.
     //
-    // A draft is the one thing left out. It has not been submitted, so nothing
-    // about it is under way, and it waits on nobody but its author.
-    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1;
+    // A draft is left out: it has not been submitted, so nothing about it is
+    // under way. So is a claim whose only outstanding business is the faulty
+    // part coming back — that has a tab of its own, and listing it here too
+    // would make In Progress read longer than the work actually left.
+    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 &&
+      !awaitingReturnOnly_(row);
   }
   if (tab === 'action') return needsAction_(session, row);
   return true;
+}
+
+/**
+ * The warranty side is finished and only the faulty part is still owed.
+ *
+ * recomputeClaimStatus_ would have closed this claim already were it not for
+ * the outstanding return, so it is exactly the gap between "we are done" and
+ * "it is over".
+ */
+function awaitingReturnOnly_(row) {
+  return row.status !== STATUS.CLOSED &&
+    row.status !== STATUS.DRAFT &&
+    row.summary.pending === 0 &&
+    row.summary.awaitingReturn > 0;
 }
 
 /** What the signed-in role still has to do about this claim. */

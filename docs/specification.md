@@ -424,6 +424,12 @@ Pertanyaan yang muncul di depan setiap klaim baru: apakah pompa ini sudah pernah
 
 Tombol **Unit history** di panel klaim (Administrator) menampilkan setiap sparepart yang pernah diklaim atas serial number itu — klaimnya, customer-nya, statusnya, jalur pemenuhannya, dan apakah part rusaknya sudah kembali. Sparepart yang diminta lebih dari sekali dihitung dan disebut di atas, karena menemukannya di tengah daftar justru yang tidak terjadi saat sedang sibuk. Klaim uji tidak pernah tercampur ke riwayat sebenarnya.
 
+### Setiap baca dan tulis terlihat
+
+Satu perjalanan bolak-balik ke Apps Script memakan hitungan detik. Tanpa sesuatu yang bergerak di layar, halamannya tampak macet — dan klik kedua yang menyusul adalah permintaan ganda yang tidak diinginkan siapa pun.
+
+Seluruh pembacaan dan penulisan aplikasi ini melewati satu fungsi, `api()`, jadi di situlah penandanya dipasang: sebuah bilah tipis di puncak halaman selama masih ada permintaan berjalan, plus `aria-busy` pada `body` untuk pembaca layar. Penandanya **menghitung**, bukan sekadar menyala-mati: unggahan dan lookup bisa tumpang tindih, dan bilahnya harus bertahan sampai yang terakhir selesai.
+
 ### Klaim tidak tertutup sebelum part rusak kembali
 
 Part pengganti dikirim, dan part rusaknya seharusnya kembali. Menutup klaim begitu part barunya terkirim menghapus satu-satunya catatan bahwa masih ada yang terutang — dan part yang dikirim tanpa penggantinya kembali justru itulah yang biasanya hilang.
@@ -441,10 +447,13 @@ Tiga tab membagi habis pekerjaan, dan sisanya ada di **All**:
 | Tab | Isinya |
 |---|---|
 | Needs Action | klaim yang menunggu peran yang sedang melihat |
-| In Progress | **semua** yang sudah diajukan dan belum `Closed`, termasuk isi Needs Action |
+| In Progress | sudah diajukan, belum selesai, dan masih ada yang dikerjakan — termasuk isi Needs Action |
 | Internal Verification | `Internal Verification` — hanya Administrator, karena hanya mereka yang memutuskan di jalur itu |
-| Completed | `Closed` |
+| **Completed** | garansinya sudah beres, **tetapi part rusaknya belum kembali** |
+| **Closed** | part rusaknya sudah kembali; perkaranya benar-benar selesai |
 | All | semuanya, termasuk draft milik orang lain |
+
+**Selesai dan berakhir bukan hal yang sama.** Sebuah klaim bisa tuntas dari sisi garansi — setiap sparepart sudah diputuskan, yang disetujui sudah dikirim — sementara part rusaknya masih di luar sana. Klaim itu belum `Closed`: masih ada yang terutang, dan justru daftar itulah yang perlu terus terlihat oleh Administrator. Karena punya tab sendiri, klaim semacam itu tidak lagi ikut terdaftar di In Progress — kalau ikut, In Progress terbaca lebih panjang daripada pekerjaan yang sebenarnya tersisa.
 
 Needs Action adalah **jalan pintas ke dalam** In Progress, bukan potongan yang diambil darinya; keduanya memang beririsan. Sebelumnya sebuah klaim keluar dari In Progress begitu ia mulai menunggu orang yang sedang melihatnya — dari sisi pembaca klaim itu sekadar lenyap, dan begitulah pekerjaan berhenti terlacak.
 
