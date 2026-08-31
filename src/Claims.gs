@@ -59,7 +59,14 @@ function matchesTab_(session, row, tab) {
   if (tab === 'completed') return awaitingReturnOnly_(row);
   if (tab === 'closed') return row.status === STATUS.CLOSED;
 
+  // Two cuts through the work under way, by the road the claim is on: the
+  // principal supplies the part, or we do. Neither is taken out of In Progress
+  // — a claim that vanishes from the list of everything under way is a claim
+  // nobody chases.
   if (tab === 'internal') return row.status === STATUS.INTERNAL;
+  if (tab === 'principal') {
+    return row.warrantyType === WARRANTY_TYPE.PRINCIPAL && underWay_(row);
+  }
   if (tab === 'progress') {
     // Everything submitted and not yet finished — including what is waiting on
     // the viewer. Needs Action is a shortcut into this list, not a slice taken
@@ -70,11 +77,16 @@ function matchesTab_(session, row, tab) {
     // under way. So is a claim whose only outstanding business is the faulty
     // part coming back — that has a tab of its own, and listing it here too
     // would make In Progress read longer than the work actually left.
-    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 &&
-      !awaitingReturnOnly_(row);
+    return underWay_(row);
   }
   if (tab === 'action') return needsAction_(session, row);
   return true;
+}
+
+/** Submitted, not finished, and not merely waiting on the faulty part. */
+function underWay_(row) {
+  return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 &&
+    !awaitingReturnOnly_(row);
 }
 
 /**

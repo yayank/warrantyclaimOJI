@@ -39,11 +39,11 @@ function session(role) {
  * `owed` is how many shipped parts have not had their faulty one returned —
  * the only thing separating a claim that is finished from one that is over.
  */
-function row(status, itemStatus, owed) {
+function row(status, itemStatus, owed, warrantyType) {
   const item = { itemId: 'I1', itemStatus: itemStatus || ITEM_STATUS.PENDING };
   return {
     claimId: 'C1', status: status, principal: 'Sansin',
-    warrantyType: 'Principal Warranty', requesterEmail: OWNER,
+    warrantyType: warrantyType || 'Principal Warranty', requesterEmail: OWNER,
     items: [item],
     summary: {
       approved: 0, rejected: 0, shipped: 0, advance: 0,
@@ -128,6 +128,32 @@ check('and nothing else is in it',
   !matchesTab_(session(ROLE.ADMIN), row(STATUS.SUBMITTED), 'internal') &&
   !matchesTab_(session(ROLE.ADMIN), row(STATUS.IN_REVIEW), 'internal') &&
   !matchesTab_(session(ROLE.ADMIN), row(STATUS.CLOSED), 'internal'));
+
+/* -------------------------- the two roads, each a cut through In Progress */
+
+const OUT = 'Out of Principal Warranty';
+
+check('a principal-warranty claim under way has a queue of its own',
+  matchesTab_(session(ROLE.ADMIN), row(STATUS.IN_REVIEW), 'principal'));
+
+check('and it is still in In Progress — the tab is a cut, not a removal',
+  tabsFor(ROLE.ADMIN, row(STATUS.IN_REVIEW)).indexOf('progress') !== -1);
+
+check('a claim outside the principal warranty is not in it',
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.INTERNAL, null, 0, OUT), 'principal'));
+
+check('nor is a draft that has not been submitted',
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.DRAFT), 'principal'));
+
+check('nor a closed one',
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.CLOSED, ITEM_STATUS.SHIPPED), 'principal'));
+
+check('nor one that is only waiting on the faulty part coming back',
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.FULFILMENT, ITEM_STATUS.SHIPPED, 1), 'principal'));
+
+check('the internal queue is the other road, and the two do not overlap',
+  matchesTab_(session(ROLE.ADMIN), row(STATUS.INTERNAL, null, 0, OUT), 'internal') &&
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.INTERNAL, null, 0, OUT), 'principal'));
 
 check('and is progress, not action, for the requester who sent it',
   tabsFor(ROLE.REQUESTER, row(STATUS.SUBMITTED)).join() === 'progress');

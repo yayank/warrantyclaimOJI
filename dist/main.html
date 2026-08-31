@@ -880,8 +880,12 @@ function renderClaims() {
     '<div class="tabs">',
     tabButton('action', 'Needs Action', S.counts.action),
     tabButton('progress', 'In Progress'),
-    // The internal track is a queue of its own: the administrator is the one
-    // deciding, and it is easy to lose among claims that are waiting on others.
+    // The two tracks a claim can be on, each a queue of its own. They are cuts
+    // through In Progress rather than pieces taken out of it: everything under
+    // way is still in one list, and these say which road it is on. Once there
+    // are a few hundred claims, that is the difference between a queue and a
+    // pile.
+    s.role === ROLE.ADMIN ? tabButton('principal', 'Warranty Principal') : '',
     s.role === ROLE.ADMIN ? tabButton('internal', 'Internal Verification') : '',
     tabButton('completed', 'Completed'),
     tabButton('closed', 'Closed'),
@@ -1203,6 +1207,13 @@ function renderClaimPanel(c) {
         '</div>' +
       (c.warrantyOverrideReason && seesInternals()
         ? '<div class="tiny">' + h(c.warrantyOverrideReason) + '</div>' : '') +
+      // Correcting a verdict the population sheet got wrong belongs next to the
+      // verdict, not in the row of buttons that carry the claim forward.
+      (s.role === ROLE.ADMIN && c.status !== STATUS.CLOSED
+        ? '<div class="row" style="margin-top:8px">' +
+          '<button class="btn sm ghost" type="button" data-act="override">Override warranty</button>' +
+          '</div>'
+        : '') +
     '</div>'
   );
 
@@ -1212,6 +1223,13 @@ function renderClaimPanel(c) {
       // yet, is the administrator's problem to solve, not the requester's.
       (S.session.role === ROLE.REQUESTER || S.session.role === ROLE.PRODUCTION
         ? '' : kv('Principal', c.principal || '— not attributed')) +
+      // Same again: a unit the population sheet cannot place is attributed by
+      // hand, here, where the gap is visible.
+      (s.role === ROLE.ADMIN && !c.principal && c.status !== STATUS.CLOSED
+        ? '<div class="row" style="margin:2px 0 6px">' +
+          '<button class="btn sm ghost" type="button" data-act="principal">Assign principal</button>' +
+          '</div>'
+        : '') +
       kv('Customer', c.customerName) + kv('Requested by', c.requesterName) +
       kv('Reference', c.refNo || '—') + kv('Work order', c.workOrderNo || '—') +
       (c.returnReason ? kv('Returned because', c.returnReason) : '') +
@@ -1275,6 +1293,12 @@ function renderClaimPanel(c) {
   renderPanelActions(c);
   el('panelHost').querySelectorAll('[data-att]').forEach(function (fig) {
     fig.addEventListener('click', function () { showAttachment(fig.dataset.att); });
+  });
+  el('panelHost').querySelectorAll('[data-act]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (b.dataset.act === 'override') promptOverride(c);
+      if (b.dataset.act === 'principal') promptPrincipal(c);
+    });
   });
 }
 
@@ -1366,52 +1390,61 @@ function renderPanelActions(c) {
   }
 
   if (s.role === ROLE.ADMIN) {
+    // One status, one move. The panel used to offer everything that was legal
+    // at a status — eight buttons for what is really a single decision — and
+    // the decision got lost among the corrections. Correcting the warranty
+    // verdict or the attribution is not a step in this workflow; those sit
+    // beside the verdict and the attribution themselves, in the panel above.
+
     // Asked in front of every claim: was this part already sent to this machine?
     buttons.push(btn('Unit history', '', function () { showUnitHistory(c.serialNumber); }));
-    if (c.status !== STATUS.CLOSED) {
-      buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
-    }
-    if (c.summary && c.summary.awaitingReturn) {
-      buttons.push(btn('Record part return', 'pri', function () { promptPartReturn(c); }));
-    }
-    if (!c.principal && c.status !== STATUS.CLOSED) {
-      buttons.push(btn('Assign principal', 'pri', function () { promptPrincipal(c); }));
-    }
-    if (c.status === STATUS.SUBMITTED || c.status === STATUS.INTERNAL) {
-      buttons.push(btn('Return to Requester', 'no', function () { promptReturn(c); }));
-      buttons.push(btn('Override warranty', '', function () { promptOverride(c); }));
-      buttons.push(btn('Amend', '', function () { closePanel(); openClaimForm(c); }));
-    }
+
     if (c.status === STATUS.SUBMITTED) {
+      buttons.push(btn('Return to Requester', 'no', function () { promptReturn(c); }));
       if (c.warrantyType === WARRANTY.PRINCIPAL) {
         buttons.push(btn('Forward to Principal', 'pri', function () { promptForward(c); }));
       } else {
+        // Out of the principal's warranty: they supply nothing, so the only
+        // road on is our own.
         buttons.push(btn('Process Internal Warranty', 'pri', function () {
           api('claims.internal', { claimId: c.claimId, rowVersion: c.rowVersion })
             .then(function () { toast('Moved to internal verification.', 'ok'); reopen(c.claimId); })
             .catch(fail);
         }));
       }
-    }
-    if (c.status === STATUS.INTERNAL) {
+    } else if (c.status === STATUS.INTERNAL) {
       buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
       buttons.push(btn('Reject parts', 'no', function () { promptDecision(c, 'reject'); }));
-    }
-    if (c.status === STATUS.IN_REVIEW) {
-      buttons.push(btn('Withdraw from Principal', '', function () {
-        if (!confirm('Withdraw this claim from the principal?')) return;
-        api('claims.withdraw', { claimId: c.claimId, rowVersion: c.rowVersion })
-          .then(function () { toast('Withdrawn.', 'ok'); reopen(c.claimId); }).catch(fail);
-      }));
-    }
-    if (c.status === STATUS.FULFILMENT) {
-      buttons.push(btn('Open in Orders', 'pri', function () { closePanel(); navigate('orders'); }));
+    } else if (c.status !== STATUS.RETURNED && c.status !== STATUS.DRAFT) {
+      // A claim already under way. A draft, and one sent back for revision,
+      // are the requester's move — there is nothing here to do but look.
+      if (c.status !== STATUS.CLOSED) {
+        buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
+      }
+      if (c.summary && c.summary.awaitingReturn) {
+        buttons.push(btn('Record part return', 'pri', function () { promptPartReturn(c); }));
+      }
+      if (c.status === STATUS.IN_REVIEW) {
+        buttons.push(btn('Withdraw from Principal', '', function () {
+          if (!confirm('Withdraw this claim from the principal?')) return;
+          api('claims.withdraw', { claimId: c.claimId, rowVersion: c.rowVersion })
+            .then(function () { toast('Withdrawn.', 'ok'); reopen(c.claimId); }).catch(fail);
+        }));
+      }
+      if (c.status === STATUS.FULFILMENT) {
+        buttons.push(btn('Open in Orders', 'pri', function () { closePanel(); navigate('orders'); }));
+      }
     }
   }
 
   if (s.role === ROLE.PRINCIPAL && c.warrantyType === WARRANTY.PRINCIPAL &&
     [STATUS.IN_REVIEW, STATUS.FULFILMENT, STATUS.CLOSED].indexOf(c.status) !== -1) {
-    buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
+    // Approving a part that is already approved does nothing; rejecting one
+    // still can, while it has not been ordered. Offering both reads as though
+    // the decision had not been taken yet.
+    if (c.items.some(function (i) { return i.itemStatus === ITEM.PENDING; })) {
+      buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
+    }
     buttons.push(btn('Reject parts', 'no', function () { promptDecision(c, 'reject'); }));
   }
 
@@ -2795,14 +2828,23 @@ function renderSelectionBar() {
       'choose one list at a time.</span>';
   }
 
+  // Orders lists parts that have already been approved — that is what puts
+  // them there. Approve and Reject belong where the decision is still open,
+  // which is the claim and batch screens, not here.
+  const decides = S.page !== 'orders';
+
   host.innerHTML = '<div class="selbar"><b>' + ids.length + ' part' +
     (ids.length === 1 ? '' : 's') + ' selected</b><span class="spacer"></span>' +
-    '<button class="btn sm ok" id="selApprove" type="button">Approve</button>' +
-    '<button class="btn sm no" id="selReject" type="button">Reject</button>' +
+    (decides
+      ? '<button class="btn sm ok" id="selApprove" type="button">Approve</button>' +
+        '<button class="btn sm no" id="selReject" type="button">Reject</button>'
+      : '') +
     admin + '</div>';
 
-  el('selApprove').addEventListener('click', function () { bulkDecision('approve'); });
-  el('selReject').addEventListener('click', function () { bulkDecision('reject'); });
+  if (decides) {
+    el('selApprove').addEventListener('click', function () { bulkDecision('approve'); });
+    el('selReject').addEventListener('click', function () { bulkDecision('reject'); });
+  }
   if (el('selAvail')) el('selAvail').addEventListener('click', function () { promptAvailability(false); });
   if (el('selForward')) el('selForward').addEventListener('click', promptForwardOrder);
   if (el('selPr')) el('selPr').addEventListener('click', function () { promptAvailability(true); });
