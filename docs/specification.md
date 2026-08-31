@@ -410,6 +410,20 @@ Saat serial number diketik, portal memberi tahu kalau unit itu punya klaim lain 
 
 Server tetap menghitung dan melaporkannya seperti biasa — yang berubah hanya apa yang ditampilkan layar, karena ini memang perkara tampilan.
 
+### Satu unit, satu hari, satu klaim
+
+Mesin yang sama diklaim dua kali dalam sehari adalah satu klaim dengan lebih banyak sparepart, bukan dua klaim. Principal menerima batch harian sebagai satu kesatuan, dan dua klaim untuk satu serial number di dalamnya terbaca sebagai order ganda.
+
+Saat submit, `submitClaim_` mencari klaim lain dengan **RefNo, serial number, dan requester yang sama** yang statusnya masih `Submitted`. Kalau ada, sparepart dan lampirannya dipindahkan ke sana dan klaim yang kosong ditandai terhapus. Sparepart yang sudah ada di klaim tujuan tidak digandakan — kuantitasnya yang dijumlahkan, karena meminta dua buah adalah kuantitas, bukan baris kedua.
+
+Penggabungan **hanya** terjadi selama klaim tujuan masih `Submitted`. Begitu Administrator atau principal menyentuhnya, menambahkan sparepart di bawah mereka berarti menulis ulang keputusan yang sudah diambil — jadi klaim keduanya berdiri sendiri dan diumumkan sendiri. Klaim milik orang lain, unit lain, hari lain, dan klaim uji tidak pernah ikut tergabung. `tools/verify-unit.js` menguji semuanya.
+
+### Riwayat sebuah unit
+
+Pertanyaan yang muncul di depan setiap klaim baru: apakah pompa ini sudah pernah dikirim bulan lalu? Kalau iya, itu order ganda atau perbaikan yang tidak bertahan, dan keduanya mengubah langkah berikutnya.
+
+Tombol **Unit history** di panel klaim (Administrator) menampilkan setiap sparepart yang pernah diklaim atas serial number itu — klaimnya, customer-nya, statusnya, jalur pemenuhannya, dan apakah part rusaknya sudah kembali. Sparepart yang diminta lebih dari sekali dihitung dan disebut di atas, karena menemukannya di tengah daftar justru yang tidak terjadi saat sedang sibuk. Klaim uji tidak pernah tercampur ke riwayat sebenarnya.
+
 ### Klaim tidak tertutup sebelum part rusak kembali
 
 Part pengganti dikirim, dan part rusaknya seharusnya kembali. Menutup klaim begitu part barunya terkirim menghapus satu-satunya catatan bahwa masih ada yang terutang — dan part yang dikirim tanpa penggantinya kembali justru itulah yang biasanya hilang.
@@ -427,11 +441,16 @@ Tiga tab membagi habis pekerjaan, dan sisanya ada di **All**:
 | Tab | Isinya |
 |---|---|
 | Needs Action | klaim yang menunggu peran yang sedang melihat |
-| In Progress | sudah diajukan, belum selesai, dan tidak menunggu peran yang sedang melihat |
+| In Progress | **semua** yang sudah diajukan dan belum `Closed`, termasuk isi Needs Action |
+| Internal Verification | `Internal Verification` — hanya Administrator, karena hanya mereka yang memutuskan di jalur itu |
 | Completed | `Closed` |
 | All | semuanya, termasuk draft milik orang lain |
 
-`Draft` sengaja berada di luar ketiga tab kerja kecuali bagi pemiliknya sendiri: klaim yang belum diajukan tidak sedang berjalan dan tidak menunggu siapa pun selain penulisnya. Bagi Administrator draft hanya muncul di **All**. `tools/verify-tabs.js` menguji seluruh kombinasi peran × status × status item: sebuah klaim tidak pernah berada di dua tab kerja sekaligus, dan draft milik orang lain tidak berada di satu pun.
+Needs Action adalah **jalan pintas ke dalam** In Progress, bukan potongan yang diambil darinya; keduanya memang beririsan. Sebelumnya sebuah klaim keluar dari In Progress begitu ia mulai menunggu orang yang sedang melihatnya — dari sisi pembaca klaim itu sekadar lenyap, dan begitulah pekerjaan berhenti terlacak.
+
+`Draft` satu-satunya yang di luar tab kerja kecuali bagi pemiliknya: klaim yang belum diajukan tidak sedang berjalan dan tidak menunggu siapa pun selain penulisnya. Bagi Administrator draft hanya muncul di **All**.
+
+`tools/verify-tabs.js` menguji seluruh kombinasi peran × status × status item terhadap satu aturan: klaim yang hidup selalu ada di **setidaknya satu** tab kerja, dan tidak pernah sekaligus terbaca hidup dan selesai.
 
 ### Apa yang dilihat tiap peran
 
@@ -445,6 +464,7 @@ Requester dan Production berada di lapangan: mereka meminta sparepart, dan mekan
 | Bagian **History** | Jejak audit menjawab “siapa mengubah apa” — pertanyaan Administrator |
 | Baris **Principal** | Unit ini milik principal mana, dan fakta bahwa belum terpetakan, adalah pekerjaan Administrator |
 | Filter garansi | Menyaring berdasarkan pembedaan yang tidak mereka lihat |
+| Cara menghitung garansi saat cek serial number | Hasilnya saja — *UNDER WARRANTY* atau *OUT OF WARRANTY* beserta tanggalnya. Perhitungannya milik Administrator; bagi requester itu hitungan yang bukan mereka buat dan tidak bisa mereka ubah |
 
 Satu hal justru ditambahkan untuk mereka: status `Returned to Requester` terbaca **“Revised!”**. Kalimat alur kerjanya menggambarkan perpindahannya; yang berguna bagi orang yang sedang memegang klaim itu adalah apa yang terjadi pada klaimnya. Statusnya sendiri tidak berubah — hanya kata yang ditampilkan, jadi filter dan penyaringan tetap mencocokkan nilai yang tersimpan.
 
@@ -659,7 +679,7 @@ Empat hal yang menopang ketiganya:
 
 ## 19. Pengujian
 
-Sembilan penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
+Sepuluh penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
 
 ```bash
 node tools/verify-warranty.js units.json    # mesin garansi, 2.610 unit asli
@@ -671,6 +691,7 @@ node tools/verify-tabs.js                   # tidak ada klaim yang lolos dari se
 node tools/verify-cache.js                  # sheet unit dibaca sekali, bukan tiap pertanyaan
 node tools/verify-fulfilment.js             # part tidak pernah salah jalur
 node tools/verify-closing.js                # klaim tidak tertutup selama part masih terutang
+node tools/verify-unit.js                   # penggabungan klaim dan riwayat per unit
 ```
 
 Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 180 · 11 · 18 pemeriksaan, seluruhnya lolos.**
