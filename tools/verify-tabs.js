@@ -103,6 +103,14 @@ check('a returned claim is back with the requester',
 check('a submitted claim waits on the administrator',
   tabsFor(ROLE.ADMIN, row(STATUS.SUBMITTED))[0] === 'action');
 
+check('internal verification has a queue of its own',
+  matchesTab_(session(ROLE.ADMIN), row(STATUS.INTERNAL), 'internal'));
+
+check('and nothing else is in it',
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.SUBMITTED), 'internal') &&
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.IN_REVIEW), 'internal') &&
+  !matchesTab_(session(ROLE.ADMIN), row(STATUS.CLOSED), 'internal'));
+
 check('and is progress, not action, for the requester who sent it',
   tabsFor(ROLE.REQUESTER, row(STATUS.SUBMITTED))[0] === 'progress');
 

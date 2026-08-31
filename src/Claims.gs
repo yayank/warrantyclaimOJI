@@ -52,6 +52,7 @@ function listClaims_(session, filter) {
 function matchesTab_(session, row, tab) {
   if (tab === 'all') return true;
   if (tab === 'completed') return row.status === STATUS.CLOSED;
+  if (tab === 'internal') return row.status === STATUS.INTERNAL;
   if (tab === 'progress') {
     // A draft has not been submitted, so nothing about it is in progress: it is
     // the requester's own unfinished work, and an administrator seeing it in

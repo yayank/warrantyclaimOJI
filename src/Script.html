@@ -394,6 +394,9 @@ function renderClaims() {
     '<div class="tabs">',
     tabButton('action', 'Needs Action', S.counts.action),
     tabButton('progress', 'In Progress'),
+    // The internal track is a queue of its own: the administrator is the one
+    // deciding, and it is easy to lose among claims that are waiting on others.
+    s.role === ROLE.ADMIN ? tabButton('internal', 'Internal Verification') : '',
     tabButton('completed', 'Completed'),
     tabButton('all', 'All'),
     '</div>',
