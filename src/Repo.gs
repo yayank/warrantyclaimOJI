@@ -293,6 +293,81 @@ function withLock_(fn) {
   }
 }
 
+/* ------------------------------------------------------------------- cache */
+
+/**
+ * A cache entry larger than CacheService will take, split across numbered keys.
+ *
+ * Both unit indexes are past the 100KB an entry may hold, so the put failed
+ * silently and every single call rebuilt the index by reading 2,610 rows from
+ * the sheet again — on every save, and on every serial number lookup as it is
+ * typed. Splitting the JSON is what makes the cache actually hold them.
+ */
+const CACHE_CHUNK = 90000;
+const CACHE_MAX_CHUNKS = 40;
+
+function chunkKeys_(key, count) {
+  const keys = [];
+  for (let i = 0; i < count; i++) keys.push(key + ':' + i);
+  return keys;
+}
+
+function cacheGetLarge_(key) {
+  const cache = CacheService.getScriptCache();
+  const head = cache.get(key + ':n');
+  if (!head) return null;
+
+  const count = Number(head);
+  if (!count || count > CACHE_MAX_CHUNKS) return null;
+  const parts = cache.getAll(chunkKeys_(key, count));
+
+  let text = '';
+  for (let i = 0; i < count; i++) {
+    const part = parts[key + ':' + i];
+    // Chunks expire independently, and half an index is worse than none.
+    if (part === undefined || part === null) return null;
+    text += part;
+  }
+  try { return JSON.parse(text); } catch (e) { return null; }
+}
+
+function cachePutLarge_(key, value, seconds) {
+  const text = JSON.stringify(value);
+  const entries = {};
+  let count = 0;
+  let at = 0;
+
+  while (at < text.length) {
+    let end = Math.min(at + CACHE_CHUNK, text.length);
+    // Never split a surrogate pair: the halves must survive as written.
+    if (end < text.length) {
+      const code = text.charCodeAt(end - 1);
+      if (code >= 0xD800 && code <= 0xDBFF) end--;
+    }
+    if (count >= CACHE_MAX_CHUNKS) return;   // too large to be worth holding
+    entries[key + ':' + count] = text.substring(at, end);
+    count++;
+    at = end;
+  }
+
+  entries[key + ':n'] = String(count);
+  try {
+    CacheService.getScriptCache().putAll(entries, seconds);
+  } catch (e) {
+    // The cache is an optimisation; losing it costs time, never correctness.
+  }
+}
+
+function cacheRemoveLarge_(key) {
+  const cache = CacheService.getScriptCache();
+  const head = cache.get(key + ':n');
+  const count = head ? Number(head) : 0;
+  const keys = chunkKeys_(key, count > CACHE_MAX_CHUNKS ? CACHE_MAX_CHUNKS : count);
+  keys.push(key + ':n');
+  keys.push(key);        // an entry written before chunking existed
+  try { cache.removeAll(keys); } catch (e) { /* best effort */ }
+}
+
 /* ---------------------------------------------------------------- settings */
 
 function settings_() {

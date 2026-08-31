@@ -364,6 +364,10 @@ Ketujuh template bawaan tertanam di kode dan aktif sejak awal. Sheet ini hanya m
 
 Keduanya diperbarui lewat impor Excel dengan pratinjau perubahan.
 
+**Keduanya juga di-indeks, dan indeksnya harus benar-benar tersimpan.** Satu penyimpanan klaim menanyakan hal berbeda ke indeks yang sama tiga kali — verdict garansi, nama produk, principal pemilik — dan setiap pencarian serial number sambil diketik menanyakannya lagi. Indeksnya lebih besar dari 100KB yang bisa ditampung satu entri `CacheService`, sehingga `put` gagal tanpa berkata apa-apa dan setiap panggilan membaca ulang 2.610 baris dari sheet.
+
+Sekarang indeks disimpan sebagai potongan bernomor (`cachePutLarge_`), dan dipegang di memori selama satu eksekusi (`INDEX_MEMO`). Hasilnya: satu eksekusi membaca sheet **sekali**, eksekusi berikutnya **tidak sama sekali**. `tools/verify-cache.js` menghitung panggilan `getValues()` untuk membuktikannya.
+
 ## 11. State machine
 
 ### Status klaim
@@ -538,6 +542,12 @@ Perulangan: `{{#Items}}…{{/Items}}` untuk daftar sparepart, `{{#Claims}}…{{/
 
 **Rekap harian dipecah per principal per nomor referensi.** Klaim yang principal-nya belum terpetakan tidak ikut terkirim dan dilaporkan sebagai *skipped*.
 
+### Layar Email Log
+
+Setiap pesan yang dicoba dikirim portal ini dicatat di sheet `EmailLog` — terkirim maupun tidak, lengkap dengan alasan kegagalannya. Catatan itu sudah ada sejak awal, tetapi tidak pernah ada layar yang menampilkannya, sehingga pertanyaan "apakah Administrator sudah diberi tahu?" tidak punya jawaban selain membuka spreadsheet. Kini ada di menu **Email Log** (Administrator).
+
+Yang paling sering membingungkan dan sekarang terlihat jelas di sana: **dalam mode uji tidak ada pesan yang sampai ke penerima sebenarnya.** Pesannya dialihkan ke alamat Tester itu sendiri dan diberi awalan `[TEST]`.
+
 ## 16. Audit
 
 Tiga lapis jejak, masing-masing menjawab pertanyaan berbeda.
@@ -590,7 +600,7 @@ Empat hal yang menopang ketiganya:
 
 ## 19. Pengujian
 
-Enam penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
+Tujuh penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
 
 ```bash
 node tools/verify-warranty.js units.json    # mesin garansi, 2.610 unit asli
@@ -599,9 +609,10 @@ node tools/verify-templates.js              # perender template email
 node tools/verify-sheets.js                 # baris data tidak dibaca sebagai judul kolom
 node tools/verify-payload.js                # tidak ada Date yang lolos ke browser
 node tools/verify-tabs.js                   # tidak ada klaim yang lolos dari semua tab
+node tools/verify-cache.js                  # sheet unit dibaca sekali, bukan tiap pertanyaan
 ```
 
-Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 179 pemeriksaan, seluruhnya lolos.**
+Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 179 · 11 pemeriksaan, seluruhnya lolos.**
 
 Penguji payload menjaga satu kegagalan yang sangat mudah terulang. `google.script.run` menolak `Date` di mana pun dalam nilai kembalian — panggilannya gagal dan halaman menerima `null`, tanpa pesan kesalahan apa pun. Aplikasi ini menulis stempel waktunya sebagai teks `2026-08-30T11:53:50`, dan Sheets berhak menyimpannya sebagai date-time sungguhan lalu mengembalikannya sebagai `Date`. Karena itu `readAll_` mengubah setiap sel `Date` menjadi teks ISO saat dibaca (`cellValue_`), dan `api()` memeriksa sekali lagi sebelum nilainya menyeberang ke browser (`jsonSafe_`). Konversi saat baca sekaligus memperbaiki urutan dan filter tanggal, yang membandingkan stempel waktu sebagai teks.
 

@@ -225,8 +225,12 @@ function nextMasterId_(def) {
 }
 
 function clearReferenceCache_() {
-  const cache = CacheService.getScriptCache();
-  cache.removeAll(['settings', 'warrantyIndex', 'populationIndex']);
+  CacheService.getScriptCache().remove('settings');
+  cacheRemoveLarge_('warrantyIndex');
+  cacheRemoveLarge_('populationIndex');
+  // The in-memory copies would otherwise outlive the import that replaced them.
+  delete INDEX_MEMO.warranty;
+  delete INDEX_MEMO.population;
 }
 
 /* ------------------------------------------------------------- unit data */

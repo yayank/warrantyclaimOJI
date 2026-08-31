@@ -336,6 +336,11 @@ function syncItems_(session, claim, wanted) {
   const existing = readLive_(SHEET.ITEMS).filter(function (i) { return i.ClaimID === claim.ClaimID; });
   const keep = {};
 
+  // The master list is read once, not once per row: findBy_ would re-read the
+  // whole spare-part sheet for every part on the claim.
+  const parts = {};
+  readAll_(SHEET.PART).forEach(function (p) { parts[String(p.PartID)] = p; });
+
   const seenParts = {};
   wanted.forEach(function (w) {
     if (!w.partId) throw new Error('Please choose a spare part for every row.');
@@ -344,7 +349,7 @@ function syncItems_(session, claim, wanted) {
   });
 
   wanted.forEach(function (w, index) {
-    const part = findBy_(SHEET.PART, 'PartID', w.partId);
+    const part = parts[String(w.partId)];
     if (!part) throw new Error('Unknown spare part.');
     const qty = Math.max(1, Number(w.qty || 1));
 

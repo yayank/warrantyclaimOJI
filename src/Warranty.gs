@@ -144,21 +144,29 @@ function warrantyTableExpiry_(serial) {
   return { year: Number(m[2]), month: Number(m[1]) };
 }
 
+/**
+ * Indexes held for the life of one execution.
+ *
+ * A single save reads the same index three times over — the warranty verdict,
+ * the product name and the owning principal — and the claims list reads it once
+ * per row. Holding it here turns that back into one read; the cache below turns
+ * the next request's read into none.
+ */
+const INDEX_MEMO = {};
+
 function warrantyIndex_() {
-  const cache = CacheService.getScriptCache();
-  const hit = cache.get('warrantyIndex');
-  if (hit) return JSON.parse(hit);
+  if (INDEX_MEMO.warranty) return INDEX_MEMO.warranty;
+
+  const cached = cacheGetLarge_('warrantyIndex');
+  if (cached) { INDEX_MEMO.warranty = cached; return cached; }
 
   const index = {};
   readAll_(SHEET.WARRANTY).forEach(function (r) {
     const sn = String(r.Batch || '').trim().toUpperCase();
     if (sn && !index[sn]) index[sn] = r.Expired;
   });
-  try {
-    cache.put('warrantyIndex', JSON.stringify(index), 1800);
-  } catch (e) {
-    // Larger than the cache entry limit; recomputed each call instead.
-  }
+  cachePutLarge_('warrantyIndex', index, 1800);
+  INDEX_MEMO.warranty = index;
   return index;
 }
 
@@ -168,9 +176,10 @@ function warrantyIndex_() {
  * unit belongs to decides who may see the claim and who receives it.
  */
 function populationIndex_() {
-  const cache = CacheService.getScriptCache();
-  const hit = cache.get('populationIndex');
-  if (hit) return JSON.parse(hit);
+  if (INDEX_MEMO.population) return INDEX_MEMO.population;
+
+  const cached = cacheGetLarge_('populationIndex');
+  if (cached) { INDEX_MEMO.population = cached; return cached; }
 
   const index = {};
   readAll_(SHEET.POPULATION).forEach(function (r) {
@@ -181,9 +190,8 @@ function populationIndex_() {
       principal: String(r.Principal || '').trim()
     };
   });
-  try {
-    cache.put('populationIndex', JSON.stringify(index), 1800);
-  } catch (e) { /* oversized; recomputed next call */ }
+  cachePutLarge_('populationIndex', index, 1800);
+  INDEX_MEMO.population = index;
   return index;
 }
 

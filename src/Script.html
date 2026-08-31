@@ -261,6 +261,7 @@ function renderChrome() {
     pages.push({ id: 'orders', label: 'Orders' });
     pages.push({ id: 'master', label: 'Master Data' });
     pages.push({ id: 'templates', label: 'Email Templates' });
+    pages.push({ id: 'email', label: 'Email Log' });
     pages.push({ id: 'audit', label: 'Audit Log' });
   }
 
@@ -320,6 +321,7 @@ function navigate(page) {
   if (page === 'orders') return loadOrders();
   if (page === 'master') return loadMaster(S.master.kind);
   if (page === 'templates') return loadTemplates();
+  if (page === 'email') return loadEmailLog();
   if (page === 'audit') return loadAudit();
 }
 
@@ -2764,6 +2766,70 @@ function saveTemplate() {
 }
 
 /* ============================================================= audit */
+
+/**
+ * What the portal has actually sent.
+ *
+ * sendMail_ has always written every attempt here, delivered or not, but
+ * nothing ever showed it — so "was the administrator notified?" had no answer
+ * short of opening the spreadsheet. In test mode nothing reaches the real
+ * recipients at all: the message is redirected to the tester, and this is where
+ * that becomes visible rather than surprising.
+ */
+function loadEmailLog() {
+  el('view').innerHTML = skeleton(6);
+  api('email.log', { limit: 200 }).then(function (rows) {
+    const failed = rows.filter(function (r) { return r.status !== 'Sent'; }).length;
+    el('view').innerHTML =
+      '<div class="toolbar"><h2 style="margin:0;font-size:16px">Email Log</h2>' +
+        '<span class="tiny">' + rows.length + ' message' + (rows.length === 1 ? '' : 's') +
+        (failed ? ' · ' + failed + ' not delivered' : '') + '</span></div>' +
+      (rows.length
+        ? '<div class="tablewrap"><table class="data"><thead><tr>' +
+          '<th>Sent</th><th>Template</th><th>To</th><th>Subject</th>' +
+          '<th>Claim</th><th>Status</th></tr></thead><tbody>' +
+          rows.map(function (r) {
+            return '<tr class="click" data-email="' + h(r.emailId) + '">' +
+              '<td class="tiny">' + h(fmtDateTime(r.sentAt)) + '</td>' +
+              '<td class="tiny mono">' + h(r.code) + (r.isTest ? ' <b>[TEST]</b>' : '') + '</td>' +
+              '<td class="tiny">' + h(r.to || '—') + '</td>' +
+              '<td>' + h(r.subject) + '</td>' +
+              '<td class="tiny mono">' + h(r.claimIds || r.refNo || '') + '</td>' +
+              '<td>' + (r.status === 'Sent'
+                ? '<span class="pill p-ok">Sent</span>'
+                : '<span class="pill p-no">' + h(r.status) + '</span>' +
+                  (r.error ? '<div class="tiny">' + h(r.error) + '</div>' : '')) +
+              '</td></tr>';
+          }).join('') +
+          '</tbody></table></div>'
+        : '<div class="tablewrap"><div class="empty">Nothing has been sent yet.</div></div>') +
+      '<p class="tiny">Every message the portal attempts is recorded here, delivered or not. ' +
+        'In test mode nothing reaches the real recipients — the message is redirected to the ' +
+        'tester\'s own address and marked <b>[TEST]</b>.</p>';
+
+    el('view').querySelectorAll('[data-email]').forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        const row = rows.filter(function (r) { return r.emailId === tr.dataset.email; })[0];
+        if (row) showEmail(row);
+      });
+    });
+  }).catch(fail);
+}
+
+function showEmail(row) {
+  openModal({
+    title: row.subject,
+    meta: row.emailId,
+    body: '<div class="blk">' +
+        kv('Sent', fmtDateTime(row.sentAt)) + kv('Template', row.code + ' v' + row.version) +
+        kv('To', row.to || '—') + (row.cc ? kv('Cc', row.cc) : '') +
+        kv('Claim', row.claimIds || '—') + kv('Status', row.status) +
+        (row.error ? '<div class="notice crit">' + h(row.error) + '</div>' : '') +
+      '</div>' +
+      '<div class="mail"><div class="mail-body">' + h(row.body) + '</div></div>',
+    actions: [{ label: 'Close', close: true }]
+  });
+}
 
 function loadAudit() {
   el('view').innerHTML = skeleton(6);

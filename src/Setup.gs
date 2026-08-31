@@ -35,9 +35,7 @@ function setUp() {
  * editor after changing anything in the Settings sheet.
  */
 function clearCache() {
-  CacheService.getScriptCache().removeAll([
-    'settings', 'warrantyIndex', 'populationIndex'
-  ]);
+  clearReferenceCache_();
   const id = setting_(SETTING_KEY.CLIENT_ID, '');
   return [
     'Cache cleared.',
