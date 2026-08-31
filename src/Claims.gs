@@ -132,10 +132,91 @@ function needsAction_(session, row) {
 
 function tabCounts_(session, claims, byClaim) {
   let action = 0;
+  let advance = 0;
   claims.forEach(function (c) {
-    if (needsAction_(session, shapeClaim_(c, byClaim[c.ClaimID] || []))) action++;
+    const row = shapeClaim_(c, byClaim[c.ClaimID] || []);
+    if (needsAction_(session, row)) action++;
+    if (session.role === ROLE.ADMIN) {
+      row.items.forEach(function (i) { if (awaitingAdvanceIssue_(row, i)) advance++; });
+    }
   });
-  return { action: action };
+  return { action: action, advance: advance };
+}
+
+/**
+ * A part the administrator should be putting on a courier today.
+ *
+ * The machine is down. Whether the principal has approved it yet, and whether
+ * this claim is theirs to cover or ours, decides who ends up paying — not
+ * whether the part goes out. Waiting for the principal's box to arrive before
+ * sending one from the shelf leaves a hospital without a machine for a month
+ * over a question of accounting.
+ *
+ * So the queue asks two things only: has this part left the building, and has
+ * anybody written down that it did. A rejected part is out — nothing is owed
+ * on it — and a claim not yet submitted, or already closed, has nothing to
+ * send.
+ */
+function awaitingAdvanceIssue_(row, item) {
+  if (row.status === STATUS.DRAFT || row.status === STATUS.CLOSED) return false;
+  if (item.advanceIssued) return false;
+  return [ITEM_STATUS.SHIPPED, ITEM_STATUS.REJECTED].indexOf(item.itemStatus) === -1;
+}
+
+/**
+ * Every part waiting to be sent from stock, across every open claim, and every
+ * one already sent.
+ *
+ * Recording an advance issue one claim at a time answers "what did I send
+ * against this claim?". The question actually in front of an administrator in
+ * the morning is the other one — "what has to go out today?" — and no screen
+ * asked it. This one is part-level and spans claims, because a courier run is.
+ */
+function advanceQueue_(session) {
+  requireRole_(session, [ROLE.ADMIN]);
+
+  const byClaim = {};
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i);
+  });
+
+  const awaiting = [];
+  const issued = [];
+
+  visibleClaims_(session).forEach(function (c) {
+    const row = shapeClaim_(c, byClaim[c.ClaimID] || []);
+    row.items.forEach(function (i) {
+      const entry = {
+        itemId: i.itemId,
+        claimId: row.claimId,
+        refNo: row.refNo,
+        claimStatus: row.status,
+        customerName: row.customerName,
+        serialNumber: row.serialNumber,
+        productName: row.productName,
+        partName: i.partName,
+        qty: i.qty,
+        itemStatus: i.itemStatus,
+        warrantyType: row.warrantyType,
+        ageDays: row.ageDays,
+        sortDate: row.sortDate,
+        advanceIssuedAt: i.advanceIssuedAt,
+        advanceIssuedBy: i.advanceIssuedBy,
+        advanceNote: i.advanceNote
+      };
+      if (awaitingAdvanceIssue_(row, i)) awaiting.push(entry);
+      else if (i.advanceIssued) issued.push(entry);
+    });
+  });
+
+  // Oldest first: the machine that has been down longest is the one to load
+  // onto the courier.
+  awaiting.sort(function (a, b) { return String(a.sortDate).localeCompare(String(b.sortDate)); });
+  issued.sort(function (a, b) {
+    return String(b.advanceIssuedAt).localeCompare(String(a.advanceIssuedAt));
+  });
+
+  return { awaiting: awaiting, issued: issued };
 }
 
 function shapeClaim_(c, items) {

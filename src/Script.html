@@ -11,9 +11,11 @@ const S = {
   filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', partId: '',
     principal: '', from: '', to: '' },
   rows: [],
-  counts: { action: 0 },
+  counts: { action: 0, advance: 0 },
   expanded: {},
   selection: {},
+  advance: null,            // the stock-issue queue, once fetched
+  advanceView: 'awaiting',  // 'awaiting' | 'issued'
   deepLink: window.APP_DEEP_LINK || {},
   master: { kind: 'users', rows: [] },
   templates: [],
@@ -338,6 +340,10 @@ function renderChrome() {
   }
   if (s.role === ROLE.PRINCIPAL) pages.unshift({ id: 'batch', label: 'Batches' });
   if (s.role === ROLE.ADMIN) {
+    // The count is the point of the menu item: the parts waiting to go out are
+    // not visible from anywhere else, and a queue nobody is reminded of is a
+    // queue that grows.
+    pages.push({ id: 'advance', label: 'Advance Issue', count: S.counts.advance });
     pages.push({ id: 'orders', label: 'Orders' });
     pages.push({ id: 'master', label: 'Master Data' });
     pages.push({ id: 'templates', label: 'Email Templates' });
@@ -347,7 +353,8 @@ function renderChrome() {
 
   el('nav').innerHTML = pages.map(function (p) {
     return '<button type="button" data-page="' + p.id + '"' +
-      (S.page === p.id ? ' class="on"' : '') + '>' + h(p.label) + '</button>';
+      (S.page === p.id ? ' class="on"' : '') + '>' + h(p.label) +
+      (p.count ? ' <span class="count">' + p.count + '</span>' : '') + '</button>';
   }).join('');
   el('nav').querySelectorAll('button').forEach(function (b) {
     b.addEventListener('click', function () { navigate(b.dataset.page); });
@@ -399,6 +406,7 @@ function navigate(page) {
   if (page === 'claims') return loadClaims();
   if (page === 'batch') return loadBatches();
   if (page === 'orders') return loadOrders();
+  if (page === 'advance') return loadAdvance();
   if (page === 'master') return loadMaster(S.master.kind);
   if (page === 'templates') return loadTemplates();
   if (page === 'email') return loadEmailLog();
@@ -419,6 +427,7 @@ function loadClaims() {
   api('claims.list', filter).then(function (data) {
     S.rows = data.rows;
     S.counts = data.counts;
+    renderChrome();            // the Advance Issue badge follows this count
     renderClaims();
     const link = S.deepLink;
     if (link && link.page === 'claim' && link.id) {
@@ -2689,6 +2698,205 @@ function promptForwardOrder() {
             close(); S.selection = {};
             toast('Order sent to ' + r.to.join(', ') + '.', 'ok');
             loadOrders();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/* ===================================================== advance issue */
+
+/**
+ * What has to go out from stock today.
+ *
+ * Recording an advance issue one claim at a time answers "what did I send
+ * against this claim?" — a question asked after the fact. The question in
+ * front of an administrator in the morning is the other one, and no screen
+ * asked it: a courier run spans claims, so this list does too.
+ *
+ * Nothing here is filtered by how far the claim has got. A machine is down;
+ * the part goes out. Whether the principal has approved it, and whether the
+ * bill lands with them or with us, is settled afterwards on the claim — the
+ * part they eventually ship replenishes the shelf instead of travelling to
+ * site.
+ */
+function loadAdvance() {
+  el('view').innerHTML = skeleton(6);
+  api('claims.advanceQueue', {}).then(function (data) {
+    S.advance = data;
+    S.counts = Object.assign({}, S.counts, { advance: data.awaiting.length });
+    S.selection = {};
+    renderChrome();
+    renderAdvance();
+  }).catch(fail);
+}
+
+function renderAdvance() {
+  const data = S.advance || { awaiting: [], issued: [] };
+  const issuedView = S.advanceView === 'issued';
+  const rows = issuedView ? data.issued : data.awaiting;
+
+  el('view').innerHTML =
+    '<div class="tabs">' +
+      '<button type="button" data-av="awaiting"' + (issuedView ? '' : ' class="on"') + '>' +
+        'To send' + (data.awaiting.length
+          ? ' <span class="count">' + data.awaiting.length + '</span>' : '') + '</button>' +
+      '<button type="button" data-av="issued"' + (issuedView ? ' class="on"' : '') + '>' +
+        'Sent from stock' + (data.issued.length
+          ? ' <span class="count">' + data.issued.length + '</span>' : '') + '</button>' +
+    '</div>' +
+    '<p class="tiny" style="margin:10px 0 0">' + (issuedView
+      ? 'Parts already supplied from local stock. What the principal sends against these ' +
+        'claims replenishes the shelf rather than travelling to site.'
+      : 'Every part on an open claim that has not left the building. A part is listed here ' +
+        'whether or not the principal has decided on it — the machine is down either way, and ' +
+        'who pays is settled on the claim afterwards.') + '</p>' +
+    (rows.length ? advanceTable(rows, issuedView)
+      : '<div class="tablewrap"><div class="empty">' + (issuedView
+        ? 'Nothing has been sent from stock yet.'
+        : 'Nothing is waiting to go out.') + '</div></div>') +
+    '<div id="advbar"></div>';
+
+  wireAdvance();
+  renderAdvanceBar();
+}
+
+function advanceTable(rows, issuedView) {
+  const head = ['<th style="width:26px"><input type="checkbox" id="advAll"></th>',
+    '<th>Claim</th>', '<th>Customer</th>', '<th>Unit</th>', '<th>Spare part</th>',
+    '<th>Claim status</th>', '<th>Part</th>',
+    issuedView ? '<th>Sent</th>' : '<th>Waiting</th>'];
+
+  const body = rows.map(function (r) {
+    return '<tr>' +
+      '<td><input type="checkbox" class="advpick" value="' + h(r.itemId) + '"' +
+        (S.selection[r.itemId] ? ' checked' : '') + '></td>' +
+      '<td class="stack"><button class="btn sm ghost" data-open="' + h(r.claimId) + '" ' +
+        'type="button">' + h(r.claimId) + '</button>' +
+        '<span class="mono tiny">' + h(r.refNo || 'no reference') + '</span></td>' +
+      '<td>' + h(r.customerName) + '</td>' +
+      '<td class="stack"><span class="mono">' + h(r.serialNumber) + '</span>' +
+        warrantyPill(r.warrantyType) + '</td>' +
+      '<td class="stack"><span>' + h(r.partName) + '</span>' +
+        '<span class="mono tiny">' + r.qty + ' pcs</span></td>' +
+      '<td>' + statusPill(r.claimStatus) + '</td>' +
+      '<td>' + itemPill(r.itemStatus) + '</td>' +
+      (issuedView
+        ? '<td class="stack"><span class="tiny">' + h(fmtDateTime(r.advanceIssuedAt)) + '</span>' +
+          '<span class="tiny dim">' + h(r.advanceIssuedBy) + '</span>' +
+          (r.advanceNote ? '<span class="tiny">“' + h(r.advanceNote) + '”</span>' : '') + '</td>'
+        : '<td>' + ageCell(r.ageDays) + '</td>') +
+      '</tr>';
+  }).join('');
+
+  return '<div class="tablewrap" style="margin-top:10px"><table class="data">' +
+    '<thead><tr>' + head.join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+
+function wireAdvance() {
+  el('view').querySelectorAll('[data-av]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      S.advanceView = b.dataset.av;
+      S.selection = {};
+      renderAdvance();
+    });
+  });
+  el('view').querySelectorAll('.advpick').forEach(function (box) {
+    box.addEventListener('change', function () {
+      if (box.checked) S.selection[box.value] = true; else delete S.selection[box.value];
+      renderAdvanceBar();
+      syncAdvanceAll();
+    });
+  });
+  el('view').querySelectorAll('[data-open]').forEach(function (b) {
+    b.addEventListener('click', function () { openClaimPanel(b.dataset.open); });
+  });
+  const all = el('advAll');
+  if (all) {
+    all.addEventListener('change', function () {
+      el('view').querySelectorAll('.advpick').forEach(function (box) {
+        box.checked = all.checked;
+        if (all.checked) S.selection[box.value] = true; else delete S.selection[box.value];
+      });
+      renderAdvanceBar();
+    });
+  }
+}
+
+/** The header box reflects the rows rather than pretending to lead them. */
+function syncAdvanceAll() {
+  const all = el('advAll');
+  if (!all) return;
+  const boxes = Array.prototype.slice.call(el('view').querySelectorAll('.advpick'));
+  const picked = boxes.filter(function (b) { return b.checked; }).length;
+  all.checked = picked > 0 && picked === boxes.length;
+  all.indeterminate = picked > 0 && picked < boxes.length;
+}
+
+function renderAdvanceBar() {
+  const host = el('advbar');
+  if (!host) return;
+  const ids = Object.keys(S.selection);
+  if (!ids.length) { host.innerHTML = ''; return; }
+
+  const issuedView = S.advanceView === 'issued';
+  host.innerHTML = '<div class="selbar"><b>' + ids.length + ' part' +
+    (ids.length === 1 ? '' : 's') + ' selected</b><span class="spacer"></span>' +
+    (issuedView
+      ? '<button class="btn sm no" id="advUndo" type="button">Not sent after all</button>'
+      : '<button class="btn sm pri" id="advSend" type="button">Record as sent from stock…</button>') +
+    '</div>';
+
+  if (el('advSend')) el('advSend').addEventListener('click', promptAdvanceBulk);
+  if (el('advUndo')) {
+    el('advUndo').addEventListener('click', function () {
+      if (!confirm('Take back the advance-issue note on ' + ids.length + ' part(s)?')) return;
+      api('claims.advanceIssue', { itemIds: ids, issued: false })
+        .then(function (r) {
+          toast(r.count + ' part(s) no longer marked as sent.', 'ok');
+          loadAdvance();
+        }).catch(fail);
+    });
+  }
+}
+
+/**
+ * One note for the whole courier run. The note is what an administrator writes
+ * to explain a shelf that is one pump short, and typing it once per claim is
+ * how it ends up not being written at all.
+ */
+function promptAdvanceBulk() {
+  const ids = Object.keys(S.selection);
+  const rows = (S.advance.awaiting || []).filter(function (r) {
+    return S.selection[r.itemId];
+  });
+  const claims = {};
+  rows.forEach(function (r) { claims[r.claimId] = true; });
+
+  openModal({
+    title: 'Record as sent from stock',
+    size: 'narrow',
+    body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') + ' across ' +
+      Object.keys(claims).length + ' claim' + (Object.keys(claims).length === 1 ? '' : 's') +
+      '.</p>' +
+      '<div class="blk"><h3>Going out</h3>' +
+      rows.map(function (r) {
+        return '<div class="itemrow"><span class="nm">' + h(r.partName) + '</span>' +
+          '<span class="mono tiny">' + r.qty + ' pcs</span>' +
+          '<span class="tiny">' + h(r.customerName) + ' · ' + h(r.serialNumber) + '</span></div>';
+      }).join('') + '</div>' +
+      '<label class="field"><span>Note (optional)</span>' +
+      '<input type="text" id="advNote" placeholder="Courier 12 Sep, replaces stock on hand"></label>' +
+      '<p class="tiny">The claims carry on unchanged. What the principal eventually sends against ' +
+      'them replenishes stock instead of travelling to site.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Record', primary: true, onClick: function (close) {
+        api('claims.advanceIssue', { itemIds: ids, note: el('advNote').value.trim() })
+          .then(function (r) {
+            close();
+            toast(r.count + ' part(s) recorded as sent from stock.', 'ok');
+            loadAdvance();
           }).catch(fail);
       } }
     ]

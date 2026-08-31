@@ -146,7 +146,15 @@ Apa yang berubah karenanya:
 | Yang dilihat principal | daftar part biasa | ditandai *already supplied from local stock* |
 | Kalau ditolak principal | rumah sakit belum terima apa-apa | **biaya sudah tertanggung di sisi Anda** — terlihat jelas di ringkasan dan ekspor |
 
-**Yang mencatat hanya Administrator**, kapan saja sebelum klaim ditutup, lewat tombol *Record advance issue* di panel detail; penandanya bisa dicabut lagi dari tempat yang sama. Stoknya milik Administrator dan hanya dia yang tahu apakah ada part yang keluar dari sana — Requester meminta part dan tidak pernah melihat penanda ini di formulir.
+**Yang mencatat hanya Administrator.** Stoknya milik Administrator dan hanya dia yang tahu apakah ada part yang keluar dari sana — Requester meminta part dan tidak pernah melihat penanda ini di formulir.
+
+### Menu *Advance Issue* — apa yang harus dikirim hari ini
+
+Mencatat talangan satu klaim demi satu klaim menjawab pertanyaan *"apa yang sudah saya kirim atas klaim ini?"* — pertanyaan yang diajukan setelah kejadian. Pertanyaan yang ada di depan Administrator setiap pagi justru sebaliknya, dan tidak ada layar yang menanyakannya. Menu **Advance Issue** adalah daftar itu: satu tabel, tingkat sparepart, melintasi semua klaim, dengan angka pada menunya sehingga antreannya tidak perlu diingat sendiri.
+
+Isinya **tidak disaring oleh sejauh mana klaimnya berjalan**. Mesinnya mati; partnya berangkat. Apakah principal sudah menyetujui, dan apakah biayanya akhirnya jatuh ke mereka atau ke kita, diselesaikan belakangan pada klaimnya. Sebuah baris hilang dari daftar hanya karena dua hal: partnya sudah keluar (`Shipped`, atau sudah dicatat sebagai talangan) atau memang tidak akan dikirim (`Rejected`, klaim masih `Draft`, klaim sudah `Closed`).
+
+Urutannya klaim terlama di atas — mesin yang paling lama mati adalah yang pertama naik ke kurir. Pilih beberapa baris sekaligus, tulis satu keterangan untuk satu rit pengiriman, dan semuanya tercatat dalam satu langkah. Tab **Sent from stock** menyimpan catatan sebaliknya, lengkap dengan siapa dan kapan, dan penandanya bisa dicabut dari sana bila ternyata tidak jadi berangkat. Tombol *Record advance issue* di panel klaim tetap ada untuk kasus satuan.
 
 Karena itu `claims.save` tidak pernah menyentuh penanda ini: Requester boleh menyunting klaimnya selama masih Draft atau Returned, dan suntingan itu tidak boleh mengubah catatan apa yang sudah dikirim dari stok. Satu-satunya jalan masuk adalah `claims.advanceIssue`, yang hanya menerima Administrator.
 

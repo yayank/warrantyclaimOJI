@@ -168,6 +168,7 @@ function route_(session, action, payload) {
     case 'claims.shipped': return markShipped_(session, payload);
     case 'claims.partReturn': return recordPartReturn_(session, payload);
     case 'claims.advanceIssue': return setAdvanceIssue_(session, payload);
+    case 'claims.advanceQueue': return advanceQueue_(session);
     case 'claims.delete': return deleteClaim_(session, payload);
     case 'claims.lookup': return lookupSerial_(session, payload.serialNumber);
     case 'claims.units': return unitOptions_(session);
