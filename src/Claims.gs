@@ -54,12 +54,14 @@ function matchesTab_(session, row, tab) {
   if (tab === 'completed') return row.status === STATUS.CLOSED;
   if (tab === 'internal') return row.status === STATUS.INTERNAL;
   if (tab === 'progress') {
-    // A draft has not been submitted, so nothing about it is in progress: it is
-    // the requester's own unfinished work, and an administrator seeing it in
-    // their working tabs reads as work waiting on somebody. Drafts other than
-    // your own are reachable from All.
-    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 &&
-      !needsAction_(session, row);
+    // Everything submitted and not yet finished — including what is waiting on
+    // the viewer. Needs Action is a shortcut into this list, not a slice taken
+    // out of it: a claim disappearing from In Progress the moment it needed
+    // attention is how work stops being tracked.
+    //
+    // A draft is the one thing left out. It has not been submitted, so nothing
+    // about it is under way, and it waits on nobody but its author.
+    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1;
   }
   if (tab === 'action') return needsAction_(session, row);
   return true;

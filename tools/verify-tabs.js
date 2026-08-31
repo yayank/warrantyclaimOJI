@@ -57,7 +57,7 @@ function tabsFor(role, r) {
   });
 }
 
-/* --------------------------------- a claim is never in two tabs at once */
+/* ------------------------ every live claim is reachable while it is live */
 
 const STATUSES = [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.RETURNED, STATUS.IN_REVIEW,
   STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED];
@@ -68,16 +68,20 @@ const ROLES = [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL];
 ROLES.forEach(function (role) {
   STATUSES.forEach(function (status) {
     ITEMS.forEach(function (itemStatus) {
-      const found = tabsFor(role, row(status, itemStatus));
-      // A draft is deliberately outside the three working tabs unless it is
-      // your own to finish: nothing about an unsubmitted claim is in progress,
-      // and it waits on nobody but its author. It is reachable from All.
-      const wanted = status === STATUS.DRAFT && !needsAction_(session(role), row(status, itemStatus))
-        ? 0 : 1;
-      check(role + ' · ' + status + ' · ' + itemStatus + ' lands in ' +
-        (wanted ? 'exactly one tab' : 'no working tab, only All'),
-        found.length === wanted,
-        found.length ? 'in ' + found.join(' and ') : 'in no tab at all');
+      const r = row(status, itemStatus);
+      const found = tabsFor(role, r);
+      // Needs Action and In Progress overlap on purpose: the first is a
+      // shortcut into the second. What must never happen is a live claim in no
+      // working tab at all — that is how work stops being tracked. A draft is
+      // the exception: not under way, waiting on nobody but its author.
+      const draftOfSomeoneElse = status === STATUS.DRAFT && !needsAction_(session(role), r);
+      check(role + ' · ' + status + ' · ' + itemStatus +
+        (draftOfSomeoneElse ? ' sits outside the working tabs' : ' is in a working tab'),
+        draftOfSomeoneElse ? found.length === 0 : found.length >= 1,
+        'in ' + (found.join(' and ') || 'no tab at all'));
+
+      check(role + ' · ' + status + ' · ' + itemStatus + ' is never both live and completed',
+        !(found.indexOf('completed') !== -1 && found.indexOf('progress') !== -1));
     });
   });
 });
@@ -101,7 +105,11 @@ check('a returned claim is back with the requester',
   tabsFor(ROLE.REQUESTER, row(STATUS.RETURNED))[0] === 'action');
 
 check('a submitted claim waits on the administrator',
-  tabsFor(ROLE.ADMIN, row(STATUS.SUBMITTED))[0] === 'action');
+  tabsFor(ROLE.ADMIN, row(STATUS.SUBMITTED)).indexOf('action') !== -1);
+
+check('and it is still in In Progress — needing attention does not remove it',
+  tabsFor(ROLE.ADMIN, row(STATUS.SUBMITTED)).indexOf('progress') !== -1,
+  tabsFor(ROLE.ADMIN, row(STATUS.SUBMITTED)).join(', '));
 
 check('internal verification has a queue of its own',
   matchesTab_(session(ROLE.ADMIN), row(STATUS.INTERNAL), 'internal'));
@@ -112,19 +120,21 @@ check('and nothing else is in it',
   !matchesTab_(session(ROLE.ADMIN), row(STATUS.CLOSED), 'internal'));
 
 check('and is progress, not action, for the requester who sent it',
-  tabsFor(ROLE.REQUESTER, row(STATUS.SUBMITTED))[0] === 'progress');
+  tabsFor(ROLE.REQUESTER, row(STATUS.SUBMITTED)).join() === 'progress');
 
 check('a claim in review with a pending part waits on the principal',
-  tabsFor(ROLE.PRINCIPAL, row(STATUS.IN_REVIEW, ITEM_STATUS.PENDING))[0] === 'action');
+  tabsFor(ROLE.PRINCIPAL, row(STATUS.IN_REVIEW, ITEM_STATUS.PENDING)).indexOf('action') !== -1);
 
 check('once decided it is no longer theirs to act on',
-  tabsFor(ROLE.PRINCIPAL, row(STATUS.IN_REVIEW, ITEM_STATUS.APPROVED))[0] === 'progress');
+  tabsFor(ROLE.PRINCIPAL, row(STATUS.IN_REVIEW, ITEM_STATUS.APPROVED)).indexOf('action') === -1);
 
 check('fulfilment with an approved part is the administrator\'s',
-  tabsFor(ROLE.ADMIN, row(STATUS.FULFILMENT, ITEM_STATUS.APPROVED))[0] === 'action');
+  tabsFor(ROLE.ADMIN, row(STATUS.FULFILMENT, ITEM_STATUS.APPROVED)).indexOf('action') !== -1);
 
-check('a closed claim is completed for everyone',
-  ROLES.every(function (r) { return tabsFor(r, row(STATUS.CLOSED, ITEM_STATUS.SHIPPED))[0] === 'completed'; }));
+check('a closed claim is completed for everyone, and only completed',
+  ROLES.every(function (r) {
+    return tabsFor(r, row(STATUS.CLOSED, ITEM_STATUS.SHIPPED)).join() === 'completed';
+  }));
 
 check('All shows what the three working tabs show',
   STATUSES.every(function (status) {
