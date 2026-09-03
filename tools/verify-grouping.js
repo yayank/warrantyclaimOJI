@@ -69,11 +69,11 @@ function claim(status, extra) {
  * The tbody read back the way the screen reads it: headings and claim rows in
  * the order they actually appear, which is the whole point of the exercise.
  */
-function render(role, tab, rows, expanded) {
+function render(role, tab, rows, collapsed) {
   S.session = { email: 'rian@rs.co.id', role: role, isTester: false };
   S.tab = tab;
   S.rows = rows;
-  S.expanded = expanded || {};
+  S.collapsed = collapsed || {};
   const html = claimTable();
 
   const out = [];
@@ -87,7 +87,7 @@ function render(role, tab, rows, expanded) {
     } else if (m[1] === 'click') {
       out.push({ kind: 'claim', claimId: m[2] });
     } else {
-      out.push({ kind: 'sub' });
+      out.push({ kind: 'sub', html: m[3] });
     }
   }
   return out;
@@ -193,18 +193,71 @@ check('production reads the same blocks as the requester',
 check('an empty list draws no headings at all',
   render(ROLE.REQUESTER, 'all', []).length === 0);
 
-/* ------------------------------------- an opened claim keeps its parts with it */
+/* ------------------- one table: the claim, and its spare parts beneath it */
 
-const open = {};
-open[mixed[1].claimId] = true;
-const expanded = render(ROLE.REQUESTER, 'all', mixed, open);
-const at = expanded.findIndex(function (e) {
-  return e.kind === 'claim' && e.claimId === mixed[1].claimId;
-});
-check('the parts of an opened claim stay directly beneath it',
-  at !== -1 && expanded[at + 1] && expanded[at + 1].kind === 'sub');
-check('and do not push the next claim out of its block',
-  expanded.filter(function (e) { return e.kind === 'claim'; }).length === mixed.length);
+// The screen used to be two tables behind a By claim / By spare part switch,
+// so the parts of a claim were only ever visible in the table that dropped the
+// claim's own row. Now they are the same table.
+
+const shown = render(ROLE.REQUESTER, 'all', mixed);
+
+check('every claim carries its spare parts directly beneath it',
+  mixed.every(function (c) {
+    const at = shown.findIndex(function (e) {
+      return e.kind === 'claim' && e.claimId === c.claimId;
+    });
+    return at !== -1 && shown[at + 1] && shown[at + 1].kind === 'sub';
+  }));
+
+check('the parts do not push the next claim out of its block',
+  shown.filter(function (e) { return e.kind === 'claim'; }).length === mixed.length);
+
+check('and a part never appears before the claim it belongs to',
+  shown[0].kind === 'head' && shown[1].kind === 'claim');
+
+const folded = {};
+folded[mixed[1].claimId] = true;
+const afterFold = render(ROLE.REQUESTER, 'all', mixed, folded);
+check('a claim folded away keeps its own row',
+  afterFold.filter(function (e) { return e.kind === 'claim'; }).length === mixed.length);
+check('and gives up only its own parts',
+  afterFold.filter(function (e) { return e.kind === 'sub'; }).length ===
+  shown.filter(function (e) { return e.kind === 'sub'; }).length - 1);
+
+/* --------------------------- what the spare-part table used to hold alone */
+
+const flagged = [claim(STATUS.FULFILMENT, {
+  items: [{ itemId: 'IX', partName: 'Plunger', qty: 2, itemStatus: ITEM.SHIPPED,
+    advanceIssued: true, awaitingReturn: true, decisionReason: 'covered by principal' }],
+  summary: { approved: 1, rejected: 0, pending: 0, shipped: 1, advance: 1, awaitingReturn: 1 }
+})];
+const detail = render(ROLE.ADMIN, 'progress', flagged)
+  .filter(function (e) { return e.kind === 'sub'; }).map(function (e) { return e.html; }).join('');
+
+check('the part row still names the part and its quantity',
+  detail.indexOf('Plunger') !== -1 && detail.indexOf('2 pcs') !== -1, detail);
+check('stock issued in advance is still marked on the part',
+  detail.indexOf('issued in advance') !== -1, detail);
+check('so is the faulty part still owed back',
+  detail.indexOf('to return') !== -1, detail);
+check('and the reason a part was decided the way it was',
+  detail.indexOf('covered by principal') !== -1, detail);
+
+check('a requester is not shown the advance-issue flag — the stock is not theirs',
+  render(ROLE.REQUESTER, 'all', flagged)
+    .filter(function (e) { return e.kind === 'sub'; })
+    .map(function (e) { return e.html; }).join('').indexOf('issued in advance') === -1);
+
+/* ------------------------------- a claim with nothing on it yet is still a row */
+
+const bare = [claim(STATUS.DRAFT, {
+  items: [], summary: { approved: 0, rejected: 0, pending: 0, shipped: 0, advance: 0, awaitingReturn: 0 }
+})];
+const bareOut = render(ROLE.REQUESTER, 'all', bare);
+check('a claim with no spare part on it still appears',
+  bareOut.filter(function (e) { return e.kind === 'claim'; }).length === 1);
+check('and says so rather than leaving a gap',
+  bareOut.some(function (e) { return e.kind === 'sub' && /No spare part/.test(e.html); }));
 
 /* --------------------------------------------- which tab opens, and for whom */
 

@@ -3917,7 +3917,17 @@ function exportClaims_(session, filter) {
 
   result.rows.forEach(function (c) {
     const link = folderLink(c);
-    if (flat) {
+    if (flat && !c.items.length) {
+      // One row per spare part loses a claim that has none yet — a draft, or a
+      // claim whose parts were all removed. The claim is what was asked for;
+      // the part columns are simply blank.
+      rows.push([
+        c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
+        c.problem, '', '', '', '', '', '', '', '', '',
+        c.requesterName, c.status, link
+      ]);
+    } else if (flat) {
       c.items.forEach(function (i) {
         rows.push([
           c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,

@@ -159,11 +159,6 @@ label.field>span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
 
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .toolbar .grow{flex:1;min-width:180px}
-.seg{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
-.seg button{padding:5px 11px;font-size:12.5px;color:var(--ink-3);background:var(--surface);
-  border:0;cursor:pointer}
-.seg button.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
-.seg button+button{border-left:1px solid var(--line)}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:var(--accent-soft);
   color:var(--accent-ink);border-radius:20px;padding:3px 6px 3px 11px;font-weight:500}
 .chip button{border:0;background:none;color:inherit;cursor:pointer;opacity:.6;padding:0 4px}
@@ -189,7 +184,12 @@ table.data td{padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical
 table.data tr.click{cursor:pointer}
 table.data tr.click:hover td{background:var(--surface-2)}
 table.data tr.sub td{background:var(--surface-2);font-size:12.5px}
-table.data tr.sub td:first-child{padding-left:30px}
+table.data tr.sub td.part{padding-left:26px;position:relative}
+/* The parts belong to the claim above them, and have to read that way. */
+table.data tr.sub td.part::before{content:"";position:absolute;left:12px;top:-9px;bottom:50%;
+  width:7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);
+  border-bottom-left-radius:3px}
+table.data tr.sub+tr.click td{border-top:1px solid var(--line)}
 table.data tr.group-header td{background:var(--surface-2);color:var(--ink-2);font-weight:600;
   font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:11px 10px 8px;
   border-bottom:1px solid var(--line);border-top:1px solid var(--line)}

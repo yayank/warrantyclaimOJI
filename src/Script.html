@@ -7,12 +7,11 @@ const S = {
   reference: null,
   page: 'claims',
   tab: 'action',
-  view: 'claim',            // 'claim' | 'item'
   filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', partId: '',
     principal: '', from: '', to: '' },
   rows: [],
   counts: { action: 0, advance: 0 },
-  expanded: {},
+  collapsed: {},            // claims whose parts the reader has folded away
   selection: {},
   advance: null,            // the stock-issue queue, once fetched
   advanceView: 'awaiting',  // 'awaiting' | 'issued'
@@ -324,7 +323,6 @@ function applyDeepLink() {
   else if (link.page === 'orders') { S.page = 'orders'; }
   else if (link.page === 'claims') { S.page = 'claims'; }
   if (S.session.role === ROLE.PRINCIPAL && S.page === 'claims') S.page = 'batch';
-  if (S.session.role === ROLE.ADMIN) S.view = 'item';
   if ((S.session.role === ROLE.REQUESTER || S.session.role === ROLE.PRODUCTION) && S.page === 'claims') S.tab = 'all';
 }
 
@@ -386,7 +384,6 @@ function renderTesterBar() {
   el('simRole').addEventListener('change', function () {
     S.session.simulatedRole = this.value;
     S.session.role = this.value;
-    S.view = this.value === ROLE.ADMIN ? 'item' : 'claim';
     S.page = this.value === ROLE.PRINCIPAL ? 'batch' : 'claims';
     renderChrome();
     navigate(S.page);
@@ -458,10 +455,6 @@ function renderClaims() {
     tabButton('all', 'All'),
     '</div>',
     '<div class="toolbar">',
-      '<div class="seg">',
-        '<button type="button" data-view="claim"' + (S.view === 'claim' ? ' class="on"' : '') + '>By claim</button>',
-        '<button type="button" data-view="item"' + (S.view === 'item' ? ' class="on"' : '') + '>By spare part</button>',
-      '</div>',
       '<input type="text" id="q" class="grow" placeholder="Search claim ID, reference, serial number, customer…" value="' + h(S.filters.search) + '">',
       selectFilter('statusFilter', 'All statuses', S.reference.statuses,
         S.filters.statuses[0] || '', statusLabel),
@@ -478,7 +471,7 @@ function renderClaims() {
     '</div>',
     activeChips(),
     S.rows.length
-      ? (S.view === 'claim' ? claimTable() : itemTable())
+      ? claimTable()
       : '<div class="tablewrap"><div class="empty">Nothing here yet.</div></div>'
   ].join('');
 
@@ -592,7 +585,7 @@ function claimTable() {
     : null;
 
   const claimRows = function (c) {
-    const open = !!S.expanded[c.claimId];
+    const open = !S.collapsed[c.claimId];
     const cells = [
       '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
       '<td class="stack"><span class="mono">' + h(c.claimId) + '</span>' +
@@ -622,12 +615,19 @@ function claimTable() {
     );
 
     const rowHtml = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
+    if (open && !c.items.length) {
+      rowHtml.push('<tr class="sub"><td></td><td class="part dimmer" colspan="' + (head.length - 1) +
+        '">No spare part on this claim yet</td></tr>');
+    }
     if (open) {
       c.items.forEach(function (i) {
-        rowHtml.push('<tr class="sub"><td></td><td colspan="' + (head.length - 4) + '">' +
-          h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td><td>' +
-          itemPill(i.itemStatus) + (i.decisionReason
-            ? '<div class="tiny">' + h(i.decisionReason) + '</div>' : '') +
+        rowHtml.push('<tr class="sub"><td></td><td class="part" colspan="' + (head.length - 4) + '">' +
+          h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td>' +
+          '<td class="stack">' + itemPill(i.itemStatus) +
+          (i.advanceIssued && seesAdvanceIssue()
+            ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
+          returnBadge(i.awaitingReturn) +
+          (i.decisionReason ? '<span class="tiny">' + h(i.decisionReason) + '</span>' : '') +
           '</td><td></td></tr>');
       });
     }
@@ -646,52 +646,15 @@ function claimTable() {
     '</tr></thead><tbody>' + body + '</tbody></table></div>';
 }
 
-function itemTable() {
-  const s = S.session;
-  const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
-  const head = ['<th>Claim</th>', '<th>Serial number</th>', '<th>Customer</th>',
-    '<th>Spare part</th>', '<th>Qty</th>'];
-  if (showWo) head.push('<th>Work order</th>');
-  head.push('<th>Status</th>', '<th>Reason</th>');
-
-  const body = [];
-  S.rows.forEach(function (c) {
-    c.items.forEach(function (i, index) {
-      const faded = index > 0 ? ' dimmer' : '';
-      const cells = [
-        '<td class="mono' + faded + '">' + h(c.claimId) + '</td>',
-        '<td class="mono' + faded + '">' + h(c.serialNumber) + '</td>',
-        '<td class="' + (index > 0 ? 'dimmer' : '') + '">' + h(c.customerName) + '</td>',
-        '<td>' + h(i.partName) + '</td>',
-        '<td class="mono">' + i.qty + '</td>'
-      ];
-      if (showWo) cells.push('<td class="mono' + faded + '">' + h(c.workOrderNo || '—') + '</td>');
-      cells.push('<td class="stack">' + itemPill(i.itemStatus) +
-        (i.advanceIssued && seesAdvanceIssue()
-          ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
-        returnBadge(i.awaitingReturn) +
-        '</td>',
-        '<td class="tiny">' + h(i.decisionReason || '') + '</td>');
-      body.push('<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>');
-    });
-  });
-
-  return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
-    '</tr></thead><tbody>' + body.join('') + '</tbody></table></div>';
-}
-
 function wireClaimsToolbar() {
   el('view').querySelectorAll('[data-tab]').forEach(function (b) {
     b.addEventListener('click', function () { S.tab = b.dataset.tab; loadClaims(); });
-  });
-  el('view').querySelectorAll('[data-view]').forEach(function (b) {
-    b.addEventListener('click', function () { S.view = b.dataset.view; renderClaims(); });
   });
   el('view').querySelectorAll('[data-toggle]').forEach(function (td) {
     td.addEventListener('click', function (e) {
       e.stopPropagation();
       const id = td.dataset.toggle;
-      S.expanded[id] = !S.expanded[id];
+      S.collapsed[id] = !S.collapsed[id];
       renderClaims();
     });
   });
@@ -751,7 +714,9 @@ function doExport() {
   const btn = el('doExport');
   btn.disabled = true;
   btn.textContent = 'Preparing file…';
-  const filter = Object.assign({ tab: S.tab, view: S.view }, S.filters);
+  // The screen is one table now, claim over spare part, so the export that
+  // matches it is the per-part one.
+  const filter = Object.assign({ tab: S.tab, view: 'item' }, S.filters);
   api('claims.export', filter).then(function (r) {
     btn.textContent = 'Export to Excel';
     btn.disabled = false;

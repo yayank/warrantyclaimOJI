@@ -170,11 +170,6 @@ label.field>span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
 
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .toolbar .grow{flex:1;min-width:180px}
-.seg{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
-.seg button{padding:5px 11px;font-size:12.5px;color:var(--ink-3);background:var(--surface);
-  border:0;cursor:pointer}
-.seg button.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
-.seg button+button{border-left:1px solid var(--line)}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:var(--accent-soft);
   color:var(--accent-ink);border-radius:20px;padding:3px 6px 3px 11px;font-weight:500}
 .chip button{border:0;background:none;color:inherit;cursor:pointer;opacity:.6;padding:0 4px}
@@ -200,7 +195,12 @@ table.data td{padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical
 table.data tr.click{cursor:pointer}
 table.data tr.click:hover td{background:var(--surface-2)}
 table.data tr.sub td{background:var(--surface-2);font-size:12.5px}
-table.data tr.sub td:first-child{padding-left:30px}
+table.data tr.sub td.part{padding-left:26px;position:relative}
+/* The parts belong to the claim above them, and have to read that way. */
+table.data tr.sub td.part::before{content:"";position:absolute;left:12px;top:-9px;bottom:50%;
+  width:7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);
+  border-bottom-left-radius:3px}
+table.data tr.sub+tr.click td{border-top:1px solid var(--line)}
 table.data tr.group-header td{background:var(--surface-2);color:var(--ink-2);font-weight:600;
   font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:11px 10px 8px;
   border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
@@ -458,12 +458,11 @@ const S = {
   reference: null,
   page: 'claims',
   tab: 'action',
-  view: 'claim',            // 'claim' | 'item'
   filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', partId: '',
     principal: '', from: '', to: '' },
   rows: [],
   counts: { action: 0, advance: 0 },
-  expanded: {},
+  collapsed: {},            // claims whose parts the reader has folded away
   selection: {},
   advance: null,            // the stock-issue queue, once fetched
   advanceView: 'awaiting',  // 'awaiting' | 'issued'
@@ -775,7 +774,6 @@ function applyDeepLink() {
   else if (link.page === 'orders') { S.page = 'orders'; }
   else if (link.page === 'claims') { S.page = 'claims'; }
   if (S.session.role === ROLE.PRINCIPAL && S.page === 'claims') S.page = 'batch';
-  if (S.session.role === ROLE.ADMIN) S.view = 'item';
   if ((S.session.role === ROLE.REQUESTER || S.session.role === ROLE.PRODUCTION) && S.page === 'claims') S.tab = 'all';
 }
 
@@ -837,7 +835,6 @@ function renderTesterBar() {
   el('simRole').addEventListener('change', function () {
     S.session.simulatedRole = this.value;
     S.session.role = this.value;
-    S.view = this.value === ROLE.ADMIN ? 'item' : 'claim';
     S.page = this.value === ROLE.PRINCIPAL ? 'batch' : 'claims';
     renderChrome();
     navigate(S.page);
@@ -909,10 +906,6 @@ function renderClaims() {
     tabButton('all', 'All'),
     '</div>',
     '<div class="toolbar">',
-      '<div class="seg">',
-        '<button type="button" data-view="claim"' + (S.view === 'claim' ? ' class="on"' : '') + '>By claim</button>',
-        '<button type="button" data-view="item"' + (S.view === 'item' ? ' class="on"' : '') + '>By spare part</button>',
-      '</div>',
       '<input type="text" id="q" class="grow" placeholder="Search claim ID, reference, serial number, customer…" value="' + h(S.filters.search) + '">',
       selectFilter('statusFilter', 'All statuses', S.reference.statuses,
         S.filters.statuses[0] || '', statusLabel),
@@ -929,7 +922,7 @@ function renderClaims() {
     '</div>',
     activeChips(),
     S.rows.length
-      ? (S.view === 'claim' ? claimTable() : itemTable())
+      ? claimTable()
       : '<div class="tablewrap"><div class="empty">Nothing here yet.</div></div>'
   ].join('');
 
@@ -1043,7 +1036,7 @@ function claimTable() {
     : null;
 
   const claimRows = function (c) {
-    const open = !!S.expanded[c.claimId];
+    const open = !S.collapsed[c.claimId];
     const cells = [
       '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
       '<td class="stack"><span class="mono">' + h(c.claimId) + '</span>' +
@@ -1073,12 +1066,19 @@ function claimTable() {
     );
 
     const rowHtml = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
+    if (open && !c.items.length) {
+      rowHtml.push('<tr class="sub"><td></td><td class="part dimmer" colspan="' + (head.length - 1) +
+        '">No spare part on this claim yet</td></tr>');
+    }
     if (open) {
       c.items.forEach(function (i) {
-        rowHtml.push('<tr class="sub"><td></td><td colspan="' + (head.length - 4) + '">' +
-          h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td><td>' +
-          itemPill(i.itemStatus) + (i.decisionReason
-            ? '<div class="tiny">' + h(i.decisionReason) + '</div>' : '') +
+        rowHtml.push('<tr class="sub"><td></td><td class="part" colspan="' + (head.length - 4) + '">' +
+          h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td>' +
+          '<td class="stack">' + itemPill(i.itemStatus) +
+          (i.advanceIssued && seesAdvanceIssue()
+            ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
+          returnBadge(i.awaitingReturn) +
+          (i.decisionReason ? '<span class="tiny">' + h(i.decisionReason) + '</span>' : '') +
           '</td><td></td></tr>');
       });
     }
@@ -1097,52 +1097,15 @@ function claimTable() {
     '</tr></thead><tbody>' + body + '</tbody></table></div>';
 }
 
-function itemTable() {
-  const s = S.session;
-  const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
-  const head = ['<th>Claim</th>', '<th>Serial number</th>', '<th>Customer</th>',
-    '<th>Spare part</th>', '<th>Qty</th>'];
-  if (showWo) head.push('<th>Work order</th>');
-  head.push('<th>Status</th>', '<th>Reason</th>');
-
-  const body = [];
-  S.rows.forEach(function (c) {
-    c.items.forEach(function (i, index) {
-      const faded = index > 0 ? ' dimmer' : '';
-      const cells = [
-        '<td class="mono' + faded + '">' + h(c.claimId) + '</td>',
-        '<td class="mono' + faded + '">' + h(c.serialNumber) + '</td>',
-        '<td class="' + (index > 0 ? 'dimmer' : '') + '">' + h(c.customerName) + '</td>',
-        '<td>' + h(i.partName) + '</td>',
-        '<td class="mono">' + i.qty + '</td>'
-      ];
-      if (showWo) cells.push('<td class="mono' + faded + '">' + h(c.workOrderNo || '—') + '</td>');
-      cells.push('<td class="stack">' + itemPill(i.itemStatus) +
-        (i.advanceIssued && seesAdvanceIssue()
-          ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
-        returnBadge(i.awaitingReturn) +
-        '</td>',
-        '<td class="tiny">' + h(i.decisionReason || '') + '</td>');
-      body.push('<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>');
-    });
-  });
-
-  return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
-    '</tr></thead><tbody>' + body.join('') + '</tbody></table></div>';
-}
-
 function wireClaimsToolbar() {
   el('view').querySelectorAll('[data-tab]').forEach(function (b) {
     b.addEventListener('click', function () { S.tab = b.dataset.tab; loadClaims(); });
-  });
-  el('view').querySelectorAll('[data-view]').forEach(function (b) {
-    b.addEventListener('click', function () { S.view = b.dataset.view; renderClaims(); });
   });
   el('view').querySelectorAll('[data-toggle]').forEach(function (td) {
     td.addEventListener('click', function (e) {
       e.stopPropagation();
       const id = td.dataset.toggle;
-      S.expanded[id] = !S.expanded[id];
+      S.collapsed[id] = !S.collapsed[id];
       renderClaims();
     });
   });
@@ -1202,7 +1165,9 @@ function doExport() {
   const btn = el('doExport');
   btn.disabled = true;
   btn.textContent = 'Preparing file…';
-  const filter = Object.assign({ tab: S.tab, view: S.view }, S.filters);
+  // The screen is one table now, claim over spare part, so the export that
+  // matches it is the per-part one.
+  const filter = Object.assign({ tab: S.tab, view: 'item' }, S.filters);
   api('claims.export', filter).then(function (r) {
     btn.textContent = 'Export to Excel';
     btn.disabled = false;
