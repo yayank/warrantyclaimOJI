@@ -194,6 +194,8 @@ table.data tr.group-header td{background:var(--surface-2);color:var(--ink-2);fon
   font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:11px 10px 8px;
   border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
 table.data tr.group-header:first-child td{border-top:0}
+/* A hospital name is a sentence, not a label; small caps make it unreadable. */
+table.data tr.group-header.plain td{text-transform:none;letter-spacing:0;font-size:12.5px}
 /* One level in from the status block: the reference the claims below share. */
 table.data tr.ref-header td{background:var(--surface);color:var(--ink-2);font-size:12px;
   padding:9px 10px 7px 22px;border-bottom:1px solid var(--line-soft);position:relative}

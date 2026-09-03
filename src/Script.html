@@ -6,12 +6,13 @@ const S = {
   session: null,
   reference: null,
   page: 'claims',
-  tab: 'action',
+  tab: 'all',
   filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', partId: '',
     principal: '', from: '', to: '' },
   rows: [],
   counts: { action: 0, advance: 0 },
   collapsed: {},            // claims whose parts the reader has folded away
+  group: 'status',          // 'status' | 'customer' — what the list is cut by
   selection: {},
   advance: null,            // the stock-issue queue, once fetched
   advanceView: 'awaiting',  // 'awaiting' | 'issued'
@@ -323,7 +324,6 @@ function applyDeepLink() {
   else if (link.page === 'orders') { S.page = 'orders'; }
   else if (link.page === 'claims') { S.page = 'claims'; }
   if (S.session.role === ROLE.PRINCIPAL && S.page === 'claims') S.page = 'batch';
-  if ((S.session.role === ROLE.REQUESTER || S.session.role === ROLE.PRODUCTION) && S.page === 'claims') S.tab = 'all';
 }
 
 /* ============================================================== chrome */
@@ -464,6 +464,7 @@ function renderClaims() {
         : '',
       customerFilter(),
       principalFilter(),
+      groupFilter(),
       '<span class="spacer"></span>',
       s.role === ROLE.ADMIN ? '<button class="btn" id="digestNow" type="button">Send Digest Now</button>' : '',
       '<button class="btn" id="doExport" type="button">Export to Excel</button>',
@@ -498,13 +499,38 @@ function selectFilter(id, blank, options, value, label) {
     }).join('') + '</select>';
 }
 
+/**
+ * There are 1.386 customers. A <select> at that size can only be scrolled, so
+ * this is the same searchable box the claim form uses, with "All customers" as
+ * a real option rather than a blank one — picking it is how the filter is
+ * cleared, and it is what the box reads when nothing is filtered.
+ */
 function customerFilter() {
-  return '<select id="customerFilter" style="width:auto;max-width:220px">' +
-    '<option value="">All customers</option>' +
-    S.reference.customers.map(function (c) {
-      return '<option value="' + h(c.id) + '"' +
-        (S.filters.customerId === c.id ? ' selected' : '') + '>' + h(c.name) + '</option>';
-    }).join('') + '</select>';
+  const all = { value: '', label: 'All customers' };
+  const chosen = S.reference.customers.filter(function (c) {
+    return c.id === S.filters.customerId;
+  })[0];
+  return '<div style="width:220px;flex:none">' + comboField({
+    id: 'customerFilter',
+    value: S.filters.customerId || '',
+    text: chosen ? chosen.name : all.label,
+    placeholder: all.label,
+    options: [all].concat(S.reference.customers.map(function (c) {
+      return { value: c.id, label: c.name };
+    })),
+    emptyHtml: function (query) {
+      return 'No customer matches “' + h(query) + '”.';
+    },
+    onPick: function (v) { S.filters.customerId = v; loadClaims(); }
+  }) + '</div>';
+}
+
+/** What the list is cut by. The blocks are the same shape either way. */
+function groupFilter() {
+  return '<select id="groupBy" style="width:auto;min-width:150px">' +
+    '<option value="status"' + (S.group === 'status' ? ' selected' : '') + '>Group by status</option>' +
+    '<option value="customer"' + (S.group === 'customer' ? ' selected' : '') + '>Group by customer</option>' +
+    '</select>';
 }
 
 /** Only an administrator sees more than one principal, so only they can filter. */
@@ -543,7 +569,27 @@ function chip(label, value, key) {
 }
 
 /**
- * The list cut into blocks, in the order a claim moves through them.
+ * The list cut into blocks. Both cuts have the same shape — a label and the
+ * rows under it — so the table draws one thing and only the heading differs.
+ */
+function groupClaims_(rows, by) {
+  return by === 'customer' ? groupByCustomer_(rows) : groupByStatus_(rows);
+}
+
+/** Collects rows by a key, keeping the order each key was first seen. */
+function collectBy_(rows, key) {
+  const grouped = {};
+  const seen = [];
+  rows.forEach(function (r) {
+    const k = key(r) || '';
+    if (!grouped[k]) { grouped[k] = []; seen.push(k); }
+    grouped[k].push(r);
+  });
+  return { grouped: grouped, seen: seen };
+}
+
+/**
+ * In the order a claim moves through them.
  *
  * A status the order does not name still gets a block, at the end: a row that
  * quietly vanishes from the list is a worse fault than one out of order.
@@ -551,15 +597,25 @@ function chip(label, value, key) {
 function groupByStatus_(rows) {
   const order = [STATUS.DRAFT, STATUS.RETURNED, STATUS.SUBMITTED, STATUS.IN_REVIEW,
     STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED];
-  const grouped = {};
-  const seen = [];
-  rows.forEach(function (r) {
-    if (!grouped[r.status]) { grouped[r.status] = []; seen.push(r.status); }
-    grouped[r.status].push(r);
-  });
-  return order.filter(function (s) { return grouped[s]; })
-    .concat(seen.filter(function (s) { return order.indexOf(s) === -1; }))
-    .map(function (s) { return { status: s, rows: grouped[s] }; });
+  const bag = collectBy_(rows, function (r) { return r.status; });
+  return order.filter(function (s) { return bag.grouped[s]; })
+    .concat(bag.seen.filter(function (s) { return order.indexOf(s) === -1; }))
+    .map(function (s) { return { label: statusLabel(s), rows: bag.grouped[s] }; });
+}
+
+/**
+ * By hospital, in name order.
+ *
+ * Status order is the order of the work; a customer list has no such order of
+ * its own, and the reason to cut by customer is to go and find one. Alphabetical
+ * is the only arrangement you can search by eye.
+ */
+function groupByCustomer_(rows) {
+  const bag = collectBy_(rows, function (r) { return r.customerName; });
+  return bag.seen.filter(function (n) { return n; })
+    .sort(function (a, b) { return a.localeCompare(b); })
+    .concat(bag.seen.indexOf('') === -1 ? [] : [''])
+    .map(function (n) { return { label: n || 'No customer', rows: bag.grouped[n] }; });
 }
 
 /**
@@ -590,7 +646,10 @@ function groupByRef_(rows) {
 
 function claimTable() {
   const s = S.session;
-  const showCustomer = true;
+  // Cut by hospital, the heading is the hospital, and a column repeating it on
+  // every row says nothing the row above did not. The column goes; the space
+  // goes to the ones that still tell the rows apart.
+  const showCustomer = S.group !== 'customer';
   const showRequester = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
   const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
 
@@ -603,31 +662,15 @@ function claimTable() {
   if (showWo) head.push('<th>Work order</th>');
   head.push('<th>Status</th>', '<th>Age</th>');
 
-  // A requester reads the whole list rather than working a queue off the top of
-  // it, so All is broken into status blocks. Every other role keeps the flat
-  // list: they come to this screen with a tab already chosen.
-  const groups = (s.role === ROLE.REQUESTER || s.role === ROLE.PRODUCTION) && S.tab === 'all'
-    ? groupByStatus_(S.rows)
-    : null;
+  const groups = groupClaims_(S.rows, S.group);
 
-  const claimRows = function (c, underRef) {
+  const claimRows = function (c) {
     const open = !S.collapsed[c.claimId];
     const cells = [
       '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
-      // The reference is what a claim is called out in the field, and one
-      // reference covers several claims, so it leads. A claim not yet submitted
-      // has no reference at all — there the claim id is the only name it has,
-      // and it keeps the top line rather than being led by its own absence.
-      //
-      // Under a reference heading neither line is needed twice: the heading is
-      // the reference, so the row is only its own id.
-      '<td class="stack">' + (underRef
-        ? '<span class="mono">' + h(c.claimId) + '</span>'
-        : (c.refNo
-          ? '<span class="mono">' + h(c.refNo) + '</span>' +
-            '<span class="mono tiny">' + h(c.claimId) + '</span>'
-          : '<span class="mono">' + h(c.claimId) + '</span>' +
-            '<span class="mono tiny">not submitted</span>')) + '</td>',
+      // The reference heading above already carries it, so the row is only its
+      // own id.
+      '<td class="stack"><span class="mono">' + h(c.claimId) + '</span></td>',
       '<td>' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
     ];
     if (showPrincipal) {
@@ -672,21 +715,22 @@ function claimTable() {
     return rowHtml.join('');
   };
 
-  const body = groups
-    ? groups.map(function (g) {
-        return '<tr class="group-header"><td colspan="' + head.length + '">' +
-          h(statusLabel(g.status)) + '<span class="group-n">' + g.rows.length + '</span>' +
-          '</td></tr>' +
-          groupByRef_(g.rows).map(function (r) {
-            return '<tr class="ref-header"><td colspan="' + head.length + '">' +
-              (r.refNo
-                ? '<span class="mono">' + h(r.refNo) + '</span>'
-                : '<span class="dimmer">No reference yet</span>') +
-              '<span class="group-n">' + r.rows.length + '</span></td></tr>' +
-              r.rows.map(function (c) { return claimRows(c, true); }).join('');
-          }).join('');
-      }).join('')
-    : S.rows.map(function (c) { return claimRows(c, false); }).join('');
+  // A hospital name is a sentence; a status is a label. Only the second reads
+  // as one in small caps.
+  const headClass = 'group-header' + (S.group === 'customer' ? ' plain' : '');
+
+  const body = groups.map(function (g) {
+    return '<tr class="' + headClass + '"><td colspan="' + head.length + '">' +
+      h(g.label) + '<span class="group-n">' + g.rows.length + '</span></td></tr>' +
+      groupByRef_(g.rows).map(function (r) {
+        return '<tr class="ref-header"><td colspan="' + head.length + '">' +
+          (r.refNo
+            ? '<span class="mono">' + h(r.refNo) + '</span>'
+            : '<span class="dimmer">No reference yet</span>') +
+          '<span class="group-n">' + r.rows.length + '</span></td></tr>' +
+          r.rows.map(claimRows).join('');
+      }).join('');
+  }).join('');
 
   return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
     '</tr></thead><tbody>' + body + '</tbody></table></div>';
@@ -731,9 +775,10 @@ function wireClaimsToolbar() {
   if (wf) wf.addEventListener('change', function () {
     S.filters.warrantyTypes = this.value ? [this.value] : []; loadClaims();
   });
-  const cf = el('customerFilter');
-  if (cf) cf.addEventListener('change', function () {
-    S.filters.customerId = this.value; loadClaims();
+  if (el('customerFilter')) wireCombo('customerFilter');
+  const gb = el('groupBy');
+  if (gb) gb.addEventListener('change', function () {
+    S.group = this.value; renderClaims();
   });
   const pf = el('principalFilter');
   if (pf) pf.addEventListener('change', function () {

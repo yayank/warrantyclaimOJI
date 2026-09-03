@@ -696,7 +696,7 @@ a{color:inherit}
     <section class="shot" id="s4">
       <div class="shot-label">Screen 04 — Requester</div>
       <h2>Claim Status · Requester</h2>
-      <p class="shot-note">Satu tabel, bukan dua. Baris claim di atas, sparepart-nya langsung di bawahnya — sebelumnya keduanya dipisah sakelar <em>By claim / By spare part</em>, dan masing-masing membuang apa yang jadi guna yang lain. Requester membuka portal untuk tahu klaimnya sudah sampai mana, bukan untuk mengerjakan antrean, jadi tab <em>All</em> yang terbuka lebih dulu dan isinya dipecah per status mengikuti urutan alur klaim. Satu referensi menaungi beberapa klaim, jadi RefNo naik menjadi judul dan tidak lagi diulang tiap baris — empat tingkat: status, RefNo, ClaimID, sparepart. RefNo yang cuma menaungi satu klaim tetap dibuatkan judul; daftar dengan dua bentuk lebih mahal bagi pembaca daripada satu baris yang dihemat. Klaim yang belum diajukan belum punya RefNo sama sekali dan berkumpul di bawah judulnya sendiri, di akhir blok. Caret melipat sparepart sebuah klaim, bukan membukanya.</p>
+      <p class="shot-note">Satu tabel, bukan dua. Baris claim di atas, sparepart-nya langsung di bawahnya — sebelumnya keduanya dipisah sakelar <em>By claim / By spare part</em>, dan masing-masing membuang apa yang jadi guna yang lain. Requester membuka portal untuk tahu klaimnya sudah sampai mana, bukan untuk mengerjakan antrean, jadi tab <em>All</em> yang terbuka lebih dulu dan isinya dipecah per status mengikuti urutan alur klaim. Satu referensi menaungi beberapa klaim, jadi RefNo naik menjadi judul dan tidak lagi diulang tiap baris — empat tingkat: status, RefNo, ClaimID, sparepart. RefNo yang cuma menaungi satu klaim tetap dibuatkan judul; daftar dengan dua bentuk lebih mahal bagi pembaca daripada satu baris yang dihemat. Klaim yang belum diajukan belum punya RefNo sama sekali dan berkumpul di bawah judulnya sendiri, di akhir blok. Caret melipat sparepart sebuah klaim, bukan membukanya. Potongan teratasnya bisa diganti lewat <em>Group by</em> — <em>status</em> seperti di sini, atau <em>customer</em>; saat dipotong per customer kolom Customer ikut hilang, karena judulnya sudah menyebutkannya. Filter customer sendiri kini kotak yang bisa dicari, bukan daftar 1.386 nama yang hanya bisa digulung.</p>
       <div class="frame frame-scroll">
         <div class="frame-inner">
           <div class="app-top">
@@ -715,7 +715,8 @@ a{color:inherit}
             <div class="toolbar">
               <div class="field grow">⌕ Search claim ID, reference, serial number, customer…</div>
               <div class="field">All statuses ▾</div>
-              <div class="field">All customers ▾</div>
+              <div class="field">⌕ All customers</div>
+              <div class="field">Group by status ▾</div>
               <span class="spacer"></span>
               <button class="btn">Export to Excel</button>
               <button class="btn pri">New Claim</button>
@@ -807,7 +808,7 @@ a{color:inherit}
     <section class="shot" id="s5">
       <div class="shot-label">Screen 05 — Administrator</div>
       <h2>Claim Status · Administrator</h2>
-      <p class="shot-note">Tabel yang sama, kolom yang lebih banyak: <em>Principal</em>, <em>Requested by</em>, dan <em>Work order</em> yang tidak dimiliki Requester. Administrator datang ke layar ini dengan tab yang sudah dipilih, jadi daftarnya rata — pemecahan per status hanya untuk Requester di tab <em>All</em>. Baris sparepart membawa apa yang dulu hanya ada di tabel sparepart tersendiri: penanda talangan, penanda part rusak yang masih terutang, dan alasan sebuah part diputuskan. Klaim yang belum punya sparepart tetap punya barisnya sendiri — di tabel sparepart yang lama klaim seperti itu hilang sama sekali.</p>
+      <p class="shot-note">Tabel yang sama, kolom yang lebih banyak: <em>Principal</em>, <em>Requested by</em>, dan <em>Work order</em> yang tidak dimiliki Requester. Semua peran kini membuka pada tab <em>All</em> dan mendapat potongan yang sama: yang memilih potongannya pembacanya, bukan perannya. Baris sparepart membawa apa yang dulu hanya ada di tabel sparepart tersendiri: penanda talangan, penanda part rusak yang masih terutang, dan alasan sebuah part diputuskan. Klaim yang belum punya sparepart tetap punya barisnya sendiri — di tabel sparepart yang lama klaim seperti itu hilang sama sekali.</p>
       <div class="frame frame-scroll">
         <div class="frame-inner">
           <div class="app-top">
@@ -829,7 +830,8 @@ a{color:inherit}
               <div class="field grow">⌕ Search…</div>
               <div class="field">All statuses ▾</div>
               <div class="field">All warranties ▾</div>
-              <div class="field">All customers ▾</div>
+              <div class="field">⌕ All customers</div>
+              <div class="field">Group by status ▾</div>
               <span class="spacer"></span>
               <button class="btn">Send Digest Now</button>
               <button class="btn">Export to Excel</button>

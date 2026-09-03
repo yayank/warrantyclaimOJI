@@ -44,10 +44,12 @@ const script = fs.readFileSync(path.join(__dirname, '..', 'src', 'Script.html'),
   .replace(/^[\s\S]*?<script>/, '')
   .replace(/<\/script>\s*$/, '');
 vm.runInContext(script +
-  '\nglobalThis.__api = { claimTable, groupByStatus_, applyDeepLink, STATUS, ITEM, ROLE, WARRANTY, S };',
+  '\nglobalThis.__api = { claimTable, groupClaims_, customerFilter, applyDeepLink, ' +
+  'STATUS, ITEM, ROLE, WARRANTY, S };',
   sandbox, { filename: 'client' });
 
-const { claimTable, groupByStatus_, applyDeepLink, STATUS, ITEM, ROLE, WARRANTY, S } = sandbox.__api;
+const { claimTable, groupClaims_, customerFilter, applyDeepLink,
+  STATUS, ITEM, ROLE, WARRANTY, S } = sandbox.__api;
 
 /* --------------------------------------------------------------- fixtures */
 
@@ -69,15 +71,18 @@ function claim(status, extra) {
  * The tbody read back the way the screen reads it: headings and claim rows in
  * the order they actually appear, which is the whole point of the exercise.
  */
-function render(role, tab, rows, collapsed) {
+function render(role, tab, rows, collapsed, group) {
   S.session = { email: 'rian@rs.co.id', role: role, isTester: false };
   S.tab = tab;
   S.rows = rows;
   S.collapsed = collapsed || {};
+  S.group = group || 'status';
   const html = claimTable();
 
   const out = [];
-  const re = /<tr class="(group-header|ref-header|click|sub)"(?:[^>]*data-claim="([^"]*)")?[^>]*>([\s\S]*?)<\/tr>/g;
+  // The class may carry a modifier (a customer heading is "group-header plain"),
+  // so the name is matched as a prefix rather than the whole attribute.
+  const re = /<tr class="(group-header|ref-header|click|sub)[^"]*"(?:[^>]*data-claim="([^"]*)")?[^>]*>([\s\S]*?)<\/tr>/g;
   let m;
   while ((m = re.exec(html)) !== null) {
     if (m[1] === 'group-header') {
@@ -188,20 +193,19 @@ check('and it lands at the end rather than among the known ones',
   withOdd.filter(function (e) { return e.kind === 'head'; })
     .map(function (e) { return e.label; }).join(' → ') === 'Draft → Closed → Some Future Status');
 
-/* ------------------------------------------- who gets blocks, and where */
+/* --------------------------------------- the cut is the reader's, not the role's */
 
-check('the requester gets no blocks on a tab they chose themselves',
+// Grouping began as something only the requester's All tab did. It is a choice
+// on the toolbar now, so every role and every tab is cut the same way.
+
+[ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL].forEach(function (role) {
+  check(role + ' reads the list in blocks',
+    render(role, 'all', mixed).filter(function (e) { return e.kind === 'head'; }).length === 5);
+});
+
+check('and on a tab they chose themselves too',
   render(ROLE.REQUESTER, 'progress', mixed)
-    .every(function (e) { return e.kind !== 'head'; }));
-
-check('an administrator reads a flat list',
-  render(ROLE.ADMIN, 'all', mixed).every(function (e) { return e.kind !== 'head'; }));
-
-check('so does the principal',
-  render(ROLE.PRINCIPAL, 'all', mixed).every(function (e) { return e.kind !== 'head'; }));
-
-check('production reads the same blocks as the requester',
-  render(ROLE.PRODUCTION, 'all', mixed).filter(function (e) { return e.kind === 'head'; }).length === 5);
+    .filter(function (e) { return e.kind === 'head'; }).length === 5);
 
 check('an empty list draws no headings at all',
   render(ROLE.REQUESTER, 'all', []).length === 0);
@@ -276,21 +280,21 @@ check('and says so rather than leaving a gap',
 /* ------------------------------- the reference leads, the claim id follows */
 
 function claimCell(rows, tab) {
-  return render(ROLE.REQUESTER, tab || 'progress', rows)
+  return render(ROLE.REQUESTER, tab || 'all', rows)
     .filter(function (e) { return e.kind === 'claim'; })[0].html
     .match(/<td class="stack">([\s\S]*?)<\/td>/)[1]
     .replace(/<[^>]*>/g, '|').replace(/\|+/g, '|').replace(/^\||\|$/g, '');
 }
 
+// The heading above always carries the reference now, so the row never repeats
+// it — on any tab, for any role.
 const submitted = claimCell([claim(STATUS.FULFILMENT, { refNo: 'CWT310826', claimId: 'TEST-0009' })]);
-check('the reference is the top line and the claim id the second',
-  submitted === 'CWT310826|TEST-0009', submitted);
+check('the row carries its claim id and nothing else',
+  submitted === 'TEST-0009', submitted);
 
-// A draft has no reference yet. Leading with its absence would put the words
-// "not submitted" where the name of the thing belongs.
 const draft = claimCell([claim(STATUS.DRAFT, { refNo: '', claimId: 'TEST-0010' })]);
-check('a claim with no reference yet still leads with its own id',
-  draft === 'TEST-0010|not submitted', draft);
+check('and a claim with no reference is no different',
+  draft === 'TEST-0010', draft);
 
 /* ----------------------- one reference, several claims, said once */
 
@@ -358,29 +362,150 @@ check('under a reference heading the row is only its own claim id',
   claimCell([refClaim('CWT310826', 'TEST-0015')], 'all') === 'TEST-0015',
   claimCell([refClaim('CWT310826', 'TEST-0015')], 'all'));
 
-check('the second level is the requester\'s All tab only — an admin list stays flat',
-  render(ROLE.ADMIN, 'all', shared).every(function (e) { return e.kind !== 'ref'; }));
+check('the second level reaches every role',
+  [ROLE.ADMIN, ROLE.PRINCIPAL, ROLE.PRODUCTION].every(function (role) {
+    return render(role, 'all', shared).filter(function (e) { return e.kind === 'ref'; }).length === 2;
+  }));
 
-check('and so does a tab the requester chose themselves',
-  render(ROLE.REQUESTER, 'progress', shared).every(function (e) { return e.kind !== 'ref'; }));
+check('and every tab',
+  render(ROLE.REQUESTER, 'progress', shared)
+    .filter(function (e) { return e.kind === 'ref'; }).length === 2);
 
 /* --------------------------------------------- which tab opens, and for whom */
+
+// The default is the state the client ships with, not something applyDeepLink
+// puts there, so it is read from a copy of the client nothing has touched yet.
+function freshState() {
+  const box = {
+    console: { log: function () {} },
+    document: sandbox.document,
+    window: { APP_CLIENT_ID: 'stub.apps.googleusercontent.com' },
+    google: { script: { run: {} } },
+    setTimeout: setTimeout, clearTimeout: clearTimeout
+  };
+  vm.createContext(box);
+  vm.runInContext(script + '\nglobalThis.__S = S;', box, { filename: 'fresh' });
+  return box.__S;
+}
+
+const fresh = freshState();
+check('the claims screen opens on the whole list, whoever is reading',
+  fresh.tab === 'all', 'opens on ' + fresh.tab);
+check('and cut by status until the reader says otherwise',
+  fresh.group === 'status', 'cut by ' + fresh.group);
 
 function opensOn(role) {
   S.session = { email: 'x@y.z', role: role, isTester: false };
   S.page = 'claims';
-  S.tab = 'action';
+  S.tab = 'all';
   S.deepLink = {};
   applyDeepLink();
   return { page: S.page, tab: S.tab };
 }
 
-check('a requester opens on All', opensOn(ROLE.REQUESTER).tab === 'all');
-check('so does production', opensOn(ROLE.PRODUCTION).tab === 'all');
-check('an administrator still opens on what needs them',
-  opensOn(ROLE.ADMIN).tab === 'action');
+check('and no role is moved off it',
+  [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN]
+    .every(function (r) { return opensOn(r).tab === 'all'; }));
 check('and the principal is sent to their batches, not to a tab',
   opensOn(ROLE.PRINCIPAL).page === 'batch');
+
+/* ------------------------------------------- cut by hospital instead */
+
+// Status order is the order of the work. A customer list has no order of its
+// own, and the reason to cut by customer is to go and find one, so the only
+// arrangement that helps is the one you can search by eye.
+
+const hospitals = [
+  claim(STATUS.CLOSED, { customerName: 'RSUD Koja', refNo: 'CW1', claimId: 'K1' }),
+  claim(STATUS.DRAFT, { customerName: 'Mitra Kasih Cimahi', refNo: 'CW2', claimId: 'M1' }),
+  claim(STATUS.FULFILMENT, { customerName: 'RSUD Koja', refNo: 'CW1', claimId: 'K2' }),
+  claim(STATUS.CLOSED, { customerName: 'Advent Bandung', refNo: 'CW3', claimId: 'A1' })
+];
+
+const byCust = render(ROLE.REQUESTER, 'all', hospitals, {}, 'customer');
+const custHeads = byCust.filter(function (e) { return e.kind === 'head'; });
+
+check('cutting by customer gives one block per hospital',
+  custHeads.length === 3, custHeads.map(function (e) { return e.label; }).join(' , '));
+
+check('in name order, so a hospital can be found by eye',
+  custHeads.map(function (e) { return e.label; }).join(' → ') ===
+  'Advent Bandung → Mitra Kasih Cimahi → RSUD Koja',
+  custHeads.map(function (e) { return e.label; }).join(' → '));
+
+check('a hospital block counts its own claims, whatever status they are',
+  custHeads.filter(function (e) { return e.label === 'RSUD Koja'; })[0].n === 2);
+
+check('and every claim of that hospital is under it',
+  (function () {
+    const at = byCust.indexOf(custHeads.filter(function (e) { return e.label === 'RSUD Koja'; })[0]);
+    const ids = [];
+    for (let i = at + 1; i < byCust.length && byCust[i].kind !== 'head'; i++) {
+      if (byCust[i].kind === 'claim') ids.push(byCust[i].claimId);
+    }
+    return ids.join(',') === 'K1,K2';
+  })());
+
+check('changing the cut never changes how many claims are on the screen',
+  byCust.filter(function (e) { return e.kind === 'claim'; }).length ===
+  render(ROLE.REQUESTER, 'all', hospitals, {}, 'status')
+    .filter(function (e) { return e.kind === 'claim'; }).length);
+
+check('the hospital column goes when the heading is the hospital',
+  byCust.filter(function (e) { return e.kind === 'claim'; })[0]
+    .html.indexOf('RSUD Koja') === -1 &&
+  render(ROLE.REQUESTER, 'all', hospitals, {}, 'status')
+    .filter(function (e) { return e.kind === 'claim'; })
+    .some(function (e) { return e.html.indexOf('RSUD Koja') !== -1; }));
+
+check('and the rows still line up with the header that is left',
+  (function () {
+    const html = claimTable();
+    // <thead> starts with the same three characters as a <th>.
+    const cols = (html.match(/<th[ >]/g) || []).length;
+    const rows = html.match(/<tr class="click"[\s\S]*?<\/tr>/g) || [];
+    return rows.length > 0 && rows.every(function (r) {
+      return (r.match(/<td/g) || []).length === cols;
+    });
+  })());
+
+check('the reference level survives the other cut',
+  byCust.filter(function (e) { return e.kind === 'ref'; }).length === 3);
+
+const nameless = render(ROLE.REQUESTER, 'all', [
+  claim(STATUS.CLOSED, { customerName: 'RSUD Koja' }),
+  claim(STATUS.CLOSED, { customerName: '' })
+], {}, 'customer').filter(function (e) { return e.kind === 'head'; });
+check('a claim with no customer on it still reaches the screen, last',
+  nameless.map(function (e) { return e.label; }).join(' → ') === 'RSUD Koja → No customer',
+  nameless.map(function (e) { return e.label; }).join(' → '));
+
+check('an unknown cut falls back to status rather than emptying the screen',
+  groupClaims_(hospitals, 'something-else').length ===
+  groupClaims_(hospitals, 'status').length);
+
+/* ------------------------------- 1.386 hospitals is not a list you scroll */
+
+S.reference = {
+  customers: [
+    { id: 'C1', name: 'RSUD Koja' },
+    { id: 'C2', name: 'Mitra Kasih Cimahi' }
+  ]
+};
+S.filters = { customerId: '' };
+const blank = customerFilter();
+
+check('the customer filter is a searchable box, not a dropdown',
+  blank.indexOf('<select') === -1 && blank.indexOf('class="combo"') !== -1);
+
+check('with All customers offered as a real choice, which is how it is cleared',
+  blank.indexOf('All customers') !== -1);
+
+S.filters = { customerId: 'C2' };
+const chosen = customerFilter();
+check('and it reads back the hospital being filtered on',
+  chosen.indexOf('value="Mitra Kasih Cimahi"') !== -1 &&
+  chosen.indexOf('value="C2"') !== -1);
 
 /* -------------------------------------------------------------------- report */
 
