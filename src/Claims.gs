@@ -51,12 +51,56 @@ function listClaims_(session, filter) {
 
 function matchesTab_(session, row, tab) {
   if (tab === 'all') return true;
-  if (tab === 'completed') return row.status === STATUS.CLOSED;
+
+  // Two different kinds of finished. The warranty work can be done — every part
+  // decided, every approved one shipped — while the faulty part is still out
+  // there. That claim is not closed; somebody still owes something, and it is
+  // the one list worth keeping in front of an administrator.
+  if (tab === 'completed') return awaitingReturnOnly_(row);
+  if (tab === 'closed') return row.status === STATUS.CLOSED;
+
+  // Two cuts through the work under way, by the road the claim is on: the
+  // principal supplies the part, or we do. Neither is taken out of In Progress
+  // — a claim that vanishes from the list of everything under way is a claim
+  // nobody chases.
+  if (tab === 'internal') return row.status === STATUS.INTERNAL;
+  if (tab === 'principal') {
+    return row.warrantyType === WARRANTY_TYPE.PRINCIPAL && underWay_(row);
+  }
   if (tab === 'progress') {
-    return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 && !needsAction_(session, row);
+    // Everything submitted and not yet finished — including what is waiting on
+    // the viewer. Needs Action is a shortcut into this list, not a slice taken
+    // out of it: a claim disappearing from In Progress the moment it needed
+    // attention is how work stops being tracked.
+    //
+    // A draft is left out: it has not been submitted, so nothing about it is
+    // under way. So is a claim whose only outstanding business is the faulty
+    // part coming back — that has a tab of its own, and listing it here too
+    // would make In Progress read longer than the work actually left.
+    return underWay_(row);
   }
   if (tab === 'action') return needsAction_(session, row);
   return true;
+}
+
+/** Submitted, not finished, and not merely waiting on the faulty part. */
+function underWay_(row) {
+  return [STATUS.CLOSED, STATUS.DRAFT].indexOf(row.status) === -1 &&
+    !awaitingReturnOnly_(row);
+}
+
+/**
+ * The warranty side is finished and only the faulty part is still owed.
+ *
+ * recomputeClaimStatus_ would have closed this claim already were it not for
+ * the outstanding return, so it is exactly the gap between "we are done" and
+ * "it is over".
+ */
+function awaitingReturnOnly_(row) {
+  return row.status !== STATUS.CLOSED &&
+    row.status !== STATUS.DRAFT &&
+    row.summary.pending === 0 &&
+    row.summary.awaitingReturn > 0;
 }
 
 /** What the signed-in role still has to do about this claim. */
@@ -88,10 +132,91 @@ function needsAction_(session, row) {
 
 function tabCounts_(session, claims, byClaim) {
   let action = 0;
+  let advance = 0;
   claims.forEach(function (c) {
-    if (needsAction_(session, shapeClaim_(c, byClaim[c.ClaimID] || []))) action++;
+    const row = shapeClaim_(c, byClaim[c.ClaimID] || []);
+    if (needsAction_(session, row)) action++;
+    if (session.role === ROLE.ADMIN) {
+      row.items.forEach(function (i) { if (awaitingAdvanceIssue_(row, i)) advance++; });
+    }
   });
-  return { action: action };
+  return { action: action, advance: advance };
+}
+
+/**
+ * A part the administrator should be putting on a courier today.
+ *
+ * The machine is down. Whether the principal has approved it yet, and whether
+ * this claim is theirs to cover or ours, decides who ends up paying — not
+ * whether the part goes out. Waiting for the principal's box to arrive before
+ * sending one from the shelf leaves a hospital without a machine for a month
+ * over a question of accounting.
+ *
+ * So the queue asks two things only: has this part left the building, and has
+ * anybody written down that it did. A rejected part is out — nothing is owed
+ * on it — and a claim not yet submitted, or already closed, has nothing to
+ * send.
+ */
+function awaitingAdvanceIssue_(row, item) {
+  if (row.status === STATUS.DRAFT || row.status === STATUS.CLOSED) return false;
+  if (item.advanceIssued) return false;
+  return [ITEM_STATUS.SHIPPED, ITEM_STATUS.REJECTED].indexOf(item.itemStatus) === -1;
+}
+
+/**
+ * Every part waiting to be sent from stock, across every open claim, and every
+ * one already sent.
+ *
+ * Recording an advance issue one claim at a time answers "what did I send
+ * against this claim?". The question actually in front of an administrator in
+ * the morning is the other one — "what has to go out today?" — and no screen
+ * asked it. This one is part-level and spans claims, because a courier run is.
+ */
+function advanceQueue_(session) {
+  requireRole_(session, [ROLE.ADMIN]);
+
+  const byClaim = {};
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i);
+  });
+
+  const awaiting = [];
+  const issued = [];
+
+  visibleClaims_(session).forEach(function (c) {
+    const row = shapeClaim_(c, byClaim[c.ClaimID] || []);
+    row.items.forEach(function (i) {
+      const entry = {
+        itemId: i.itemId,
+        claimId: row.claimId,
+        refNo: row.refNo,
+        claimStatus: row.status,
+        customerName: row.customerName,
+        serialNumber: row.serialNumber,
+        productName: row.productName,
+        partName: i.partName,
+        qty: i.qty,
+        itemStatus: i.itemStatus,
+        warrantyType: row.warrantyType,
+        ageDays: row.ageDays,
+        sortDate: row.sortDate,
+        advanceIssuedAt: i.advanceIssuedAt,
+        advanceIssuedBy: i.advanceIssuedBy,
+        advanceNote: i.advanceNote
+      };
+      if (awaitingAdvanceIssue_(row, i)) awaiting.push(entry);
+      else if (i.advanceIssued) issued.push(entry);
+    });
+  });
+
+  // Oldest first: the machine that has been down longest is the one to load
+  // onto the courier.
+  awaiting.sort(function (a, b) { return String(a.sortDate).localeCompare(String(b.sortDate)); });
+  issued.sort(function (a, b) {
+    return String(b.advanceIssuedAt).localeCompare(String(a.advanceIssuedAt));
+  });
+
+  return { awaiting: awaiting, issued: issued };
 }
 
 function shapeClaim_(c, items) {
@@ -104,6 +229,7 @@ function shapeClaim_(c, items) {
   const pending = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.PENDING; }).length;
   const shipped = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.SHIPPED; }).length;
   const advance = shaped.filter(function (i) { return i.advanceIssued; }).length;
+  const awaitingReturn = shaped.filter(function (i) { return i.awaitingReturn; }).length;
 
   const stamp = c.SubmittedAt || c.CreatedAt || '';
   return {
@@ -137,7 +263,7 @@ function shapeClaim_(c, items) {
     ageDays: ageDays_(c),
     summary: {
       approved: approved, rejected: rejected, pending: pending,
-      shipped: shipped, advance: advance
+      shipped: shipped, advance: advance, awaitingReturn: awaitingReturn
     },
     items: shaped
   };
@@ -160,17 +286,22 @@ function shapeItem_(i) {
     decisionReason: i.DecisionReason,
     availabilityDate: i.AvailabilityDate ? formatDate_(i.AvailabilityDate) : '',
     documentRefNo: i.DocumentRefNo,
+    fulfilmentRoute: i.FulfilmentRoute || '',
     forwardedAt: i.ForwardedAt,
     forwardedTo: i.ForwardedTo,
     shippedAt: i.ShippedAt,
     partReturnNote: i.PartReturnNote,
+    partReturnAt: i.PartReturnAt,
+    awaitingReturn: i.ItemStatus === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim(),
     rowVersion: Number(i.RowVersion || 0)
   };
 }
 
 function formatDate_(v) {
   if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
-  return String(v);
+  // A date cell reaches here as the ISO timestamp cellValue_ made of it.
+  const iso = /^(\d{4}-\d{2}-\d{2})T/.exec(String(v));
+  return iso ? iso[1] : String(v);
 }
 
 /** Days spent in the current status — the column that stops claims being forgotten. */
@@ -194,6 +325,61 @@ function getClaim_(session, claimId) {
   shaped.audit = auditForClaim_(claimId);
   shaped.canEdit = canEditClaimFields_(session, claim);
   return shaped;
+}
+
+/**
+ * Every spare part ever claimed against one machine.
+ *
+ * The question in front of a new claim is whether this pump was already sent
+ * last month. If it was, that is either a double order or a repair that did not
+ * hold, and both are worth knowing before approving another one. So the part
+ * asked for more than once is counted at the top rather than left to be spotted
+ * halfway down the list.
+ */
+function unitHistory_(session, serial) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const sn = String(serial || '').trim().toUpperCase();
+  if (!sn) return { serial: '', productName: '', claims: 0, parts: [], repeated: [] };
+
+  const claims = {};
+  readLive_(SHEET.CLAIMS).forEach(function (c) {
+    if (String(c.SerialNumber || '').trim().toUpperCase() !== sn) return;
+    // A tester's claims and real ones are never mixed into one history.
+    if (isTrue_(c.IsTest) !== session.isTester) return;
+    claims[c.ClaimID] = c;
+  });
+
+  const parts = readLive_(SHEET.ITEMS)
+    .filter(function (i) { return claims[i.ClaimID]; })
+    .map(function (i) {
+      const c = claims[i.ClaimID];
+      return {
+        claimId: i.ClaimID, refNo: c.RefNo, claimStatus: c.Status,
+        customerName: c.CustomerName, workOrderNo: c.WorkOrderNo,
+        submittedAt: c.SubmittedAt || c.CreatedAt,
+        partId: i.PartID, partName: i.PartName, qty: Number(i.Qty || 0),
+        itemStatus: i.ItemStatus, decisionReason: i.DecisionReason,
+        shippedAt: i.ShippedAt, fulfilmentRoute: i.FulfilmentRoute || '',
+        advanceIssued: isTrue_(i.AdvanceIssued),
+        partReturnAt: i.PartReturnAt,
+        awaitingReturn: i.ItemStatus === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim()
+      };
+    })
+    .sort(function (a, b) { return String(b.submittedAt).localeCompare(String(a.submittedAt)); });
+
+  const times = {};
+  parts.forEach(function (p) { times[p.partName] = (times[p.partName] || 0) + 1; });
+
+  return {
+    serial: sn,
+    productName: productName_(sn),
+    claims: Object.keys(claims).length,
+    parts: parts,
+    repeated: Object.keys(times)
+      .filter(function (n) { return times[n] > 1; })
+      .map(function (n) { return { partName: n, times: times[n] }; })
+      .sort(function (a, b) { return b.times - a.times; })
+  };
 }
 
 /* ----------------------------------------------------------------- write */
@@ -283,8 +469,10 @@ function saveClaim_(session, payload) {
         RowVersion: 1
       }, fields);
       insert_(SHEET.CLAIMS, claim);
-      claim.DriveFolderId = claimFolder_(claim).getId();
-      update_(SHEET.CLAIMS, 'ClaimID', claimId, { DriveFolderId: claim.DriveFolderId });
+      // No Drive folder yet. Making one costs four Drive round trips — root,
+      // test, _DRAFT, the claim — and most of that time is spent before the
+      // requester has attached anything to put in it. The first upload creates
+      // it and writes the id back, so a claim that never gets a file never pays.
       audit_(session, 'Create', { claimId: claimId, isTest: isTest });
     } else {
       const changes = [];
@@ -330,6 +518,11 @@ function syncItems_(session, claim, wanted) {
   const existing = readLive_(SHEET.ITEMS).filter(function (i) { return i.ClaimID === claim.ClaimID; });
   const keep = {};
 
+  // The master list is read once, not once per row: findBy_ would re-read the
+  // whole spare-part sheet for every part on the claim.
+  const parts = {};
+  readAll_(SHEET.PART).forEach(function (p) { parts[String(p.PartID)] = p; });
+
   const seenParts = {};
   wanted.forEach(function (w) {
     if (!w.partId) throw new Error('Please choose a spare part for every row.');
@@ -338,16 +531,13 @@ function syncItems_(session, claim, wanted) {
   });
 
   wanted.forEach(function (w, index) {
-    const part = findBy_(SHEET.PART, 'PartID', w.partId);
+    const part = parts[String(w.partId)];
     if (!part) throw new Error('Unknown spare part.');
     const qty = Math.max(1, Number(w.qty || 1));
 
     const current = w.itemId
       ? existing.filter(function (i) { return i.ItemID === w.itemId; })[0]
       : null;
-
-    const advance = !!w.advanceIssued;
-    const advanceNote = String(w.advanceNote || '').trim();
 
     if (current) {
       keep[current.ItemID] = true;
@@ -363,16 +553,11 @@ function syncItems_(session, claim, wanted) {
         PartID: part.PartID, PartName: part.Name, Qty: qty,
         UpdatedAt: nowIso_(), UpdatedBy: session.email
       };
-      if (advance !== isTrue_(current.AdvanceIssued)) {
-        changes.push({ field: 'AdvanceIssued', oldValue: isTrue_(current.AdvanceIssued),
-          newValue: advance, itemId: current.ItemID });
-        patch.AdvanceIssued = advance;
-        patch.AdvanceIssuedAt = advance ? nowIso_() : '';
-        patch.AdvanceIssuedBy = advance ? session.email : '';
-      }
-      if (advanceNote !== String(current.AdvanceNote || '')) patch.AdvanceNote = advanceNote;
 
-      if (changes.length || patch.AdvanceNote !== undefined) {
+      // The advance-issue flag is deliberately not touched here. It records
+      // what the administrator shipped from local stock, and editing the claim
+      // — which a requester may do while it is theirs — must not disturb it.
+      if (changes.length) {
         update_(SHEET.ITEMS, 'ItemID', current.ItemID, patch);
         auditChanges_(session, 'SaveDraft', claim.ClaimID, changes, '', isTrue_(claim.IsTest));
       }
@@ -385,10 +570,8 @@ function syncItems_(session, claim, wanted) {
         PartName: part.Name,
         Qty: qty,
         ItemStatus: ITEM_STATUS.PENDING,
-        AdvanceIssued: advance,
-        AdvanceIssuedAt: advance ? nowIso_() : '',
-        AdvanceIssuedBy: advance ? session.email : '',
-        AdvanceNote: advanceNote,
+        AdvanceIssued: false,
+        AdvanceIssuedAt: '', AdvanceIssuedBy: '', AdvanceNote: '',
         DecisionBy: '', DecisionAt: '', DecisionReason: '',
         AvailabilityDate: '', DocumentRefNo: '',
         ForwardedAt: '', ForwardedTo: '', ShippedAt: '', ShippedBy: '',
@@ -490,6 +673,13 @@ function submitClaim_(session, payload) {
     // draft was started, or the principal's daily batch would contain claims
     // that were not submitted that day.
     const refNo = todayRef_(isTrue_(claim.IsTest));
+
+    // The same machine claimed twice in one day is one claim with more parts on
+    // it, not two. The principal receives the day's batch as a unit, and two
+    // claims for one serial number inside it read as a double order.
+    const twin = mergeTargetFor_(session, claim, refNo);
+    if (twin) return mergeIntoClaim_(session, claim, twin, items);
+
     const updated = update_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, {
       RefNo: refNo,
       Status: STATUS.SUBMITTED,
@@ -521,6 +711,85 @@ function submitClaim_(session, payload) {
 
     return getClaim_(session, claim.ClaimID);
   });
+}
+
+/**
+ * The claim this one should join, or null.
+ *
+ * Same requester, same unit, same day's reference — and still untouched. Once
+ * an administrator or the principal has acted on the earlier claim, adding
+ * parts underneath them rewrites a decision that has already been taken, so
+ * the second claim stands on its own instead.
+ */
+function mergeTargetFor_(session, claim, refNo) {
+  const sn = String(claim.SerialNumber || '').trim().toUpperCase();
+  if (!sn) return null;
+
+  return readLive_(SHEET.CLAIMS).filter(function (c) {
+    return c.ClaimID !== claim.ClaimID &&
+      String(c.RefNo || '') === refNo &&
+      String(c.SerialNumber || '').trim().toUpperCase() === sn &&
+      String(c.RequesterEmail || '').toLowerCase() === session.email &&
+      c.Status === STATUS.SUBMITTED &&
+      isTrue_(c.IsTest) === isTrue_(claim.IsTest);
+  })[0] || null;
+}
+
+/**
+ * Moves this claim's parts and files onto the earlier one, then retires it.
+ *
+ * A part already on the target is not added twice: the same spare part cannot
+ * appear on one claim more than once, and asking for two of something is a
+ * quantity rather than a second row.
+ */
+function mergeIntoClaim_(session, claim, target, items) {
+  const already = {};
+  readLive_(SHEET.ITEMS)
+    .filter(function (i) { return i.ClaimID === target.ClaimID; })
+    .forEach(function (i) { already[String(i.PartID)] = i; });
+
+  let moved = 0;
+  let combined = 0;
+
+  items.forEach(function (item) {
+    const twin = already[String(item.PartID)];
+    if (twin) {
+      update_(SHEET.ITEMS, 'ItemID', twin.ItemID, {
+        Qty: Number(twin.Qty || 0) + Number(item.Qty || 0),
+        UpdatedAt: nowIso_(), UpdatedBy: session.email
+      });
+      update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
+        Deleted: true, UpdatedAt: nowIso_(), UpdatedBy: session.email
+      });
+      combined++;
+      return;
+    }
+    update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
+      ClaimID: target.ClaimID, UpdatedAt: nowIso_(), UpdatedBy: session.email
+    });
+    moved++;
+  });
+
+  // The evidence goes with the parts it is evidence for.
+  readAll_(SHEET.ATTACHMENTS)
+    .filter(function (a) { return a.ClaimID === claim.ClaimID; })
+    .forEach(function (a) {
+      update_(SHEET.ATTACHMENTS, 'AttachmentID', a.AttachmentID, { ClaimID: target.ClaimID });
+    });
+
+  update_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, {
+    Deleted: true, DeletedBy: session.email, DeletedAt: nowIso_(),
+    UpdatedAt: nowIso_(), UpdatedBy: session.email
+  });
+
+  audit_(session, 'Submit', {
+    claimId: target.ClaimID, field: 'MergedFrom',
+    oldValue: claim.ClaimID,
+    newValue: moved + ' part(s) moved, ' + combined + ' merged by quantity',
+    isTest: isTrue_(claim.IsTest)
+  });
+
+  return getClaim_(session, target.ClaimID);
 }
 
 function returnClaim_(session, payload) {
@@ -775,6 +1044,13 @@ function recomputeClaimStatus_(session, claimId) {
   }).length;
   const shipped = items.filter(function (i) { return i.ItemStatus === ITEM_STATUS.SHIPPED; }).length;
 
+  // A replacement has gone out and the faulty part has not come back. Closing
+  // here would erase the only record that something is still owed — and a part
+  // sent without its old one returned is exactly what goes missing.
+  const awaitingReturn = items.filter(function (i) {
+    return i.ItemStatus === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim();
+  }).length;
+
   let next = claim.Status;
   let notify = false;
 
@@ -783,6 +1059,8 @@ function recomputeClaimStatus_(session, claimId) {
     // approved part has shipped.
     next = approvedLike === 0 ? STATUS.CLOSED : STATUS.FULFILMENT;
     notify = [STATUS.IN_REVIEW, STATUS.INTERNAL].indexOf(claim.Status) !== -1;
+    // A claim where everything was rejected still closes: nothing was ever sent.
+    if (next === STATUS.CLOSED && awaitingReturn) next = STATUS.FULFILMENT;
   }
 
   if (next !== claim.Status) {
@@ -794,7 +1072,7 @@ function recomputeClaimStatus_(session, claimId) {
       isTest: isTrue_(claim.IsTest)
     });
   }
-  return { notify: notify, status: next };
+  return { notify: notify, status: next, awaitingReturn: awaitingReturn };
 }
 
 /* ---------------------------------------------------------- fulfilment */
@@ -804,6 +1082,9 @@ function setAvailability_(session, payload) {
   const date = String(payload.availabilityDate || '').trim();
   const docRef = String(payload.documentRefNo || '').trim();
   if (!date || !docRef) throw new Error('Enter both the availability date and the document reference.');
+  // A purchase request is the same shape as a principal order — a number and a
+  // date to expect it by — so it is the same transition, differently routed.
+  const route = payload.route === FULFILMENT.PR ? FULFILMENT.PR : FULFILMENT.PRINCIPAL;
 
   return withLock_(function () {
     const items = readLive_(SHEET.ITEMS).filter(function (i) {
@@ -820,6 +1101,7 @@ function setAvailability_(session, payload) {
       }
       update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
         AvailabilityDate: date, DocumentRefNo: docRef,
+        FulfilmentRoute: item.FulfilmentRoute || route,
         ItemStatus: ITEM_STATUS.AWAITING,
         UpdatedAt: nowIso_(), UpdatedBy: session.email
       });
@@ -853,6 +1135,13 @@ function forwardOrder_(session, payload) {
       guardTestScope_(session, claim);
       if (item.ItemStatus !== ITEM_STATUS.APPROVED) {
         throw new Error('Only approved parts that have not yet been forwarded can be sent.');
+      }
+      // A unit out of principal warranty is not the principal's to supply, so
+      // the part never reaches their order list — it is raised as a purchase
+      // request or taken from stock instead.
+      if (claim.WarrantyType !== WARRANTY_TYPE.PRINCIPAL) {
+        throw new Error(claim.ClaimID + ' is not under principal warranty — ' +
+          'raise a purchase request or fulfil it from stock instead.');
       }
       claims[claim.ClaimID] = claim;
       return {
@@ -902,6 +1191,47 @@ function forwardOrder_(session, payload) {
   });
 }
 
+/**
+ * Marks approved parts as coming off the shelf rather than being ordered.
+ *
+ * Recorded first and shipped afterwards, deliberately: the part is on the shelf
+ * but it has not moved yet, and the shipping date should say when it did.
+ */
+function fulfilFromStock_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+
+  return withLock_(function () {
+    const items = readLive_(SHEET.ITEMS).filter(function (i) {
+      return payload.itemIds.indexOf(i.ItemID) !== -1;
+    });
+    if (!items.length) throw new Error('No spare parts were selected.');
+
+    const note = String(payload.note || '').trim();
+    const date = String(payload.availabilityDate || '').trim();
+
+    items.forEach(function (item) {
+      const claim = findBy_(SHEET.CLAIMS, 'ClaimID', item.ClaimID);
+      guardTestScope_(session, claim);
+      if ([ITEM_STATUS.APPROVED, ITEM_STATUS.AWAITING].indexOf(item.ItemStatus) === -1) {
+        throw new Error('Only an approved part can be fulfilled from stock.');
+      }
+      update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
+        FulfilmentRoute: FULFILMENT.STOCK,
+        ItemStatus: ITEM_STATUS.AWAITING,
+        AvailabilityDate: date || item.AvailabilityDate,
+        DocumentRefNo: note || item.DocumentRefNo,
+        UpdatedAt: nowIso_(), UpdatedBy: session.email
+      });
+      audit_(session, 'SetAvailability', {
+        claimId: item.ClaimID, itemId: item.ItemID, field: 'FulfilmentRoute',
+        oldValue: item.FulfilmentRoute, newValue: FULFILMENT.STOCK, reason: note,
+        isTest: isTrue_(claim.IsTest)
+      });
+    });
+    return { ok: true, count: items.length };
+  });
+}
+
 function markShipped_(session, payload) {
   requireRole_(session, [ROLE.ADMIN]);
 
@@ -936,8 +1266,12 @@ function markShipped_(session, payload) {
 }
 
 /**
- * Records that a part was handed over from local stock before the principal
- * decided, because the machine could not wait.
+ * Records that a part was shipped from local stock before the principal decided,
+ * because the machine could not wait.
+ *
+ * This is the administrator's decision alone: the stock is theirs, and only they
+ * know whether a part went out of it. The requester asks for a part and never
+ * sees this flag on the form — they have no way of knowing what was on the shelf.
  *
  * The claim itself carries on unchanged — the flag says the customer already has
  * the part, so what eventually arrives from the principal replenishes stock
@@ -945,7 +1279,7 @@ function markShipped_(session, payload) {
  * the claim is later rejected.
  */
 function setAdvanceIssue_(session, payload) {
-  requireRole_(session, [ROLE.ADMIN, ROLE.REQUESTER, ROLE.PRODUCTION]);
+  requireRole_(session, [ROLE.ADMIN]);
 
   return withLock_(function () {
     const items = readLive_(SHEET.ITEMS).filter(function (i) {
@@ -960,16 +1294,7 @@ function setAdvanceIssue_(session, payload) {
       const claim = findBy_(SHEET.CLAIMS, 'ClaimID', item.ClaimID);
       guardTestScope_(session, claim);
 
-      if (session.role !== ROLE.ADMIN) {
-        // The requester may only record it on a claim of their own that is still
-        // in their hands; afterwards the administrator does it.
-        if (String(claim.RequesterEmail).toLowerCase() !== session.email ||
-          [STATUS.DRAFT, STATUS.RETURNED].indexOf(claim.Status) === -1) {
-          throw forbid_('Ask the administrator to record this on a submitted claim.');
-        }
-      } else if (claim.Status === STATUS.CLOSED) {
-        throw forbid_('This claim is already closed.');
-      }
+      if (claim.Status === STATUS.CLOSED) throw forbid_('This claim is already closed.');
 
       update_(SHEET.ITEMS, 'ItemID', item.ItemID, {
         AdvanceIssued: issued,
@@ -1007,7 +1332,10 @@ function recordPartReturn_(session, payload) {
       claimId: item.ClaimID, itemId: item.ItemID, field: 'PartReturnNote',
       oldValue: item.PartReturnNote, newValue: payload.note, isTest: isTrue_(claim.IsTest)
     });
-    return { ok: true };
+    // The outstanding return may have been the only thing holding the claim
+    // open, so this is the moment it can finish.
+    recomputeClaimStatus_(session, item.ClaimID);
+    return getClaim_(session, item.ClaimID);
   });
 }
 

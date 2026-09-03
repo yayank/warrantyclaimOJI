@@ -316,6 +316,15 @@ function sendMail_(opts) {
     return record;
   }
 
+  // Switched off, the message is still written down. A claim that was submitted
+  // while notifications were off should say so, not look like it was delivered.
+  if (!emailEnabled_()) {
+    record.Status = 'Not sent';
+    record.Error = 'Email notifications are switched off';
+    insert_(SHEET.EMAIL_LOG, record);
+    return record;
+  }
+
   try {
     MailApp.sendEmail({
       to: to.join(','),
@@ -331,6 +340,12 @@ function sendMail_(opts) {
   }
   insert_(SHEET.EMAIL_LOG, record);
   return record;
+}
+
+/** Email is on unless the Settings sheet says otherwise. */
+function emailEnabled_() {
+  const value = String(setting_(SETTING_KEY.EMAIL_ENABLED, 'TRUE')).trim().toUpperCase();
+  return value !== 'FALSE' && value !== 'NO' && value !== '0';
 }
 
 function adminEmails_() {
@@ -455,6 +470,19 @@ function sendTestTemplate_(session, code) {
   });
 }
 
+/** Turns email delivery on or off. Logging is unaffected either way. */
+function setEmailEnabled_(session, enabled) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const wanted = enabled ? 'TRUE' : 'FALSE';
+  const before = emailEnabled_();
+  setSetting_(SETTING_KEY.EMAIL_ENABLED, wanted);
+  audit_(session, 'MasterDataChange', {
+    field: 'settings.' + SETTING_KEY.EMAIL_ENABLED,
+    oldValue: before ? 'TRUE' : 'FALSE', newValue: wanted
+  });
+  return { enabled: !!enabled };
+}
+
 function listEmailLog_(session, filter) {
   requireRole_(session, [ROLE.ADMIN]);
   const f = filter || {};
@@ -463,7 +491,7 @@ function listEmailLog_(session, filter) {
     rows = rows.filter(function (r) { return String(r.ClaimIDs).indexOf(f.claimId) !== -1; });
   }
   rows.sort(function (a, b) { return String(b.SentAt).localeCompare(String(a.SentAt)); });
-  return rows.slice(0, f.limit || 100).map(function (r) {
+  const sent = rows.slice(0, f.limit || 100).map(function (r) {
     return {
       emailId: r.EmailID, sentAt: r.SentAt, code: r.TemplateCode,
       version: r.TemplateVersion, to: r.To, cc: r.Cc, subject: r.Subject,
@@ -471,4 +499,5 @@ function listEmailLog_(session, filter) {
       isTest: isTrue_(r.IsTest), body: r.BodySnapshot
     };
   });
+  return { enabled: emailEnabled_(), rows: sent };
 }

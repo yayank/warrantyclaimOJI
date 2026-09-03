@@ -164,6 +164,28 @@ function adoptHeaderless_(s, name) {
 }
 
 /** Reads a whole sheet as objects keyed by header name. */
+/**
+ * A cell value as the rest of the application expects to see it.
+ *
+ * A timestamp this application writes as text — "2026-08-30T11:53:50" — is a
+ * date-time as far as Sheets is concerned, and it is free to store it as one and
+ * hand back a Date. That breaks two things at once. Timestamps are compared as
+ * strings all over the server (the sort order of the claims list, the date
+ * filters, the change detection in saveClaim_), and a Date stringifies to
+ * "Sat Aug 30 2026 …", which sorts and compares as nonsense. Worse,
+ * google.script.run refuses a Date anywhere in a return value: the call fails
+ * and hands the page null, so a single coerced cell empties the whole screen.
+ *
+ * Reading is the one place every value passes through, so it is converted here
+ * rather than at each field that happens to hold a date today.
+ */
+function cellValue_(v) {
+  if (v instanceof Date) {
+    return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  }
+  return v;
+}
+
 function readAll_(name) {
   const s = sheet_(name);
   const last = s.getLastRow();
@@ -176,7 +198,7 @@ function readAll_(name) {
     const row = values[r];
     if (row.every(function (c) { return c === '' || c === null; })) continue;
     const obj = {};
-    for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = row[c];
+    for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
     obj.__row = r + 1;
     out.push(obj);
   }
@@ -252,9 +274,35 @@ function update_(name, keyField, keyValue, changes, expectedVersion) {
   return rowToObject_(head, current);
 }
 
+/**
+ * Writes one cell without touching RowVersion.
+ *
+ * A note the server makes for its own benefit — where a claim's Drive folder
+ * ended up — is not an edit anybody made, and bumping the version for it would
+ * make the copy the browser is already holding stale: it would upload a file
+ * and then be told its claim had moved on.
+ */
+function setCell_(name, keyField, keyValue, field, value) {
+  const s = sheet_(name);
+  const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const keyCol = head.indexOf(keyField);
+  const col = head.indexOf(field);
+  if (keyCol === -1 || col === -1) return false;
+
+  const last = s.getLastRow();
+  const keys = last > 1 ? s.getRange(2, keyCol + 1, last - 1, 1).getValues() : [];
+  for (let i = 0; i < keys.length; i++) {
+    if (String(keys[i][0]) === String(keyValue)) {
+      s.getRange(i + 2, col + 1).setValue(value);
+      return true;
+    }
+  }
+  return false;
+}
+
 function rowToObject_(head, row) {
   const obj = {};
-  for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = row[c];
+  for (let c = 0; c < head.length; c++) if (head[c]) obj[head[c]] = cellValue_(row[c]);
   return obj;
 }
 
@@ -269,6 +317,81 @@ function withLock_(fn) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/* ------------------------------------------------------------------- cache */
+
+/**
+ * A cache entry larger than CacheService will take, split across numbered keys.
+ *
+ * Both unit indexes are past the 100KB an entry may hold, so the put failed
+ * silently and every single call rebuilt the index by reading 2,610 rows from
+ * the sheet again — on every save, and on every serial number lookup as it is
+ * typed. Splitting the JSON is what makes the cache actually hold them.
+ */
+const CACHE_CHUNK = 90000;
+const CACHE_MAX_CHUNKS = 40;
+
+function chunkKeys_(key, count) {
+  const keys = [];
+  for (let i = 0; i < count; i++) keys.push(key + ':' + i);
+  return keys;
+}
+
+function cacheGetLarge_(key) {
+  const cache = CacheService.getScriptCache();
+  const head = cache.get(key + ':n');
+  if (!head) return null;
+
+  const count = Number(head);
+  if (!count || count > CACHE_MAX_CHUNKS) return null;
+  const parts = cache.getAll(chunkKeys_(key, count));
+
+  let text = '';
+  for (let i = 0; i < count; i++) {
+    const part = parts[key + ':' + i];
+    // Chunks expire independently, and half an index is worse than none.
+    if (part === undefined || part === null) return null;
+    text += part;
+  }
+  try { return JSON.parse(text); } catch (e) { return null; }
+}
+
+function cachePutLarge_(key, value, seconds) {
+  const text = JSON.stringify(value);
+  const entries = {};
+  let count = 0;
+  let at = 0;
+
+  while (at < text.length) {
+    let end = Math.min(at + CACHE_CHUNK, text.length);
+    // Never split a surrogate pair: the halves must survive as written.
+    if (end < text.length) {
+      const code = text.charCodeAt(end - 1);
+      if (code >= 0xD800 && code <= 0xDBFF) end--;
+    }
+    if (count >= CACHE_MAX_CHUNKS) return;   // too large to be worth holding
+    entries[key + ':' + count] = text.substring(at, end);
+    count++;
+    at = end;
+  }
+
+  entries[key + ':n'] = String(count);
+  try {
+    CacheService.getScriptCache().putAll(entries, seconds);
+  } catch (e) {
+    // The cache is an optimisation; losing it costs time, never correctness.
+  }
+}
+
+function cacheRemoveLarge_(key) {
+  const cache = CacheService.getScriptCache();
+  const head = cache.get(key + ':n');
+  const count = head ? Number(head) : 0;
+  const keys = chunkKeys_(key, count > CACHE_MAX_CHUNKS ? CACHE_MAX_CHUNKS : count);
+  keys.push(key + ':n');
+  keys.push(key);        // an entry written before chunking existed
+  try { cache.removeAll(keys); } catch (e) { /* best effort */ }
 }
 
 /* ---------------------------------------------------------------- settings */

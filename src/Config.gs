@@ -44,7 +44,7 @@ SCHEMA[SHEET.ITEMS] = [
   'ItemID', 'ClaimID', 'PartID', 'PartName', 'Qty', 'ItemStatus',
   'AdvanceIssued', 'AdvanceIssuedAt', 'AdvanceIssuedBy', 'AdvanceNote',
   'DecisionBy', 'DecisionAt', 'DecisionReason',
-  'AvailabilityDate', 'DocumentRefNo',
+  'AvailabilityDate', 'DocumentRefNo', 'FulfilmentRoute',
   'ForwardedAt', 'ForwardedTo',
   'ShippedAt', 'ShippedBy',
   'PartReturnNote', 'PartReturnAt',
@@ -126,6 +126,20 @@ const ITEM_STATUS = {
   SHIPPED: 'Shipped'
 };
 
+/**
+ * How an approved part is going to be obtained.
+ *
+ * A claim still under principal warranty is ordered from the principal, and
+ * that is the only route that involves them. Once a unit is out of their
+ * warranty the part has to come from somewhere else: raised as a purchase
+ * request, or taken off the shelf. Blank until an administrator decides.
+ */
+const FULFILMENT = {
+  PRINCIPAL: 'Principal order',
+  PR: 'Purchase request',
+  STOCK: 'From stock'
+};
+
 const WARRANTY_TYPE = {
   PRINCIPAL: 'Principal Warranty',
   OUT: 'Out of Principal Warranty',
@@ -152,7 +166,9 @@ const SETTING_KEY = {
   CLIENT_ID: 'GoogleClientId',
   ROOT_FOLDER: 'DriveRootFolderId',
   DIGEST_HOUR: 'DigestHour',
-  APP_URL: 'AppUrl'
+  APP_URL: 'AppUrl',
+  /** Whether the portal sends email at all. Everything is still logged. */
+  EMAIL_ENABLED: 'EmailNotifications'
 };
 
 const FOLDER = {

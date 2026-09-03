@@ -29,6 +29,30 @@ function principalNames_() {
     .filter(Boolean);
 }
 
+/**
+ * Who to ask when something the portal will not accept needs a human — a
+ * customer or a unit that is not on the master lists. Screens name the
+ * administrator rather than telling the user to find one.
+ */
+function administrators_() {
+  return readAll_(SHEET.USERS)
+    .filter(function (u) { return u.Role === ROLE.ADMIN && isTrue_(u.Active); })
+    .map(function (u) {
+      const email = String(u.Email || '').trim();
+      return { name: String(u.Name || '').trim() || email, email: email };
+    })
+    .filter(function (a) { return a.email; });
+}
+
+/** The same contact, as one sentence an error message can carry. */
+function administratorContact_() {
+  const admins = administrators_();
+  if (!admins.length) return 'Please contact the portal administrator.';
+  return 'Please contact the administrator: ' + admins.map(function (a) {
+    return a.name + ' (' + a.email + ')';
+  }).join(', ') + '.';
+}
+
 /** Lists master data every screen needs, cached because it barely changes. */
 function referenceData_(session) {
   const customers = readAll_(SHEET.CUSTOMER)
@@ -64,7 +88,10 @@ function referenceData_(session) {
     warrantyTypes: [WARRANTY_TYPE.PRINCIPAL, WARRANTY_TYPE.OUT, WARRANTY_TYPE.MANUAL,
       WARRANTY_TYPE.INTERNAL],
     principals: principalNames_(),
-    productionCustomer: PRODUCTION_CUSTOMER
+    productionCustomer: PRODUCTION_CUSTOMER,
+    // Only the screens that fill a claim in need to name someone to ask; a
+    // principal is a partner outside the office and has no such screen.
+    administrators: session.role === ROLE.PRINCIPAL ? [] : administrators_()
   };
 }
 
@@ -198,11 +225,27 @@ function nextMasterId_(def) {
 }
 
 function clearReferenceCache_() {
-  const cache = CacheService.getScriptCache();
-  cache.removeAll(['settings', 'warrantyIndex', 'populationIndex']);
+  CacheService.getScriptCache().remove('settings');
+  cacheRemoveLarge_('warrantyIndex');
+  cacheRemoveLarge_('populationIndex');
+  // The in-memory copies would otherwise outlive the import that replaced them.
+  delete INDEX_MEMO.warranty;
+  delete INDEX_MEMO.population;
 }
 
 /* ------------------------------------------------------------- unit data */
+
+/**
+ * The registered units the claim form offers as its serial number list.
+ *
+ * Fetched on demand rather than at sign-in: every screen needs the customer
+ * list, only the claim form needs several thousand serial numbers, and the
+ * browser holds them for the rest of the session once it has them.
+ */
+function unitOptions_(session) {
+  requireRole_(session, [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN]);
+  return { units: populationUnits_() };
+}
 
 function listUnits_(session, filter) {
   requireRole_(session, [ROLE.ADMIN]);

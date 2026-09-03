@@ -93,7 +93,7 @@ function api(request) {
   try {
     const session = resolveSession_(req.token, req.simulatedRole);
     const data = route_(session, req.action, req.payload || {});
-    return { ok: true, data: data, session: publicSession_(session) };
+    return { ok: true, data: jsonSafe_(data), session: publicSession_(session) };
   } catch (err) {
     return {
       ok: false,
@@ -103,6 +103,29 @@ function api(request) {
       current: err && err.stale ? err.current : undefined
     };
   }
+}
+
+/**
+ * The last check before a value crosses to the browser.
+ *
+ * google.script.run accepts primitives, arrays and plain objects and nothing
+ * else: a Date anywhere inside a return value fails the whole call, and the
+ * page is handed null with no error to show. cellValue_ already keeps Dates out
+ * of everything read from a sheet; this covers whatever a future caller builds
+ * in code. NaN and Infinity are not JSON either, and leave as null.
+ */
+function jsonSafe_(value) {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? '' : Utilities.formatDate(value, TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  }
+  if (typeof value === 'number') return isFinite(value) ? value : null;
+  if (Array.isArray(value)) return value.map(jsonSafe_);
+  if (value && typeof value === 'object') {
+    const out = {};
+    Object.keys(value).forEach(function (k) { out[k] = jsonSafe_(value[k]); });
+    return out;
+  }
+  return value;
 }
 
 function publicSession_(session) {
@@ -141,11 +164,15 @@ function route_(session, action, payload) {
     case 'claims.decide': return decideItems_(session, payload);
     case 'claims.availability': return setAvailability_(session, payload);
     case 'claims.forwardOrder': return forwardOrder_(session, payload);
+    case 'claims.fulfilStock': return fulfilFromStock_(session, payload);
     case 'claims.shipped': return markShipped_(session, payload);
     case 'claims.partReturn': return recordPartReturn_(session, payload);
     case 'claims.advanceIssue': return setAdvanceIssue_(session, payload);
+    case 'claims.advanceQueue': return advanceQueue_(session);
     case 'claims.delete': return deleteClaim_(session, payload);
     case 'claims.lookup': return lookupSerial_(session, payload.serialNumber);
+    case 'claims.units': return unitOptions_(session);
+    case 'claims.unitHistory': return unitHistory_(session, payload.serialNumber);
     case 'claims.attachment': return attachmentData_(session, payload.attachmentId);
     case 'claims.export': return exportClaims_(session, payload);
 
@@ -163,6 +190,7 @@ function route_(session, action, payload) {
     case 'templates.restore': return restoreTemplate_(session, payload.code);
     case 'templates.test': return sendTestTemplate_(session, payload.code);
     case 'email.log': return listEmailLog_(session, payload);
+    case 'email.setEnabled': return setEmailEnabled_(session, payload.enabled);
     case 'email.digestNow': return sendDigestNow_(session);
 
     /* audit and test mode */

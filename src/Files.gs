@@ -25,14 +25,39 @@ function childFolder_(parent, name) {
 /**
  * Folder for a claim. Drafts live under _DRAFT because their reference number
  * is not assigned until they are submitted.
+ *
+ * The claim records the folder it was given, and opening it by id is one Drive
+ * call where walking the tree from the root is four. That matters: every file
+ * uploaded against a claim used to walk the whole chain again, so a claim with
+ * four attachments paid for it four times over.
  */
 function claimFolder_(claim) {
+  if (claim.DriveFolderId) {
+    try {
+      return DriveApp.getFolderById(claim.DriveFolderId);
+    } catch (e) {
+      // Removed or moved by hand: fall through and find it the long way.
+    }
+  }
   const root = rootFolder_();
   const base = isTrue_(claim.IsTest) ? childFolder_(root, FOLDER.TEST) : root;
   const parent = claim.RefNo
     ? childFolder_(base, claim.RefNo)
     : childFolder_(base, FOLDER.DRAFT);
-  return childFolder_(parent, claim.ClaimID);
+  const folder = childFolder_(parent, claim.ClaimID);
+
+  // Remember where it is, so the walk above happens once per claim rather than
+  // once per file. The note is written without bumping RowVersion: the browser
+  // is holding the claim it just saved and is about to submit it.
+  claim.DriveFolderId = folder.getId();
+  if (claim.ClaimID) {
+    try {
+      setCell_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, 'DriveFolderId', claim.DriveFolderId);
+    } catch (e) {
+      // The folder is usable either way; the next upload will walk again.
+    }
+  }
+  return folder;
 }
 
 function kindFolder_(claim, kind) {
