@@ -77,13 +77,21 @@ function render(role, tab, rows, collapsed) {
   const html = claimTable();
 
   const out = [];
-  const re = /<tr class="(group-header|click|sub)"(?:[^>]*data-claim="([^"]*)")?[^>]*>([\s\S]*?)<\/tr>/g;
+  const re = /<tr class="(group-header|ref-header|click|sub)"(?:[^>]*data-claim="([^"]*)")?[^>]*>([\s\S]*?)<\/tr>/g;
   let m;
   while ((m = re.exec(html)) !== null) {
     if (m[1] === 'group-header') {
       const label = m[3].replace(/<span class="group-n">(\d+)<\/span>/, '');
       const n = /<span class="group-n">(\d+)<\/span>/.exec(m[3]);
       out.push({ kind: 'head', label: label.replace(/<[^>]*>/g, '').trim(), n: n ? Number(n[1]) : null });
+    } else if (m[1] === 'ref-header') {
+      const n = /<span class="group-n">(\d+)<\/span>/.exec(m[3]);
+      out.push({
+        kind: 'ref',
+        label: m[3].replace(/<span class="group-n">\d+<\/span>/, '')
+          .replace(/<[^>]*>/g, '').trim(),
+        n: n ? Number(n[1]) : null
+      });
     } else if (m[1] === 'click') {
       out.push({ kind: 'claim', claimId: m[2], html: m[3] });
     } else {
@@ -132,9 +140,14 @@ check('every claim sits under the heading that names its status', misplaced === 
   misplaced + ' of ' + mixed.length + ' misplaced; read: ' +
   seen.map(function (e) { return e.kind === 'head' ? '[' + e.label + ']' : e.claimId; }).join(' '));
 
-check('a heading is never left with nothing under it',
+check('a status heading is always followed by a reference heading',
   seen.every(function (e, i) {
-    return e.kind !== 'head' || (seen[i + 1] && seen[i + 1].kind === 'claim');
+    return e.kind !== 'head' || (seen[i + 1] && seen[i + 1].kind === 'ref');
+  }));
+
+check('and a reference heading always by a claim',
+  seen.every(function (e, i) {
+    return e.kind !== 'ref' || (seen[i + 1] && seen[i + 1].kind === 'claim');
   }));
 
 check('no claim appears before the first heading',
@@ -213,7 +226,8 @@ check('the parts do not push the next claim out of its block',
   shown.filter(function (e) { return e.kind === 'claim'; }).length === mixed.length);
 
 check('and a part never appears before the claim it belongs to',
-  shown[0].kind === 'head' && shown[1].kind === 'claim');
+  shown[0].kind === 'head' && shown[1].kind === 'ref' && shown[2].kind === 'claim',
+  shown.slice(0, 3).map(function (e) { return e.kind; }).join(' → '));
 
 const folded = {};
 folded[mixed[1].claimId] = true;
@@ -261,8 +275,8 @@ check('and says so rather than leaving a gap',
 
 /* ------------------------------- the reference leads, the claim id follows */
 
-function claimCell(rows) {
-  return render(ROLE.REQUESTER, 'all', rows)
+function claimCell(rows, tab) {
+  return render(ROLE.REQUESTER, tab || 'progress', rows)
     .filter(function (e) { return e.kind === 'claim'; })[0].html
     .match(/<td class="stack">([\s\S]*?)<\/td>/)[1]
     .replace(/<[^>]*>/g, '|').replace(/\|+/g, '|').replace(/^\||\|$/g, '');
@@ -277,6 +291,78 @@ check('the reference is the top line and the claim id the second',
 const draft = claimCell([claim(STATUS.DRAFT, { refNo: '', claimId: 'TEST-0010' })]);
 check('a claim with no reference yet still leads with its own id',
   draft === 'TEST-0010|not submitted', draft);
+
+/* ----------------------- one reference, several claims, said once */
+
+// The screen repeated the reference on every row, and a reference covers
+// several claims, so the same eight characters were read four times over
+// telling the reader nothing new each time.
+
+function refClaim(refNo, claimId, status) {
+  return claim(status || STATUS.CLOSED, { refNo: refNo, claimId: claimId });
+}
+
+const shared = [
+  refClaim('CWT310826', 'TEST-260831-0001'),
+  refClaim('CWT310826', 'TEST-260831-0002'),
+  refClaim('CWT300826', 'TEST-260830-0003'),
+  refClaim('CWT300826', 'TEST-260830-0001')
+];
+const tree = render(ROLE.REQUESTER, 'all', shared);
+const refs = tree.filter(function (e) { return e.kind === 'ref'; });
+
+check('a reference is named once, not once per claim',
+  refs.length === 2, refs.map(function (e) { return e.label; }).join(' , '));
+
+check('and in the order its claims arrive',
+  refs.map(function (e) { return e.label; }).join(' → ') === 'CWT310826 → CWT300826',
+  refs.map(function (e) { return e.label; }).join(' → '));
+
+check('every claim of a reference sits under it',
+  refs.every(function (r) {
+    const at = tree.indexOf(r);
+    let n = 0;
+    for (let i = at + 1; i < tree.length && tree[i].kind !== 'ref' && tree[i].kind !== 'head'; i++) {
+      if (tree[i].kind === 'claim') n++;
+    }
+    return n === 2 && r.n === 2;
+  }));
+
+check('and no claim is lost to the second level',
+  tree.filter(function (e) { return e.kind === 'claim'; }).length === shared.length);
+
+// A list with two shapes in it costs the reader more than the row it saves.
+const alone = render(ROLE.REQUESTER, 'all', [refClaim('CWT999999', 'TEST-0001')])
+  .filter(function (e) { return e.kind === 'ref'; });
+check('a reference holding one claim still gets its heading',
+  alone.length === 1 && alone[0].label === 'CWT999999' && alone[0].n === 1);
+
+const noRef = render(ROLE.REQUESTER, 'all', [
+  claim(STATUS.DRAFT, { refNo: '', claimId: 'TEST-0011' }),
+  claim(STATUS.DRAFT, { refNo: '', claimId: 'TEST-0012' })
+]);
+check('claims with no reference gather under a heading of their own',
+  noRef.filter(function (e) { return e.kind === 'ref'; })
+    .map(function (e) { return e.label; }).join('') === 'No reference yet');
+
+// Within one status block, the drafts come after every real reference.
+const mixedRef = render(ROLE.REQUESTER, 'all', [
+  claim(STATUS.DRAFT, { refNo: '', claimId: 'TEST-0013' }),
+  claim(STATUS.DRAFT, { refNo: 'CWT300826', claimId: 'TEST-0014' })
+]).filter(function (e) { return e.kind === 'ref'; });
+check('and they come last in their block, not first',
+  mixedRef.map(function (e) { return e.label; }).join(' → ') === 'CWT300826 → No reference yet',
+  mixedRef.map(function (e) { return e.label; }).join(' → '));
+
+check('under a reference heading the row is only its own claim id',
+  claimCell([refClaim('CWT310826', 'TEST-0015')], 'all') === 'TEST-0015',
+  claimCell([refClaim('CWT310826', 'TEST-0015')], 'all'));
+
+check('the second level is the requester\'s All tab only — an admin list stays flat',
+  render(ROLE.ADMIN, 'all', shared).every(function (e) { return e.kind !== 'ref'; }));
+
+check('and so does a tab the requester chose themselves',
+  render(ROLE.REQUESTER, 'progress', shared).every(function (e) { return e.kind !== 'ref'; }));
 
 /* --------------------------------------------- which tab opens, and for whom */
 

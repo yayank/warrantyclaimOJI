@@ -260,6 +260,10 @@ a{color:inherit}
   width:7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);
   border-bottom-left-radius:3px}
 .tbl tr.sub+tr:not(.sub) td{border-top:1px solid var(--line)}
+.tbl tr.ref-header td{background:var(--surface);color:var(--ink-2);font-size:12px;
+  padding:9px 10px 7px 22px;border-bottom:1px solid var(--line-soft);position:relative}
+.tbl tr.ref-header td::before{content:"";position:absolute;left:11px;top:9px;bottom:7px;
+  width:2px;border-radius:1px;background:var(--accent)}
 .tbl tr.group-header td{background:var(--surface-2);color:var(--ink-2);font-weight:600;
   font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:11px 10px 8px;
   border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
@@ -692,7 +696,7 @@ a{color:inherit}
     <section class="shot" id="s4">
       <div class="shot-label">Screen 04 — Requester</div>
       <h2>Claim Status · Requester</h2>
-      <p class="shot-note">Satu tabel, bukan dua. Baris claim di atas, sparepart-nya langsung di bawahnya — sebelumnya keduanya dipisah sakelar <em>By claim / By spare part</em>, dan masing-masing membuang apa yang jadi guna yang lain. Requester membuka portal untuk tahu klaimnya sudah sampai mana, bukan untuk mengerjakan antrean, jadi tab <em>All</em> yang terbuka lebih dulu dan isinya dipecah per status mengikuti urutan alur klaim. Kolom Claim menaruh <em>RefNo</em> di baris atas: satu referensi menaungi beberapa klaim, dan itulah yang disebut orang di lapangan. Klaim yang belum diajukan belum punya RefNo — di sana claim id yang memimpin. Caret melipat sparepart sebuah klaim, bukan membukanya.</p>
+      <p class="shot-note">Satu tabel, bukan dua. Baris claim di atas, sparepart-nya langsung di bawahnya — sebelumnya keduanya dipisah sakelar <em>By claim / By spare part</em>, dan masing-masing membuang apa yang jadi guna yang lain. Requester membuka portal untuk tahu klaimnya sudah sampai mana, bukan untuk mengerjakan antrean, jadi tab <em>All</em> yang terbuka lebih dulu dan isinya dipecah per status mengikuti urutan alur klaim. Satu referensi menaungi beberapa klaim, jadi RefNo naik menjadi judul dan tidak lagi diulang tiap baris — empat tingkat: status, RefNo, ClaimID, sparepart. RefNo yang cuma menaungi satu klaim tetap dibuatkan judul; daftar dengan dua bentuk lebih mahal bagi pembaca daripada satu baris yang dihemat. Klaim yang belum diajukan belum punya RefNo sama sekali dan berkumpul di bawah judulnya sendiri, di akhir blok. Caret melipat sparepart sebuah klaim, bukan membukanya.</p>
       <div class="frame frame-scroll">
         <div class="frame-inner">
           <div class="app-top">
@@ -723,9 +727,10 @@ a{color:inherit}
               </tr></thead>
               <tbody>
                 <tr class="group-header"><td colspan="8">Draft<span class="group-n">1</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="dimmer">No reference yet</span><span class="group-n">1</span></td></tr>
                 <tr>
                   <td class="caret">▾</td>
-                  <td class="twoline"><span class="mono">CLM-260830-0011</span><span class="mono tiny dimmer">not submitted</span></td>
+                  <td class="twoline"><span class="mono">CLM-260830-0011</span></td>
                   <td>30 Aug 2026</td>
                   <td>RSUD Tarakan Jakarta</td>
                   <td class="twoline"><span class="mono">XT2411116</span><span class="pill p-wait flat tiny" style="align-self:flex-start">Being checked</span></td>
@@ -736,9 +741,10 @@ a{color:inherit}
                 <tr class="sub"><td></td><td class="part" colspan="4">Air Detector</td><td class="mono">1 pcs</td><td><span class="pill p-draft">Pending</span></td><td></td></tr>
 
                 <tr class="group-header"><td colspan="8">Revised!<span class="group-n">1</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="mono">CW280826</span><span class="group-n">1</span></td></tr>
                 <tr>
                   <td class="caret">▾</td>
-                  <td class="twoline"><span class="mono">CW280826</span><span class="mono tiny">CLM-260828-0009</span></td>
+                  <td class="twoline"><span class="mono">CLM-260828-0009</span></td>
                   <td>28 Aug 2026</td>
                   <td>RS TK. II M. Ridwan Meuraksa</td>
                   <td class="twoline"><span class="mono">XT2411090</span><span class="pill p-no flat tiny" style="align-self:flex-start">Out of warranty</span></td>
@@ -749,9 +755,10 @@ a{color:inherit}
                 <tr class="sub"><td></td><td class="part" colspan="4">Blood pump rotor</td><td class="mono">2 pcs</td><td><span class="pill p-draft">Pending</span></td><td></td></tr>
 
                 <tr class="group-header"><td colspan="8">In Fulfilment<span class="group-n">1</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="mono">CW260826</span><span class="group-n">1</span></td></tr>
                 <tr>
                   <td class="caret">▾</td>
-                  <td class="twoline"><span class="mono">CW260826</span><span class="mono tiny">CLM-260826-0003</span></td>
+                  <td class="twoline"><span class="mono">CLM-260826-0003</span></td>
                   <td>26 Aug 2026</td>
                   <td>Mitra Kasih Cimahi</td>
                   <td class="twoline"><span class="mono">XT2411194</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Warranty</span></td>
@@ -765,10 +772,11 @@ a{color:inherit}
                 <tr class="sub"><td></td><td class="part" colspan="4">Blood pump rotor</td><td class="mono">2 pcs</td>
                   <td class="twoline"><span class="pill p-no" style="align-self:flex-start">Rejected</span><span class="tiny">damage caused by mishandling</span></td><td></td></tr>
 
-                <tr class="group-header"><td colspan="8">Closed<span class="group-n">1</span></td></tr>
+                <tr class="group-header"><td colspan="8">Closed<span class="group-n">2</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="mono">CW260826</span><span class="group-n">2</span></td></tr>
                 <tr>
                   <td class="caret">▾</td>
-                  <td class="twoline"><span class="mono">CW260826</span><span class="mono tiny">CLM-260826-0004</span></td>
+                  <td class="twoline"><span class="mono">CLM-260826-0004</span></td>
                   <td>26 Aug 2026</td>
                   <td>RSUD Koja</td>
                   <td class="twoline"><span class="mono">XT2410090</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Warranty</span></td>
@@ -777,6 +785,17 @@ a{color:inherit}
                   <td class="num">—</td>
                 </tr>
                 <tr class="sub"><td></td><td class="part" colspan="4">Dialysate Filter</td><td class="mono">3 pcs</td><td><span class="pill p-ok">Shipped</span></td><td></td></tr>
+                <tr>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CLM-260826-0006</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>RSUD Koja</td>
+                  <td class="twoline"><span class="mono">XT2410090</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Warranty</span></td>
+                  <td>1 item</td>
+                  <td class="twoline"><span class="pill p-ok" style="align-self:flex-start">Closed</span><span class="tiny">1 approved</span></td>
+                  <td class="num">—</td>
+                </tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Air pump</td><td class="mono">1 pcs</td><td><span class="pill p-ok">Shipped</span></td><td></td></tr>
               </tbody>
             </table>
           </div>

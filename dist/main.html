@@ -205,6 +205,12 @@ table.data tr.group-header td{background:var(--surface-2);color:var(--ink-2);fon
   font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:11px 10px 8px;
   border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
 table.data tr.group-header:first-child td{border-top:0}
+/* One level in from the status block: the reference the claims below share. */
+table.data tr.ref-header td{background:var(--surface);color:var(--ink-2);font-size:12px;
+  padding:9px 10px 7px 22px;border-bottom:1px solid var(--line-soft);position:relative}
+table.data tr.ref-header td::before{content:"";position:absolute;left:11px;top:9px;bottom:7px;
+  width:2px;border-radius:1px;background:var(--accent)}
+table.data tr.ref-header+tr.click td{border-top:0}
 .group-n{display:inline-block;margin-left:7px;padding:0 6px;border-radius:9px;
   background:var(--mute-soft);color:var(--ink-3);font-size:10.5px;letter-spacing:0}
 .caret{color:var(--ink-3);font-size:10px;width:22px;cursor:pointer;user-select:none}
@@ -1013,6 +1019,32 @@ function groupByStatus_(rows) {
     .map(function (s) { return { status: s, rows: grouped[s] }; });
 }
 
+/**
+ * A status block cut again by reference.
+ *
+ * One reference covers several claims, and repeating it down the rows says
+ * nothing the row above did not already say. It becomes the heading instead,
+ * and the rows under it carry only what tells them apart. A reference holding
+ * one claim still gets its heading: a list with two shapes in it costs the
+ * reader more than the row it saves.
+ *
+ * A claim not yet submitted has no reference at all, and those gather under a
+ * heading of their own at the end of the block rather than sitting at a depth
+ * nothing else in the table uses.
+ */
+function groupByRef_(rows) {
+  const grouped = {};
+  const seen = [];
+  rows.forEach(function (r) {
+    const key = r.refNo || '';
+    if (!grouped[key]) { grouped[key] = []; seen.push(key); }
+    grouped[key].push(r);
+  });
+  return seen.filter(function (k) { return k; })
+    .concat(seen.indexOf('') === -1 ? [] : [''])
+    .map(function (k) { return { refNo: k, rows: grouped[k] }; });
+}
+
 function claimTable() {
   const s = S.session;
   const showCustomer = true;
@@ -1035,7 +1067,7 @@ function claimTable() {
     ? groupByStatus_(S.rows)
     : null;
 
-  const claimRows = function (c) {
+  const claimRows = function (c, underRef) {
     const open = !S.collapsed[c.claimId];
     const cells = [
       '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
@@ -1043,11 +1075,16 @@ function claimTable() {
       // reference covers several claims, so it leads. A claim not yet submitted
       // has no reference at all — there the claim id is the only name it has,
       // and it keeps the top line rather than being led by its own absence.
-      '<td class="stack">' + (c.refNo
-        ? '<span class="mono">' + h(c.refNo) + '</span>' +
-          '<span class="mono tiny">' + h(c.claimId) + '</span>'
-        : '<span class="mono">' + h(c.claimId) + '</span>' +
-          '<span class="mono tiny">not submitted</span>') + '</td>',
+      //
+      // Under a reference heading neither line is needed twice: the heading is
+      // the reference, so the row is only its own id.
+      '<td class="stack">' + (underRef
+        ? '<span class="mono">' + h(c.claimId) + '</span>'
+        : (c.refNo
+          ? '<span class="mono">' + h(c.refNo) + '</span>' +
+            '<span class="mono tiny">' + h(c.claimId) + '</span>'
+          : '<span class="mono">' + h(c.claimId) + '</span>' +
+            '<span class="mono tiny">not submitted</span>')) + '</td>',
       '<td>' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
     ];
     if (showPrincipal) {
@@ -1096,9 +1133,17 @@ function claimTable() {
     ? groups.map(function (g) {
         return '<tr class="group-header"><td colspan="' + head.length + '">' +
           h(statusLabel(g.status)) + '<span class="group-n">' + g.rows.length + '</span>' +
-          '</td></tr>' + g.rows.map(claimRows).join('');
+          '</td></tr>' +
+          groupByRef_(g.rows).map(function (r) {
+            return '<tr class="ref-header"><td colspan="' + head.length + '">' +
+              (r.refNo
+                ? '<span class="mono">' + h(r.refNo) + '</span>'
+                : '<span class="dimmer">No reference yet</span>') +
+              '<span class="group-n">' + r.rows.length + '</span></td></tr>' +
+              r.rows.map(function (c) { return claimRows(c, true); }).join('');
+          }).join('');
       }).join('')
-    : S.rows.map(claimRows).join('');
+    : S.rows.map(function (c) { return claimRows(c, false); }).join('');
 
   return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
     '</tr></thead><tbody>' + body + '</tbody></table></div>';
