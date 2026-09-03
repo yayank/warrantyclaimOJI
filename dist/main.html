@@ -1039,8 +1039,15 @@ function claimTable() {
     const open = !S.collapsed[c.claimId];
     const cells = [
       '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
-      '<td class="stack"><span class="mono">' + h(c.claimId) + '</span>' +
-        '<span class="mono tiny">' + h(c.refNo || 'not submitted') + '</span></td>',
+      // The reference is what a claim is called out in the field, and one
+      // reference covers several claims, so it leads. A claim not yet submitted
+      // has no reference at all — there the claim id is the only name it has,
+      // and it keeps the top line rather than being led by its own absence.
+      '<td class="stack">' + (c.refNo
+        ? '<span class="mono">' + h(c.refNo) + '</span>' +
+          '<span class="mono tiny">' + h(c.claimId) + '</span>'
+        : '<span class="mono">' + h(c.claimId) + '</span>' +
+          '<span class="mono tiny">not submitted</span>') + '</td>',
       '<td>' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
     ];
     if (showPrincipal) {

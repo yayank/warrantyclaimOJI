@@ -81,6 +81,13 @@ for (let i = 0; i < 2610; i++) {
   WARRANTY.push(['2024-10-01', 'MAT-' + i, sn, 'Active', '', '8/2026']);
 }
 
+// The fixture's units carry cover to 8/2026, and determineWarranty_ falls back
+// to the real clock when it is not given a date. Left to itself this check
+// passed until 1 September 2026 and then began failing on its own, with no
+// change to any code it tests. The harness already pretends today is 30 August
+// 2026; every call below is handed that same day.
+const TODAY = new Date(2026, 7, 30);
+
 const book = {
   getSheetByName: function (n) {
     if (n === 'Population') return new Sheet('Population', POPULATION);
@@ -124,7 +131,7 @@ reads = {}; store = {};
 let app = load();
 
 const SN = 'XT24100500';
-app.determineWarranty_(SN);
+app.determineWarranty_(SN, TODAY);
 app.productName_(SN);
 app.principalFor_(SN);
 app.productName_('XT24100501');
@@ -151,7 +158,7 @@ check('every chunk is within what CacheService will take',
 reads = {};
 app = load();                       // fresh globals, same cache — a new request
 const product = app.productName_(SN);
-app.determineWarranty_(SN);
+app.determineWarranty_(SN, TODAY);
 app.principalFor_(SN);
 
 check('a later request serves both indexes from the cache, reading no sheet',
@@ -162,8 +169,8 @@ check('and the answer it serves is the right one',
   product === 'Sansin SWS-4000 Hemodialysis Machine, unit 500', String(product));
 
 check('the warranty verdict survives the round trip too',
-  app.determineWarranty_(SN).type === 'Principal Warranty',
-  app.determineWarranty_(SN).type);
+  app.determineWarranty_(SN, TODAY).type === 'Principal Warranty',
+  app.determineWarranty_(SN, TODAY).type);
 
 /* ------------------------------------- a half-expired cache is not trusted */
 

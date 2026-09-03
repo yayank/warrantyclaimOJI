@@ -85,7 +85,7 @@ function render(role, tab, rows, collapsed) {
       const n = /<span class="group-n">(\d+)<\/span>/.exec(m[3]);
       out.push({ kind: 'head', label: label.replace(/<[^>]*>/g, '').trim(), n: n ? Number(n[1]) : null });
     } else if (m[1] === 'click') {
-      out.push({ kind: 'claim', claimId: m[2] });
+      out.push({ kind: 'claim', claimId: m[2], html: m[3] });
     } else {
       out.push({ kind: 'sub', html: m[3] });
     }
@@ -258,6 +258,25 @@ check('a claim with no spare part on it still appears',
   bareOut.filter(function (e) { return e.kind === 'claim'; }).length === 1);
 check('and says so rather than leaving a gap',
   bareOut.some(function (e) { return e.kind === 'sub' && /No spare part/.test(e.html); }));
+
+/* ------------------------------- the reference leads, the claim id follows */
+
+function claimCell(rows) {
+  return render(ROLE.REQUESTER, 'all', rows)
+    .filter(function (e) { return e.kind === 'claim'; })[0].html
+    .match(/<td class="stack">([\s\S]*?)<\/td>/)[1]
+    .replace(/<[^>]*>/g, '|').replace(/\|+/g, '|').replace(/^\||\|$/g, '');
+}
+
+const submitted = claimCell([claim(STATUS.FULFILMENT, { refNo: 'CWT310826', claimId: 'TEST-0009' })]);
+check('the reference is the top line and the claim id the second',
+  submitted === 'CWT310826|TEST-0009', submitted);
+
+// A draft has no reference yet. Leading with its absence would put the words
+// "not submitted" where the name of the thing belongs.
+const draft = claimCell([claim(STATUS.DRAFT, { refNo: '', claimId: 'TEST-0010' })]);
+check('a claim with no reference yet still leads with its own id',
+  draft === 'TEST-0010|not submitted', draft);
 
 /* --------------------------------------------- which tab opens, and for whom */
 
