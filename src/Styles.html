@@ -190,8 +190,12 @@ table.data tr.click{cursor:pointer}
 table.data tr.click:hover td{background:var(--surface-2)}
 table.data tr.sub td{background:var(--surface-2);font-size:12.5px}
 table.data tr.sub td:first-child{padding-left:30px}
-table.data tr.group-header td{background:var(--mute-soft);font-weight:600;color:var(--ink-2);
-  font-size:11.5px;padding:12px 10px;border-bottom:1px solid var(--line)}
+table.data tr.group-header td{background:var(--surface-2);color:var(--ink-2);font-weight:600;
+  font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:11px 10px 8px;
+  border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
+table.data tr.group-header:first-child td{border-top:0}
+.group-n{display:inline-block;margin-left:7px;padding:0 6px;border-radius:9px;
+  background:var(--mute-soft);color:var(--ink-3);font-size:10.5px;letter-spacing:0}
 .caret{color:var(--ink-3);font-size:10px;width:22px;cursor:pointer;user-select:none}
 .age-warn{color:var(--warn);font-weight:600}
 .age-crit{color:var(--crit);font-weight:600}
