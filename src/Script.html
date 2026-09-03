@@ -325,6 +325,7 @@ function applyDeepLink() {
   else if (link.page === 'claims') { S.page = 'claims'; }
   if (S.session.role === ROLE.PRINCIPAL && S.page === 'claims') S.page = 'batch';
   if (S.session.role === ROLE.ADMIN) S.view = 'item';
+  if ((S.session.role === ROLE.REQUESTER || S.session.role === ROLE.PRODUCTION) && S.page === 'claims') S.tab = 'all';
 }
 
 /* ============================================================== chrome */
@@ -548,6 +549,18 @@ function chip(label, value, key) {
     '<button type="button" data-clear="' + key + '" aria-label="Remove filter">✕</button></span>';
 }
 
+function groupByStatus_(rows) {
+  const statusOrder = [STATUS.DRAFT, STATUS.RETURNED, STATUS.SUBMITTED, STATUS.IN_REVIEW,
+    STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED];
+  const grouped = {};
+  statusOrder.forEach(function (s) { grouped[s] = []; });
+  rows.forEach(function (r) {
+    if (grouped[r.status]) grouped[r.status].push(r);
+  });
+  return statusOrder.map(function (s) { return { status: s, rows: grouped[s] }; })
+    .filter(function (g) { return g.rows.length > 0; });
+}
+
 function claimTable() {
   const s = S.session;
   const showCustomer = true;
@@ -563,7 +576,23 @@ function claimTable() {
   if (showWo) head.push('<th>Work order</th>');
   head.push('<th>Status</th>', '<th>Age</th>');
 
-  const body = S.rows.map(function (c) {
+  const showGrouping = (s.role === ROLE.REQUESTER || s.role === ROLE.PRODUCTION) && S.tab === 'all';
+  const rowsToRender = showGrouping ? groupByStatus_(S.rows) : null;
+
+  const body = [];
+  const claimsToProcess = showGrouping ? [] : S.rows;
+
+  if (showGrouping) {
+    rowsToRender.forEach(function (group) {
+      body.push('<tr class="group-header"><td colspan="' + head.length + '">' +
+        h(statusLabel(group.status)) + ' (' + group.rows.length + ')</td></tr>');
+      group.rows.forEach(function (c) {
+        claimsToProcess.push(c);
+      });
+    });
+  }
+
+  const rows = claimsToProcess.map(function (c) {
     const open = !!S.expanded[c.claimId];
     const cells = [
       '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
@@ -593,21 +622,26 @@ function claimTable() {
       '<td>' + ageCell(c.ageDays) + '</td>'
     );
 
-    const rows = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
+    const rowHtml = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
     if (open) {
       c.items.forEach(function (i) {
-        rows.push('<tr class="sub"><td></td><td colspan="' + (head.length - 4) + '">' +
+        rowHtml.push('<tr class="sub"><td></td><td colspan="' + (head.length - 4) + '">' +
           h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td><td>' +
           itemPill(i.itemStatus) + (i.decisionReason
             ? '<div class="tiny">' + h(i.decisionReason) + '</div>' : '') +
           '</td><td></td></tr>');
       });
     }
-    return rows.join('');
-  }).join('');
+    return rowHtml.join('');
+  });
 
-  return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
-    '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  if (showGrouping) {
+    return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
+      '</tr></thead><tbody>' + body.concat(rows).join('') + '</tbody></table></div>';
+  } else {
+    return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
+      '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+  }
 }
 
 function itemTable() {
