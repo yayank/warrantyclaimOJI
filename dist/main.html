@@ -203,6 +203,9 @@ table.data th{text-align:left;font-size:10.5px;letter-spacing:.09em;text-transfo
   white-space:nowrap;background:var(--surface-2)}
 table.data td{padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
 table.data tr.click{cursor:pointer}
+/* The tick column carries a box and nothing else, so it takes the width of one. */
+table.data th.pick,table.data td.pick{width:1%;padding-right:0;white-space:nowrap}
+table.data td.pick input,table.data th.pick input{cursor:pointer;margin:0}
 table.data tr.click:hover td{background:var(--surface-2)}
 table.data tr.sub td{background:var(--surface-2);font-size:12.5px}
 table.data tr.sub td.part{padding-left:26px;position:relative}
@@ -253,6 +256,9 @@ table.data tr.ref-header+tr.click td{border-top:0}
     padding:11px 12px;border-bottom:1px solid var(--line-soft)}
   table.data tr.click td.stack{display:flex}
 
+  /* First on the card, before the caret: it is what the reader is aiming at
+     when they are picking claims out, and a box halfway down a card is missed. */
+  .c-pick{order:-1;width:auto;padding-top:2px}
   .c-caret{order:0;width:auto;padding-top:2px}
   .c-claim{order:1;flex:1 1 auto;min-width:0}
   /* Pushed to the far end of the first line, and reading right to left there. */
@@ -270,6 +276,7 @@ table.data tr.ref-header+tr.click td{border-top:0}
   /* The spacer cells that align a part row under a table have nothing to
      align to once the table is a stack of cards. */
   table.data tr.sub td:empty{display:none}
+  /* …and the second spacer a tick column adds is one of them. */
   table.data tr.sub td.part{flex:1 1 auto;padding-left:0}
   table.data tr.sub td.part::before{display:none}
   table.data tr.sub td.stack{display:flex;margin-left:auto;align-items:flex-end;text-align:right}
@@ -531,6 +538,7 @@ const S = {
   page: 'claims',
   tab: 'all',
   filters: blankFilters(),
+  pick: {},                 // claims ticked on the claim list, by claim id
   views: null,              // saved filter combinations; null until fetched once
   viewNotice: '',           // why a view that was opened shows nothing
   rows: [],
@@ -986,6 +994,10 @@ function loadClaims(append) {
   // The name is what the box and the chip read back; only the id filters.
   delete filter.customerName;
   filter.offset = append ? S.rows.length : 0;
+  // A tick belongs to the list it was made on. Changing tab, filter or search
+  // draws a different list, and carrying the ticks across would act on claims
+  // that are no longer on screen.
+  if (!append) S.pick = {};
   api('claims.list', filter).then(function (data) {
     S.rows = append ? S.rows.concat(data.rows) : data.rows;
     S.total = data.total;
@@ -1039,6 +1051,7 @@ function renderClaims() {
     '</div>',
     activeChips(),
     viewNotice(),
+    claimBar(),
     S.rows.length
       ? claimTable() + moreBar()
       : '<div class="tablewrap"><div class="empty">Nothing here yet.</div></div>'
@@ -1046,6 +1059,7 @@ function renderClaims() {
 
   el('view').innerHTML = html;
   wireClaimsToolbar();
+  renderClaimBar();
 }
 
 /**
@@ -1136,6 +1150,253 @@ function customerFilter() {
       loadClaims();
     }
   }) + '</div>';
+}
+
+/* ============================================ acting on several at once */
+
+/*
+ * The Orders and Advance Issue screens have had a selection bar for a while;
+ * the claim list — the one screen where somebody actually looks at many claims
+ * at once — had none, so a morning's forwarding was done one panel at a time.
+ *
+ * What the bar offers follows the rule the panel already follows: **one status,
+ * one step**. A selection spanning two statuses has no single right answer, so
+ * it offers nothing and says why, exactly as Orders does when a selection
+ * spans the principal and internal lists.
+ */
+
+/** Only the roles that have a step to take see a tick box at all. */
+function canPickClaims() {
+  return S.session.role === ROLE.ADMIN || S.session.role === ROLE.PRINCIPAL;
+}
+
+function pickedClaims() {
+  return S.rows.filter(function (c) { return S.pick[c.claimId]; });
+}
+
+/** Parts still open to a decision, across the claims given. */
+function openPartsOf(claims) {
+  const ids = [];
+  claims.forEach(function (c) {
+    (c.items || []).forEach(function (i) {
+      if ([ITEM.FORWARDED, ITEM.AWAITING, ITEM.SHIPPED].indexOf(i.itemStatus) === -1) {
+        ids.push(i.itemId);
+      }
+    });
+  });
+  return ids;
+}
+
+function distinct(list) {
+  return list.filter(function (v, i, all) { return all.indexOf(v) === i; });
+}
+
+/**
+ * What may be done to these claims, for this role.
+ *
+ * Returns the actions to offer and, when there are none, the reason in words —
+ * a bar that simply goes blank on a mixed selection reads as a broken screen.
+ */
+function claimBulkOffer(role, claims) {
+  if (!claims.length) return { actions: [], note: '' };
+
+  const statuses = distinct(claims.map(function (c) { return c.status; }));
+  if (statuses.length > 1) {
+    return { actions: [], note: 'Those claims are at ' + statuses.length +
+      ' different statuses, and each status has its own next step. Pick one status at a time.' };
+  }
+  const status = statuses[0];
+  const parts = openPartsOf(claims);
+
+  if (role === ROLE.ADMIN) {
+    if (status === STATUS.SUBMITTED) {
+      // Returning is the same move whichever warranty the unit is under, so it
+      // is offered either way; only the road onwards depends on the track.
+      const actions = ['return'];
+      const tracks = distinct(claims.map(function (c) {
+        return c.warrantyType === WARRANTY.PRINCIPAL ? 'principal' : 'internal';
+      }));
+      if (tracks.length > 1) {
+        return { actions: actions, note: 'Some of these are under principal warranty and some ' +
+          'are not, so there is no one road onwards. Returning them is the same move either way.' };
+      }
+      actions.push(tracks[0] === 'principal' ? 'forward' : 'internal');
+      return { actions: actions, note: '' };
+    }
+    if (status === STATUS.INTERNAL) {
+      if (!parts.length) {
+        return { actions: [], note: 'Every part on those claims has already been ordered.' };
+      }
+      return { actions: ['approve', 'reject'], note: '' };
+    }
+    return { actions: [], note: 'Nothing here moves a claim at ' + statusLabel(status) +
+      ' — that step is taken elsewhere, or is the requester\'s to take.' };
+  }
+
+  if (role === ROLE.PRINCIPAL) {
+    if (!parts.length) {
+      return { actions: [], note: 'Every part on those claims has already been decided and ordered.' };
+    }
+    return { actions: ['approve', 'reject'], note: '' };
+  }
+
+  return { actions: [], note: '' };
+}
+
+function claimBar() {
+  if (!canPickClaims()) return '';
+  return '<div id="claimbar"></div>';
+}
+
+function renderClaimBar() {
+  const host = el('claimbar');
+  if (!host) return;
+  const claims = pickedClaims();
+  if (!claims.length) { host.innerHTML = ''; return; }
+
+  const offer = claimBulkOffer(S.session.role, claims);
+  const label = {
+    return: '<button class="btn sm no" data-bulk="return" type="button">Return to Requester…</button>',
+    forward: '<button class="btn sm pri" data-bulk="forward" type="button">Forward to Principal…</button>',
+    internal: '<button class="btn sm pri" data-bulk="internal" type="button">Process Internal Warranty</button>',
+    approve: '<button class="btn sm ok" data-bulk="approve" type="button">Approve parts…</button>',
+    reject: '<button class="btn sm no" data-bulk="reject" type="button">Reject parts…</button>'
+  };
+
+  host.innerHTML = '<div class="selbar"><b>' + claims.length + ' claim' +
+    (claims.length === 1 ? '' : 's') + ' selected</b>' +
+    '<button class="btn sm" data-bulk="clear" type="button">Clear</button>' +
+    '<span class="spacer"></span>' +
+    (offer.note ? '<span class="tiny">' + h(offer.note) + '</span>' : '') +
+    offer.actions.map(function (a) { return label[a]; }).join('') + '</div>';
+
+  host.querySelectorAll('[data-bulk]').forEach(function (b) {
+    b.addEventListener('click', function () { runClaimBulk(b.dataset.bulk, claims); });
+  });
+}
+
+function runClaimBulk(action, claims) {
+  if (action === 'clear') { S.pick = {}; renderClaims(); return; }
+  if (action === 'approve' || action === 'reject') {
+    decideModal(openPartsOf(claims), action, function () { S.pick = {}; loadClaims(); });
+    return;
+  }
+  if (action === 'return') { promptBulkReturn(claims); return; }
+  if (action === 'forward') { promptBulkForward(claims); return; }
+  if (action === 'internal') { promptBulkInternal(claims); return; }
+}
+
+/** What a claim needs to be sent back to the server as part of a batch. */
+function bulkTarget(c) {
+  return { claimId: c.claimId, rowVersion: c.rowVersion };
+}
+
+/**
+ * Says what happened when only part of a batch went through.
+ *
+ * The ones that worked stay worked, so the message has to name the ones that
+ * did not — a toast reading "12 claims returned" over a batch of fifteen is
+ * how three claims go missing.
+ */
+function reportBulk(result, verb) {
+  const done = (result && result.done) || [];
+  const failed = (result && result.failed) || [];
+  if (!failed.length) {
+    toast(done.length + ' claim' + (done.length === 1 ? '' : 's') + ' ' + verb + '.', 'ok');
+    return;
+  }
+  toast(done.length + ' of ' + (done.length + failed.length) + ' ' + verb + '. ' +
+    failed.map(function (f) { return f.claimId + ' — ' + f.error; }).join('; '),
+    done.length ? 'err' : 'err');
+}
+
+function promptBulkReturn(claims) {
+  openModal({
+    title: 'Return ' + claims.length + ' claim' + (claims.length === 1 ? '' : 's'),
+    size: 'narrow',
+    body: '<p class="tiny">' + claims.map(function (c) {
+        return '<span class="mono">' + h(c.claimId) + '</span>';
+      }).join(' · ') + '</p>' +
+      '<label class="field"><span>Reason <b class="req">*</b></span>' +
+      '<textarea id="reason" placeholder="What do the requesters need to correct?"></textarea></label>' +
+      '<p class="tiny">The same reason goes to every one of them, each with a link back ' +
+        'to its own claim.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Return claims', primary: true, onClick: function (close) {
+        const reason = el('reason').value.trim();
+        if (!reason) { toast('Please give a reason.', 'err'); return; }
+        api('claims.bulkReturn', { claims: claims.map(bulkTarget), reason: reason })
+          .then(function (r) {
+            close(); S.pick = {}; reportBulk(r, 'returned'); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/**
+ * A work order number belongs to one claim, so a batch asks for one apiece
+ * rather than putting the same reference on all of them. The ones already
+ * carrying a number arrive filled in.
+ */
+function promptBulkForward(claims) {
+  openModal({
+    title: 'Forward ' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') +
+      ' to the principal',
+    body: claims.map(function (c) {
+        return '<label class="field"><span><span class="mono">' + h(c.claimId) + '</span> · ' +
+          h(c.customerName) + ' · <span class="mono">' + h(c.serialNumber) + '</span></span>' +
+          '<input type="text" data-wo="' + h(c.claimId) + '" value="' + h(c.workOrderNo || '') +
+          '" placeholder="Work order number"></label>';
+      }).join('') +
+      '<p class="tiny">The principals see these immediately. The notification goes out with the ' +
+        'daily digest at 17:00 WIB, or straight away using “Send Digest Now”.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Forward', primary: true, onClick: function (close) {
+        const targets = [];
+        let missing = 0;
+        claims.forEach(function (c) {
+          const box = el('modalHost').querySelector('[data-wo="' + c.claimId + '"]');
+          const wo = box ? box.value.trim() : '';
+          if (!wo) { missing++; return; }
+          targets.push({ claimId: c.claimId, rowVersion: c.rowVersion, workOrderNo: wo });
+        });
+        if (missing) {
+          toast(missing + ' claim' + (missing === 1 ? ' has' : 's have') +
+            ' no work order number yet.', 'err');
+          return;
+        }
+        api('claims.bulkForward', { claims: targets })
+          .then(function (r) {
+            close(); S.pick = {}; reportBulk(r, 'forwarded'); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+function promptBulkInternal(claims) {
+  openModal({
+    title: 'Process ' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') +
+      ' as internal warranty',
+    size: 'narrow',
+    body: '<p class="tiny">' + claims.map(function (c) {
+        return '<span class="mono">' + h(c.claimId) + '</span>';
+      }).join(' · ') + '</p>' +
+      '<p>These units are outside principal warranty, so the principal supplies nothing. ' +
+        'They move to internal verification, where the parts are decided here.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Move to internal verification', primary: true, onClick: function (close) {
+        api('claims.bulkInternal', { claims: claims.map(bulkTarget) })
+          .then(function (r) {
+            close(); S.pick = {}; reportBulk(r, 'moved to internal verification'); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
 }
 
 /* ======================================================== saved views */
@@ -1438,7 +1699,16 @@ function claimTable() {
   const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
 
   const showPrincipal = s.role === ROLE.ADMIN;
-  const head = ['<th class="caret"></th>', '<th>Claim</th>', '<th>Date</th>'];
+  const showPick = canPickClaims();
+  const head = [];
+  if (showPick) {
+    // Ticks every claim on the page, not every claim the filter matched: what
+    // is off screen is not what anybody looked at before ticking.
+    head.push('<th class="pick"><input type="checkbox" id="pickAll"' +
+      (S.rows.length && S.rows.every(function (c) { return S.pick[c.claimId]; })
+        ? ' checked' : '') + ' aria-label="Select every claim on this page"></th>');
+  }
+  head.push('<th class="caret"></th>', '<th>Claim</th>', '<th>Date</th>');
   if (showPrincipal) head.push('<th>Principal</th>');
   if (showCustomer) head.push('<th>Customer</th>');
   head.push('<th>Serial number</th>', '<th>Parts</th>');
@@ -1450,7 +1720,12 @@ function claimTable() {
 
   const claimRows = function (c, underRef) {
     const open = !S.collapsed[c.claimId];
-    const cells = [
+    const cells = [];
+    if (showPick) {
+      cells.push('<td class="pick c-pick"><input type="checkbox" data-pick="' + h(c.claimId) +
+        '"' + (S.pick[c.claimId] ? ' checked' : '') + ' aria-label="Select this claim"></td>');
+    }
+    cells.push(
       // Each cell says what it is, not merely where it sits. Which columns a
       // role gets varies, so a card layout that placed cells by position would
       // reshuffle itself between roles.
@@ -1467,7 +1742,7 @@ function claimTable() {
           : '<span class="mono">' + h(c.claimId) + '</span>' +
             '<span class="mono tiny">not submitted</span>')) + '</td>',
       '<td class="c-date">' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
-    ];
+    );
     if (showPrincipal) {
       cells.push('<td class="c-principal' + (c.principal ? '' : ' dimmer') + '">' +
         h(c.principal || 'unattributed') + '</td>');
@@ -1491,13 +1766,18 @@ function claimTable() {
     );
 
     const rowHtml = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
+    // The elbow sits under the caret, so a tick column in front of it pushes
+    // the whole sub-row across by one.
+    const lead = showPick ? '<td></td><td></td>' : '<td></td>';
+    const indent = showPick ? 2 : 1;
     if (open && !c.items.length) {
-      rowHtml.push('<tr class="sub"><td></td><td class="part dimmer" colspan="' + (head.length - 1) +
-        '">No spare part on this claim yet</td></tr>');
+      rowHtml.push('<tr class="sub">' + lead + '<td class="part dimmer" colspan="' +
+        (head.length - indent) + '">No spare part on this claim yet</td></tr>');
     }
     if (open) {
       c.items.forEach(function (i) {
-        rowHtml.push('<tr class="sub"><td></td><td class="part" colspan="' + (head.length - 4) + '">' +
+        rowHtml.push('<tr class="sub">' + lead + '<td class="part" colspan="' +
+          (head.length - indent - 3) + '">' +
           h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td>' +
           '<td class="stack">' + itemPill(i.itemStatus) +
           (i.advanceIssued && seesAdvanceIssue()
@@ -1564,6 +1844,28 @@ function wireClaimsToolbar() {
   });
   el('view').querySelectorAll('[data-claim]').forEach(function (tr) {
     tr.addEventListener('click', function () { openClaimPanel(tr.dataset.claim); });
+  });
+  el('view').querySelectorAll('[data-pick]').forEach(function (box) {
+    // The row opens the claim when clicked; ticking it must not, or every tick
+    // would be followed by a panel nobody asked for.
+    box.addEventListener('click', function (e) { e.stopPropagation(); });
+    box.addEventListener('change', function () {
+      if (this.checked) S.pick[this.dataset.pick] = true;
+      else delete S.pick[this.dataset.pick];
+      const all = el('pickAll');
+      if (all) all.checked = S.rows.length &&
+        S.rows.every(function (c) { return S.pick[c.claimId]; });
+      renderClaimBar();
+    });
+  });
+  const pickAll = el('pickAll');
+  if (pickAll) pickAll.addEventListener('change', function () {
+    const on = this.checked;
+    S.rows.forEach(function (c) {
+      if (on) S.pick[c.claimId] = true; else delete S.pick[c.claimId];
+    });
+    el('view').querySelectorAll('[data-pick]').forEach(function (b) { b.checked = on; });
+    renderClaimBar();
   });
   el('view').querySelectorAll('[data-clear]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -3459,7 +3761,17 @@ function selectedTrack() {
 }
 
 function bulkDecision(decision) {
-  const ids = Object.keys(S.selection);
+  decideModal(Object.keys(S.selection), decision, function () {
+    S.selection = {};
+    S.page === 'orders' ? loadOrders() : loadBatches();
+  });
+}
+
+/**
+ * One decision over a list of parts, wherever the list came from — parts ticked
+ * on Orders, or every open part under the claims ticked on the claim list.
+ */
+function decideModal(ids, decision, after) {
   openModal({
     title: decision === 'approve' ? 'Approve selected parts' : 'Reject selected parts',
     size: 'narrow',
@@ -3474,10 +3786,8 @@ function bulkDecision(decision) {
           const reason = el('reason').value.trim();
           if (decision === 'reject' && !reason) { toast('A rejection must state its reason.', 'err'); return; }
           api('claims.decide', { itemIds: ids, decision: decision, reason: reason })
-            .then(function () {
-              close(); S.selection = {}; toast('Decision recorded.', 'ok');
-              S.page === 'orders' ? loadOrders() : loadBatches();
-            }).catch(fail);
+            .then(function () { close(); toast('Decision recorded.', 'ok'); after(); })
+            .catch(fail);
         } }
     ]
   });

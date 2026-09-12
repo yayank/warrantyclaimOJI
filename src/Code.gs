@@ -195,6 +195,11 @@ function route_(session, action, payload) {
     case 'email.setEnabled': return setEmailEnabled_(session, payload.enabled);
     case 'email.digestNow': return sendDigestNow_(session);
 
+    /* the same move over everything ticked on the claim list */
+    case 'claims.bulkReturn': return returnClaims_(session, payload);
+    case 'claims.bulkForward': return forwardClaims_(session, payload);
+    case 'claims.bulkInternal': return startInternalVerifications_(session, payload);
+
     /* saved filter combinations, per person */
     case 'views.list': return listViews_(session);
     case 'views.save': return saveView_(session, payload);

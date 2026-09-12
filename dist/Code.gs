@@ -3063,6 +3063,95 @@ function uploadAttachment_(session, payload) {
   });
 }
 
+/* --------------------------------------------------------- in a batch */
+
+/*
+ * The same three moves, applied to what somebody ticked on the claim list.
+ *
+ * One claim at a time from the browser would be one round trip each, and a
+ * morning's forwarding would take a minute of watching a progress bar. So the
+ * loop runs here, inside one execution.
+ *
+ * A claim that will not move does not stop the ones after it. Half a batch
+ * applied with no record of which half is the worst outcome available, so each
+ * failure is caught, named, and handed back with the claim it belongs to —
+ * the screen reports them, and the ones that worked stay worked.
+ */
+
+/** A page of the claim list is the most that can be ticked, so it is the most that can be sent. */
+const BULK_MAX = CLAIM_PAGE_MAX;
+
+function bulkTargets_(payload) {
+  const claims = (payload || {}).claims;
+  if (!Array.isArray(claims) || !claims.length) throw new Error('No claims were selected.');
+  if (claims.length > BULK_MAX) {
+    throw new Error('That is ' + claims.length + ' claims at once; ' + BULK_MAX + ' is the most.');
+  }
+  return claims;
+}
+
+/**
+ * Runs one move over every selected claim, collecting what failed rather than
+ * stopping at it.
+ */
+function bulkApply_(payload, move) {
+  const done = [];
+  const failed = [];
+  bulkTargets_(payload).forEach(function (target) {
+    const claimId = String((target || {}).claimId || '');
+    if (!claimId) return;
+    try {
+      move(target);
+      done.push(claimId);
+    } catch (e) {
+      // STALE carries no message of its own: it means somebody else moved this
+      // claim while the list was on screen, and saying so is more use than the
+      // word.
+      const why = e && e.stale
+        ? 'Somebody else changed this claim — reload and try again.'
+        : String((e && e.message) || e);
+      failed.push({ claimId: claimId, error: why });
+    }
+  });
+  return { done: done, failed: failed };
+}
+
+function returnClaims_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const reason = String((payload || {}).reason || '').trim();
+  if (!reason) throw new Error('Please say why the claims are being returned.');
+
+  return bulkApply_(payload, function (target) {
+    returnOneClaim_(session, {
+      claimId: target.claimId, rowVersion: target.rowVersion, reason: reason
+    });
+  });
+}
+
+function forwardClaims_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+
+  // Each claim carries its own work order number; there is no one number for a
+  // batch, and inventing one would put the wrong reference on every claim.
+  return bulkApply_(payload, function (target) {
+    forwardOneClaim_(session, {
+      claimId: target.claimId, rowVersion: target.rowVersion,
+      workOrderNo: target.workOrderNo
+    });
+  });
+}
+
+function startInternalVerifications_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+
+  return bulkApply_(payload, function (target) {
+    startOneInternal_(session, {
+      claimId: target.claimId, rowVersion: target.rowVersion,
+      workOrderNo: target.workOrderNo
+    });
+  });
+}
+
 /* ----------------------------------------------------------- transitions */
 
 function submitClaim_(session, payload) {
@@ -3230,6 +3319,18 @@ function mergeIntoClaim_(session, claim, target, items) {
 }
 
 function returnClaim_(session, payload) {
+  return getClaim_(session, returnOneClaim_(session, payload));
+}
+
+/**
+ * The move itself, without building the panel afterwards.
+ *
+ * Every transition below is split this way. Answering with getClaim_ is right
+ * for one claim — the panel redraws from it — and wrong for fifty: it reads the
+ * items, the attachments and the whole audit trail per claim, which is most of
+ * an execution's budget spent on an answer nobody looks at.
+ */
+function returnOneClaim_(session, payload) {
   requireRole_(session, [ROLE.ADMIN]);
   const reason = String(payload.reason || '').trim();
   if (!reason) throw new Error('Please say why the claim is being returned.');
@@ -3268,7 +3369,7 @@ function returnClaim_(session, payload) {
       data: data
     });
 
-    return getClaim_(session, claim.ClaimID);
+    return claim.ClaimID;
   });
 }
 
@@ -3308,6 +3409,10 @@ function overrideWarranty_(session, payload) {
 }
 
 function forwardToPrincipal_(session, payload) {
+  return getClaim_(session, forwardOneClaim_(session, payload));
+}
+
+function forwardOneClaim_(session, payload) {
   requireRole_(session, [ROLE.ADMIN]);
 
   return withLock_(function () {
@@ -3348,7 +3453,7 @@ function forwardToPrincipal_(session, payload) {
 
     // The principal sees this immediately in the portal; only the notification
     // waits for the evening digest.
-    return getClaim_(session, claim.ClaimID);
+    return claim.ClaimID;
   });
 }
 
@@ -3381,6 +3486,10 @@ function withdrawFromPrincipal_(session, payload) {
 
 /** Moves an out-of-warranty claim onto the internal track. */
 function startInternalVerification_(session, payload) {
+  return getClaim_(session, startOneInternal_(session, payload));
+}
+
+function startOneInternal_(session, payload) {
   requireRole_(session, [ROLE.ADMIN]);
 
   return withLock_(function () {
@@ -3399,7 +3508,7 @@ function startInternalVerification_(session, payload) {
       claimId: claim.ClaimID, field: 'Status', oldValue: claim.Status,
       newValue: STATUS.INTERNAL, isTest: isTrue_(claim.IsTest)
     });
-    return getClaim_(session, claim.ClaimID);
+    return claim.ClaimID;
   });
 }
 
@@ -5405,6 +5514,11 @@ function route_(session, action, payload) {
     case 'email.log': return listEmailLog_(session, payload);
     case 'email.setEnabled': return setEmailEnabled_(session, payload.enabled);
     case 'email.digestNow': return sendDigestNow_(session);
+
+    /* the same move over everything ticked on the claim list */
+    case 'claims.bulkReturn': return returnClaims_(session, payload);
+    case 'claims.bulkForward': return forwardClaims_(session, payload);
+    case 'claims.bulkInternal': return startInternalVerifications_(session, payload);
 
     /* saved filter combinations, per person */
     case 'views.list': return listViews_(session);

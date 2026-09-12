@@ -192,6 +192,9 @@ table.data th{text-align:left;font-size:10.5px;letter-spacing:.09em;text-transfo
   white-space:nowrap;background:var(--surface-2)}
 table.data td{padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
 table.data tr.click{cursor:pointer}
+/* The tick column carries a box and nothing else, so it takes the width of one. */
+table.data th.pick,table.data td.pick{width:1%;padding-right:0;white-space:nowrap}
+table.data td.pick input,table.data th.pick input{cursor:pointer;margin:0}
 table.data tr.click:hover td{background:var(--surface-2)}
 table.data tr.sub td{background:var(--surface-2);font-size:12.5px}
 table.data tr.sub td.part{padding-left:26px;position:relative}
@@ -242,6 +245,9 @@ table.data tr.ref-header+tr.click td{border-top:0}
     padding:11px 12px;border-bottom:1px solid var(--line-soft)}
   table.data tr.click td.stack{display:flex}
 
+  /* First on the card, before the caret: it is what the reader is aiming at
+     when they are picking claims out, and a box halfway down a card is missed. */
+  .c-pick{order:-1;width:auto;padding-top:2px}
   .c-caret{order:0;width:auto;padding-top:2px}
   .c-claim{order:1;flex:1 1 auto;min-width:0}
   /* Pushed to the far end of the first line, and reading right to left there. */
@@ -259,6 +265,7 @@ table.data tr.ref-header+tr.click td{border-top:0}
   /* The spacer cells that align a part row under a table have nothing to
      align to once the table is a stack of cards. */
   table.data tr.sub td:empty{display:none}
+  /* …and the second spacer a tick column adds is one of them. */
   table.data tr.sub td.part{flex:1 1 auto;padding-left:0}
   table.data tr.sub td.part::before{display:none}
   table.data tr.sub td.stack{display:flex;margin-left:auto;align-items:flex-end;text-align:right}

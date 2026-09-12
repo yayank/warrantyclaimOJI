@@ -278,7 +278,42 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## F · Aksi massal dari daftar klaim *(opsional)*
+## F · Aksi massal dari daftar klaim — ✅ SELESAI (12 Sep 2026)
+
+> Bilah pilihan pada tabel klaim, mengikuti aturan bagian 18: **satu status,
+> satu langkah**. Pilihan yang mencakup dua status tidak menawarkan apa pun dan
+> **menyebutkan alasannya** — bilah yang sekadar kosong terbaca sebagai layar
+> rusak. Satu penghalusan yang tidak disebut prompt: pada status `Submitted`,
+> *Return to Requester* adalah langkah yang sama untuk kedua jenis garansi, jadi
+> pilihan yang mencampur keduanya tetap boleh dikembalikan; yang ditahan hanya
+> jalan ke depannya, dengan keterangannya.
+>
+> Kotak centang hanya muncul untuk peran yang punya langkah — Administrator dan
+> Principal. Menampilkannya pada peran yang tidak pernah bisa memakainya hanya
+> menambah kolom yang tidak berguna.
+>
+> Tiga endpoint batch di server (`claims.bulkReturn` / `bulkForward` /
+> `bulkInternal`), bukan perulangan di browser: satu klaim per perjalanan akan
+> membuat penerusan satu pagi jadi semenit menonton bilah kemajuan. **Klaim yang
+> gagal tidak menghentikan sisanya** — kegagalannya ditangkap, disebut namanya,
+> dan dilaporkan bersama klaimnya. Yang sudah berhasil tetap berhasil.
+>
+> `returnClaim_`, `forwardToPrincipal_` dan `startInternalVerification_` dipecah:
+> intinya mengembalikan claim id, pembungkusnya memanggil `getClaim_`. Menjawab
+> dengan `getClaim_` benar untuk satu klaim (panelnya digambar ulang darinya) dan
+> boros untuk lima puluh — ia membaca item, lampiran, dan seluruh jejak audit per
+> klaim. Terukur: 39 pembacaan untuk satu batch berisi lima klaim, versus 54 bila
+> dijalankan satu per satu.
+>
+> Nomor work order milik satu klaim, jadi batch penerusan meminta satu nomor per
+> klaim — bukan satu nomor untuk semuanya. `tools/verify-bulk.js`, 69 pemeriksaan,
+> terbukti menangkap sepuluh bug.
+>
+> Satu hal yang **tidak** diubah dan patut diketahui: `returnClaim_` mengirim satu
+> email per klaim, jadi mengembalikan lima klaim milik satu requester mengirim
+> lima pesan. Sama seperti bila dikerjakan satu per satu hari ini; menggabungkannya
+> butuh template baru dan itu di luar butir ini.
+
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 >
