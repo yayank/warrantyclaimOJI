@@ -49,7 +49,7 @@ for (let i = 0; i < TOTAL; i++) {
     CustomerID: 'C' + (i % 7), CustomerName: 'RSUD Kota ' + (i % 7),
     SerialNumber: 'XT24' + (100000 + i), ProductName: 'Sansin SWS-4000',
     Principal: 'Sansin', WarrantyType: 'Principal Warranty',
-    Status: i % 3 === 0 ? 'Closed' : 'In Fulfilment',
+    Status: i % 4 === 0 ? 'Draft' : i % 3 === 0 ? 'Closed' : 'In Fulfilment',
     RequesterEmail: 'rian@rs.co.id', RequesterName: 'Rian',
     CreatedAt: '2026-08-' + day + 'T09:00:00',
     SubmittedAt: '2026-08-' + day + 'T09:0' + (i % 10) + ':00'
@@ -180,6 +180,20 @@ check('a filtered total is the filtered set, not everything',
   closed.total + ' of ' + TOTAL);
 check('and every row on the page satisfies the filter',
   closed.rows.every(function (r) { return r.status === 'Closed'; }));
+
+// The badge answers "how much is waiting on me", which does not change because
+// somebody narrowed the list they are looking at. Counting the filtered rows
+// would make it drop to zero the moment a filter excluded the drafts.
+check('the fixture has claims that need action, or the next check proves nothing',
+  everything.counts.action > 0, 'action ' + everything.counts.action);
+
+check('the badge ignores the filter',
+  closed.counts.action === everything.counts.action,
+  'filtered ' + closed.counts.action + ' vs ' + everything.counts.action);
+
+check('and ignores the page',
+  listClaims_(REQ, { tab: 'all', limit: 5, offset: 300 }).counts.action ===
+  everything.counts.action);
 
 /* ------------------------------------------------ the export is never a page */
 

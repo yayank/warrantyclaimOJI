@@ -61,6 +61,16 @@ button{font:inherit}
 .tiny{font-size:11.5px;color:var(--ink-3);line-height:1.5}
 .spacer{margin-left:auto}
 .stack{display:flex;flex-direction:column;gap:3px;min-width:0}
+/*
+ * A <td> that becomes a flex container stops being a table cell: it sizes to
+ * its own content instead of the row, so its bottom border stops short of the
+ * row it belongs to — measured at 39px against its neighbours' 64px. Inside a
+ * table the cell stays a cell and its children stack as blocks, each still
+ * hugging its own content so a pill does not stretch the width of the column.
+ */
+table.data td.stack{display:table-cell}
+table.data td.stack>*{display:block;width:-moz-fit-content;width:fit-content;max-width:100%}
+table.data td.stack>*+*{margin-top:3px}
 .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .req{color:var(--crit)}
 

@@ -45,11 +45,11 @@ const script = fs.readFileSync(path.join(__dirname, '..', 'src', 'Script.html'),
   .replace(/<\/script>\s*$/, '');
 vm.runInContext(script +
   '\nglobalThis.__api = { claimTable, groupClaims_, customerFilter, applyDeepLink, ' +
-  'COMBO, STATUS, ITEM, ROLE, WARRANTY, S };',
+  'COMBO, groupFilter, STATUS, ITEM, ROLE, WARRANTY, S };',
   sandbox, { filename: 'client' });
 
 const { claimTable, groupClaims_, customerFilter, applyDeepLink,
-  COMBO, STATUS, ITEM, ROLE, WARRANTY, S } = sandbox.__api;
+  COMBO, groupFilter, STATUS, ITEM, ROLE, WARRANTY, S } = sandbox.__api;
 
 /* --------------------------------------------------------------- fixtures */
 
@@ -279,8 +279,8 @@ check('and says so rather than leaving a gap',
 
 /* ------------------------------- the reference leads, the claim id follows */
 
-function claimCell(rows, tab) {
-  return render(ROLE.REQUESTER, tab || 'all', rows)
+function claimCell(rows, tab, group) {
+  return render(ROLE.REQUESTER, tab || 'all', rows, {}, group)
     .filter(function (e) { return e.kind === 'claim'; })[0].html
     .match(/<td class="stack">([\s\S]*?)<\/td>/)[1]
     .replace(/<[^>]*>/g, '|').replace(/\|+/g, '|').replace(/^\||\|$/g, '');
@@ -370,6 +370,45 @@ check('the second level reaches every role',
 check('and every tab',
   render(ROLE.REQUESTER, 'progress', shared)
     .filter(function (e) { return e.kind === 'ref'; }).length === 2);
+
+/* ------------------------------------------------- and the cut turned off */
+
+const flat = render(ROLE.REQUESTER, 'all', mixed, {}, 'none');
+
+check('no grouping draws no headings of either kind',
+  flat.every(function (e) { return e.kind !== 'head' && e.kind !== 'ref'; }));
+
+check('and still every claim',
+  flat.filter(function (e) { return e.kind === 'claim'; }).length === mixed.length,
+  flat.filter(function (e) { return e.kind === 'claim'; }).length + ' of ' + mixed.length);
+
+check('with the parts still under their own claim',
+  flat[0].kind === 'claim' && flat[1].kind === 'sub');
+
+// Flat, no heading carries the reference, so the row has to.
+check('the row carries the reference again, with its claim id beneath',
+  claimCell([claim(STATUS.CLOSED, { refNo: 'CWT310826', claimId: 'TEST-0020' })], 'all', 'none') ===
+  'CWT310826|TEST-0020',
+  claimCell([claim(STATUS.CLOSED, { refNo: 'CWT310826', claimId: 'TEST-0020' })], 'all', 'none'));
+
+check('and a claim with no reference leads with its own id',
+  claimCell([claim(STATUS.DRAFT, { refNo: '', claimId: 'TEST-0021' })], 'all', 'none') ===
+  'TEST-0021|not submitted');
+
+// Array.map hands its callback an index; passing claimRows to it bare would
+// make every row after the first read that index as "under a heading".
+check('every row of a flat list carries its reference, not just the first',
+  render(ROLE.REQUESTER, 'all', [
+    claim(STATUS.CLOSED, { refNo: 'CW1', claimId: 'A1' }),
+    claim(STATUS.CLOSED, { refNo: 'CW2', claimId: 'A2' }),
+    claim(STATUS.CLOSED, { refNo: 'CW3', claimId: 'A3' })
+  ], {}, 'none').filter(function (e) { return e.kind === 'claim'; })
+    .every(function (e) { return /CW\d/.test(e.html); }));
+
+check('the group control offers all three cuts',
+  ['status', 'customer', 'none'].every(function (v) {
+    return groupFilter().indexOf('value="' + v + '"') !== -1;
+  }), groupFilter());
 
 /* --------------------------------------------- which tab opens, and for whom */
 

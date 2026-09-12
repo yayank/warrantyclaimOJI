@@ -75,7 +75,8 @@ vm.runInContext(
   sandbox, { filename: 'advance' }
 );
 
-const { advanceQueue_, tabCounts_, STATUS, ITEM_STATUS, WARRANTY_TYPE, ROLE } = sandbox.__api;
+const { advanceQueue_, tabCounts_, shapeClaim_, STATUS, ITEM_STATUS, WARRANTY_TYPE, ROLE } =
+  sandbox.__api;
 const admin = { email: 'admin@oneject.co.id', role: ROLE.ADMIN, isTester: false };
 
 let pass = 0;
@@ -179,15 +180,19 @@ check('and which claim it belongs to, to open it',
 
 /* -------------------------------------------- the count behind the badge */
 
+// tabCounts_ takes rows that listClaims_ has already shaped, rather than
+// shaping every claim a second time to count them.
 const byClaim = {};
 ITEMS.forEach(function (i) { (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i); });
+const shaped = CLAIMS.map(function (c) { return shapeClaim_(c, byClaim[c.ClaimID] || []); });
+
 check('the menu badge counts exactly what the queue lists',
-  tabCounts_(admin, CLAIMS, byClaim).advance === waiting().length,
-  String(tabCounts_(admin, CLAIMS, byClaim).advance));
+  tabCounts_(admin, shaped).advance === waiting().length,
+  String(tabCounts_(admin, shaped).advance));
 
 check('and nobody but the administrator is counting it',
   tabCounts_({ email: 'rian@rs.co.id', role: ROLE.REQUESTER, isTester: false },
-    CLAIMS, byClaim).advance === 0);
+    shaped).advance === 0);
 
 /* -------------------------------------------------------------- report */
 

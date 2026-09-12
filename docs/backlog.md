@@ -22,7 +22,13 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## A · Tiga perbaikan cepat
+## A · Tiga perbaikan cepat — ✅ SELESAI (commit berikut)
+
+> Catatan koreksi: prompt di bawah menyatakan `verify-paging.js` sudah punya
+> pemeriksaan bahwa angka tab tidak ikut tersaring. **Itu keliru** — yang ada
+> hanya membandingkan dua panggilan tanpa filter, jadi tidak bisa menangkapnya.
+> Pemeriksaannya ditambahkan saat mengerjakan ini.
+
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Tiga perbaikan
 > kecil yang tidak saling bergantung — boleh satu commit atau tiga, pilih yang

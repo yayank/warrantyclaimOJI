@@ -2103,7 +2103,12 @@ function listClaims_(session, filter) {
     (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i);
   });
 
-  let rows = claims.map(function (c) { return shapeClaim_(c, byClaim[c.ClaimID] || []); });
+  // Shaped once. The filters below narrow `rows`, but the tab badges count
+  // everything the reader can see rather than what is left after filtering, so
+  // the unfiltered set is kept — tabCounts_ used to shape all of them a second
+  // time to get it back.
+  const shaped = claims.map(function (c) { return shapeClaim_(c, byClaim[c.ClaimID] || []); });
+  let rows = shaped;
 
   if (f.search) {
     const q = String(f.search).toLowerCase();
@@ -2150,7 +2155,7 @@ function listClaims_(session, filter) {
     page = rows.slice(offset, offset + limit);
   }
 
-  return { rows: page, total: total, counts: tabCounts_(session, claims, byClaim) };
+  return { rows: page, total: total, counts: tabCounts_(session, shaped) };
 }
 
 function matchesTab_(session, row, tab) {
@@ -2234,11 +2239,11 @@ function needsAction_(session, row) {
   }
 }
 
-function tabCounts_(session, claims, byClaim) {
+/** Over every claim the reader can see — never the page, never the filter. */
+function tabCounts_(session, rows) {
   let action = 0;
   let advance = 0;
-  claims.forEach(function (c) {
-    const row = shapeClaim_(c, byClaim[c.ClaimID] || []);
+  rows.forEach(function (row) {
     if (needsAction_(session, row)) action++;
     if (session.role === ROLE.ADMIN) {
       row.items.forEach(function (i) { if (awaitingAdvanceIssue_(row, i)) advance++; });

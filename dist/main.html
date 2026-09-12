@@ -72,6 +72,16 @@ button{font:inherit}
 .tiny{font-size:11.5px;color:var(--ink-3);line-height:1.5}
 .spacer{margin-left:auto}
 .stack{display:flex;flex-direction:column;gap:3px;min-width:0}
+/*
+ * A <td> that becomes a flex container stops being a table cell: it sizes to
+ * its own content instead of the row, so its bottom border stops short of the
+ * row it belongs to — measured at 39px against its neighbours' 64px. Inside a
+ * table the cell stays a cell and its children stack as blocks, each still
+ * hugging its own content so a pill does not stretch the width of the column.
+ */
+table.data td.stack{display:table-cell}
+table.data td.stack>*{display:block;width:-moz-fit-content;width:fit-content;max-width:100%}
+table.data td.stack>*+*{margin-top:3px}
 .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .req{color:var(--crit)}
 
@@ -1054,6 +1064,7 @@ function groupFilter() {
   return '<select id="groupBy" style="width:auto;min-width:150px">' +
     '<option value="status"' + (S.group === 'status' ? ' selected' : '') + '>Group by status</option>' +
     '<option value="customer"' + (S.group === 'customer' ? ' selected' : '') + '>Group by customer</option>' +
+    '<option value="none"' + (S.group === 'none' ? ' selected' : '') + '>No grouping</option>' +
     '</select>';
 }
 
@@ -1096,6 +1107,9 @@ function chip(label, value, key) {
  * rows under it — so the table draws one thing and only the heading differs.
  */
 function groupClaims_(rows, by) {
+  // null, not an empty list: no grouping is a flat list, which is a different
+  // thing from a grouping that happened to find nothing.
+  if (by === 'none') return null;
   return by === 'customer' ? groupByCustomer_(rows) : groupByStatus_(rows);
 }
 
@@ -1187,13 +1201,21 @@ function claimTable() {
 
   const groups = groupClaims_(S.rows, S.group);
 
-  const claimRows = function (c) {
+  const claimRows = function (c, underRef) {
     const open = !S.collapsed[c.claimId];
     const cells = [
       '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
-      // The reference heading above already carries it, so the row is only its
-      // own id.
-      '<td class="stack"><span class="mono">' + h(c.claimId) + '</span></td>',
+      // Under a reference heading the row is only its own id — the heading
+      // above already carries the reference. Flat, nothing carries it but the
+      // row, so both lines come back; and a claim with no reference at all
+      // leads with the only name it has.
+      '<td class="stack">' + (underRef
+        ? '<span class="mono">' + h(c.claimId) + '</span>'
+        : (c.refNo
+          ? '<span class="mono">' + h(c.refNo) + '</span>' +
+            '<span class="mono tiny">' + h(c.claimId) + '</span>'
+          : '<span class="mono">' + h(c.claimId) + '</span>' +
+            '<span class="mono tiny">not submitted</span>')) + '</td>',
       '<td>' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
     ];
     if (showPrincipal) {
@@ -1242,18 +1264,23 @@ function claimTable() {
   // as one in small caps.
   const headClass = 'group-header' + (S.group === 'customer' ? ' plain' : '');
 
-  const body = groups.map(function (g) {
-    return '<tr class="' + headClass + '"><td colspan="' + head.length + '">' +
-      h(g.label) + '<span class="group-n">' + g.rows.length + '</span></td></tr>' +
-      groupByRef_(g.rows).map(function (r) {
-        return '<tr class="ref-header"><td colspan="' + head.length + '">' +
-          (r.refNo
-            ? '<span class="mono">' + h(r.refNo) + '</span>'
-            : '<span class="dimmer">No reference yet</span>') +
-          '<span class="group-n">' + r.rows.length + '</span></td></tr>' +
-          r.rows.map(claimRows).join('');
-      }).join('');
-  }).join('');
+  // Array.map hands its callback an index, so claimRows is never passed to it
+  // bare: every row after the first would read that index as `underRef` and
+  // drop its own reference.
+  const body = groups
+    ? groups.map(function (g) {
+        return '<tr class="' + headClass + '"><td colspan="' + head.length + '">' +
+          h(g.label) + '<span class="group-n">' + g.rows.length + '</span></td></tr>' +
+          groupByRef_(g.rows).map(function (r) {
+            return '<tr class="ref-header"><td colspan="' + head.length + '">' +
+              (r.refNo
+                ? '<span class="mono">' + h(r.refNo) + '</span>'
+                : '<span class="dimmer">No reference yet</span>') +
+              '<span class="group-n">' + r.rows.length + '</span></td></tr>' +
+              r.rows.map(function (c) { return claimRows(c, true); }).join('');
+          }).join('');
+      }).join('')
+    : S.rows.map(function (c) { return claimRows(c, false); }).join('');
 
   return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
     '</tr></thead><tbody>' + body + '</tbody></table></div>';
