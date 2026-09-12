@@ -1,7 +1,8 @@
 # Rancangan model garansi
 
-Status: **usulan, belum dikerjakan.** Ditulis 12 September 2026 untuk diperiksa
-lebih dulu, sebelum satu baris pun ditulis di `src/`.
+Status: **disetujui, belum dikerjakan.** Ditulis 12 September 2026, diperiksa
+dan diputuskan pemilik repo pada hari yang sama. Pemecahannya jadi prompt ada
+di `docs/backlog.md` butir H sampai N.
 
 Dasar faktanya ada di `docs/business-context.md`. Berkas ini menjawab satu
 pertanyaan lanjutan: **bentuk data seperti apa yang bisa menjawab "apakah unit
@@ -154,7 +155,7 @@ berhasil dinegosiasikan ke principal cuma 6.
 
 ### Kontrak: per unit dulu, sheet kontrak belakangan
 
-Usulan saya: **jangan buat sheet kontrak sekarang.** Simpan penimpaan sebagai
+**Diputuskan: per unit + impor massal.** Tidak ada sheet kontrak sekarang. Simpan penimpaan sebagai
 `ExtendedMonths*` + `ContractRef` per unit, dan sediakan impor massal.
 
 Alasannya: satu tender 40 unit memang berarti 40 baris disunting, tapi impor
@@ -222,7 +223,15 @@ Urutan presedensi, dari yang menang:
 - **Daftar klaim** dapat filter `CostBorne` dan kolom garansi customer.
 - **Layar Administrator** dapat antrean `UnitRequests`.
 - **Principal** melihat kolom principal saja. Tanggal garansi kita ke pembeli
-  bukan urusannya — usulan saya, mohon dikoreksi kalau keliru.
+  dan penanda `CostBorne` **tidak boleh sampai ke payload-nya sama sekali** —
+  bukan sekadar disembunyikan CSS. Diputuskan 12 Sep 2026.
+- **Layar unit** untuk Administrator: cari, sunting per unit, daftarkan unit
+  baru, impor massal. Tervalidasi dan tercatat di `AuditLog`.
+- **Layar "unit belum lengkap"**: unit beserta apa yang kurang, bisa disaring
+  per distributor dan per model. Ini yang membuat pengisian data punya ujung.
+- **Layar aturan garansi** untuk menyunting `WarrantyRules` dari portal, dengan
+  validasi dan jejak audit. Menyunting langsung di Sheets ditolak: satu salah
+  ketik bisa mengubah jawaban garansi ratusan unit tanpa jejak siapa pun.
 
 ## 8. Migrasi
 
@@ -262,12 +271,27 @@ kolomnya ada.
 - Telusur serial part rusak ke serial part pengganti.
 - SLA, downtime, laporan teknisi, pelaporan vigilance.
 
-## 11. Yang perlu Anda putuskan sebelum ini dikerjakan
+## 11. Keputusan pemilik repo, 12 September 2026
 
-1. Apakah `Material` benar-benar satu nilai per model? Kalau satu model punya
-   beberapa kode material, kunci aturannya harus diganti.
-2. Unit lama yang tidak punya tanggal BAST sama sekali — jawabannya `Manual`,
-   atau mundur ke `SellingInDate`? Usulan saya `Manual`, karena mundur diam-diam
-   ke tanggal yang salah persis kesalahan yang sedang kita perbaiki.
-3. Boleh atau tidak principal melihat garansi sisi customer?
-4. Format tanggal pada berkas impor Anda — `dd/mm/yyyy`, ISO, atau campur?
+Semua ditanyakan dan dijawab sebelum satu baris kode ditulis.
+
+| Pertanyaan | Keputusan |
+|---|---|
+| Kunci aturan garansi | **Satu model = satu `Material`.** `WarrantyRules` dikunci ke `Material`, tanpa lapis pemetaan |
+| Unit tanpa tanggal BAST | **`Manual` + sebutkan apa yang kurang.** Tidak pernah mundur diam-diam ke tanggal lain |
+| Principal melihat sisi customer | **Tidak, sama sekali.** Termasuk `CostBorne` |
+| Format tanggal impor | **`dd/mm/yyyy`.** Hari dulu, baru bulan |
+| Penimpaan kontrak | **Per unit + impor massal.** Tidak ada sheet kontrak |
+| Permintaan pendaftaran unit | **Email ke Administrator + antrean di layar** |
+| Menyunting `WarrantyRules` | **Lewat layar portal, tercatat di `AuditLog`** |
+| Merawat data unit | **Layar unit di portal + impor berkas** |
+| Unit yang datanya kurang | **Ada layarnya**, bisa disaring per distributor dan per model |
+| Menerjemahkan antarmuka | **Tidak perlu.** Antarmuka tetap Bahasa Inggris |
+
+### Kenapa `dd/mm/yyyy` perlu ditulis di sini
+
+`03/09/2025` adalah 3 September bagi pembaca Indonesia dan 9 Maret bagi
+`new Date()` di Apps Script. Setengah tahun selisihnya, dan salahnya diam.
+Impor **wajib** lewat satu fungsi `parseLocalDate_` yang membaca hari dulu dan
+**menolak** apa yang tidak berbentuk `dd/mm/yyyy` — bukan menebak, bukan
+menyerahkannya ke `new Date()`.

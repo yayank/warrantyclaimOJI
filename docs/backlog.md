@@ -6,7 +6,12 @@ apa adanya. Koordinat kode di dalamnya sudah diverifikasi pada 12 September 2026
 penghematan token yang sebenarnya.
 
 **Urutan yang disarankan:** A → B → C → D. E, F, G hanya kalau memang terasa
-kurang.
+kurang. **A–G semuanya sudah selesai.**
+
+**Gelombang kedua: H → N**, model garansi dua tingkat. Urutannya **mengikat** —
+tiap butir memakai yang dibangun butir sebelumnya. Rancangannya di
+`docs/warranty-model.md`, latar belakangnya di `docs/business-context.md`;
+**baca keduanya sebelum mengerjakan butir mana pun di gelombang ini.**
 
 **Cara menghemat token:**
 
@@ -374,6 +379,297 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 > sebagai baru.
 >
 > Penguji dibuktikan menangkap bug-nya. Suite, `dist/`, commit, push.
+
+---
+
+## H · Master produk dan aturan garansi — mesinnya saja
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Baca
+> `docs/warranty-model.md` bagian 1–3, 6 dan 11 lebih dulu.
+>
+> Hari ini `determineWarranty_` di `src/Warranty.gs` menjawab `22 bulan` untuk
+> setiap serial berawalan XT, karena `XT_WARRANTY_MONTHS = 22` di
+> `src/Config.gs` adalah satu-satunya aturan yang ada. Kenyataannya tiap model
+> punya masa garansinya sendiri, dasar hitungnya berbeda-beda per principal, dan
+> ada dua tingkat garansi. Butir ini memindahkan aturannya dari kode ke data.
+> **Tanpa layar apa pun, tanpa menyentuh `Population`, tanpa mengubah satu pun
+> perilaku yang terlihat** — itu butir I dan seterusnya.
+>
+> **Tiga sheet baru** di `SCHEMA` (`src/Config.gs`), otomatis dibuat
+> `ensureSheets_` (`src/Repo.gs:45`):
+>
+> - `Products`: `Material` (kunci), `Name`, `Principal`, `Regulation`
+>   (`AKD`/`AKL`), `SerialPattern`, `Active`, `Notes`. Satu model = satu
+>   `Material`, sudah dipastikan ke pemilik repo.
+> - `WarrantyRules`: `RuleID`, `Material`, `Scope` (`principal`|`customer`),
+>   `Channel` (`direct`|`distributor`|`*`), `Basis`
+>   (`assembly`|`selling-in`|`received`|`installation`), `Months`,
+>   `EffectiveFrom`, `EffectiveTo`, `Active`, `Notes`.
+> - `Distributors`: `DistributorID`, `Name`, `Email`, `Active`, `Notes`. Sheet
+>   `users` dapat kolom `Distributor`.
+>
+> **Berkas baru `src/WarrantyRules.gs`** — daftarkan di `ORDER` pada
+> `tools/bundle.js`, bundler menolak `.gs` yang belum terdaftar:
+>
+> - `productsIndex_()` dan `rulesIndex_()`, di-cache dan di-memo persis seperti
+>   `warrantyIndex_` di `src/Warranty.gs:157` (`INDEX_MEMO` + `cachePutLarge_`).
+> - `pickRule_(material, scope, channel, basisDate)`. Pemilihannya:
+>   `Channel` spesifik mengalahkan `*`; kalau masih seri, `EffectiveFrom` paling
+>   akhir menang. `EffectiveFrom`/`To` dicocokkan ke **tanggal dasar unitnya**,
+>   bukan ke hari ini — kebijakan yang berubah tahun ini tidak boleh memundurkan
+>   garansi unit yang dijual tiga tahun lalu. Tidak ada yang cocok → `null`.
+> - `resolveWarranty_(unit, scope, today)` → `{type, start, expiry, basis,
+>   months, source, missing}`. `missing` berisi **apa** yang kurang saat
+>   jawabannya manual ("belum ada tanggal BAST"), bukan sekadar "perlu dicek" —
+>   itu yang membuat layar bisa menyuruh orang berbuat sesuatu.
+> - `basisDate_(unit, basis)` mengambil tanggal yang diminta aturan.
+>   **Kosong berarti `Manual`, tidak pernah mundur diam-diam ke tanggal lain.**
+>   Itu keputusan pemilik repo, bukan pilihan implementasi.
+>
+> Presedensi, dari yang menang: penimpaan manual per klaim
+> (`WarrantyOverridden`, sudah ada) → `ExtendedMonths*` pada unit (butir I) →
+> baris `WarrantyRules` → rumus serial lama → `Manual` + daftar yang kurang.
+>
+> **Kompatibilitas, ini yang paling mudah dirusak:** `determineWarranty_` tetap
+> ada, tetap dipanggil dari tempat yang sama, dan **wajib mengembalikan bentuk
+> yang sama persis** (`{type, expiry, basis, assemblyMonth, daysRemaining,
+> source}`). Isinya jadi: kalau ada aturan yang cocok pakai itu, kalau tidak
+> jatuh kembali ke rumus 22 bulan yang sekarang. Sheet `WarrantyRules` yang
+> kosong harus membuat seluruh suite tetap hijau **tanpa satu penguji pun
+> disentuh** — kalau ada yang perlu diubah, rancangannya yang salah, bukan
+> pengujinya.
+>
+> Penguji baru `tools/verify-rules.js`: pemilihan aturan (spesifik vs `*`,
+> jendela efektif, seri), keempat `Basis`, `missing` yang benar, dan jaring
+> pengaman rumus lama saat sheet kosong. Buktikan menangkap bugnya. Suite,
+> `node tools/bundle.js`, commit, push.
+
+---
+
+## I · Kolom garansi pada unit, dan pengisian awalnya
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H.
+> Baca `docs/warranty-model.md` bagian 2, 4 dan 8.
+>
+> H membuat mesinnya. Butir ini memberinya data untuk dibaca, dan menyimpan
+> hasilnya di baris unit supaya daftar klaim tidak menghitung garansi 400 kali.
+>
+> **Kolom tambahan pada `SCHEMA[SHEET.POPULATION]`.** Diisi manusia atau impor:
+> `Channel`, `DistributorID`, `CustomerID`, `ReceivedAtDistributor`,
+> `InstalledAt`, `ExtendedMonthsPrincipal`, `ExtendedMonthsCustomer`,
+> `ContractRef`, `WarrantyNote`. Dihitung dan ditulis balik: `AssemblyMonth`,
+> `WarrantyStartPrincipal`, `WarrantyEndPrincipal`, `WarrantyBasisPrincipal`,
+> `WarrantyStartCustomer`, `WarrantyEndCustomer`, `WarrantyBasisCustomer`,
+> `WarrantyComputedAt`.
+>
+> **Disiplinnya sama persis dengan kolom ringkasan di `Claims`** — baca
+> `summaryOf_` dan `refreshClaimSummaries_` di `src/Claims.gs` dulu, lalu tiru:
+> `recomputeUnitWarranty_(serials)` **selalu menghitung ulang dari sumbernya,
+> tidak pernah menambah atau mengurangi**, dan menulis dengan `setCells_`
+> sehingga `RowVersion` tidak naik.
+>
+> **Simpan tanggal, jangan simpan status.** "Masih bergaransi" berubah sendiri
+> besok pagi; yang disimpan `WarrantyEnd`, verdictnya dihitung saat dibaca.
+> Kalau ada kolom bernama `WarrantyStatus` di hasil kerja ini, rancangannya
+> dilanggar.
+>
+> **`parseLocalDate_`, dan ini bukan detail kecil.** Berkas impor pemilik repo
+> berformat `dd/mm/yyyy`. `03/09/2025` adalah 3 September bagi mereka dan
+> 9 Maret bagi `new Date()`. Tulis satu fungsi yang membaca hari dulu dan
+> **menolak** apa pun yang bukan `dd/mm/yyyy`; jangan pernah menyerahkan teks
+> tanggal ke `new Date()`. Ingat juga jebakan lama: `google.script.run` menolak
+> `Date` di mana pun dalam nilai kembalian — simpan dan kembalikan teks ISO.
+>
+> `backfillUnitWarranty()` di `src/Setup.gs`, sepola dengan
+> `backfillClaimSummaries_` (`src/Setup.gs:44`): satu kolom penuh sekali jalan,
+> bukan satu sel per baris, dan baris tanpa data dibiarkan apa adanya. Panggil
+> dari `setUp()`.
+>
+> Ukur `populationIndex_` sesudahnya. 2.610 unit dikali kolom baru
+> diperkirakan menembus batas 100KB satu entri `CacheService` jauh-jauh — pastikan
+> lewat `cachePutLarge_` dan laporkan angkanya. Jalankan juga
+> `node tools/measure-list.js` sebelum dan sesudah: `listClaims_` **tidak boleh**
+> jadi lebih mahal, karena kolom garansi klaim ada di baris klaim, bukan di sini.
+>
+> Penguji baru `tools/verify-unit-warranty.js`: keempat dasar hitung,
+> extended warranty yang memundurkan dua sisi dengan angka berbeda,
+> `dd/mm/yyyy` yang terbaca benar dan format lain yang ditolak, penulisan yang
+> tidak menaikkan `RowVersion`, dan backfill yang tidak menyentuh baris kosong.
+> Buktikan menangkap bugnya. Suite, `dist/`, commit, push.
+
+---
+
+## J · Dua tingkat garansi pada klaim
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H dan I.
+> Baca `docs/warranty-model.md` bagian 5 dan 7, dan
+> `docs/business-context.md` bagian "Dua tingkat garansi".
+>
+> Ini butir yang menjawab pertanyaan direksi: **berapa biaya garansi yang kita
+> serap** — unit yang garansi principal-nya sudah habis tapi garansi kita ke
+> pembeli masih jalan. Hari ini kotak itu tampil sama saja dengan "sudah habis".
+>
+> **Kolom tambahan di `SCHEMA[SHEET.CLAIMS]`**, semuanya aditif:
+> `DistributorID`, `DistributorName`, `CustomerWarrantyType`,
+> `CustomerWarrantyExpiry`, `CustomerWarrantyBasis`, `CostBorne`,
+> `WarrantySnapshotAt`.
+>
+> **`WarrantyType` tidak berubah artinya.** Ia berarti sisi principal, dan ia
+> yang mengunci `forwardOrder_`, `visibleClaims_` (`src/Auth.gs:192`),
+> `verify-tabs` dan `verify-fulfilment`. Jangan ditumpangi. Yang berubah hanya
+> labelnya di layar jadi "Principal warranty".
+>
+> Potretnya ditulis di `saveClaim_`, di blok yang sekarang menulis
+> `fields.WarrantyType` (`src/Claims.gs:549`), dan mengikuti aturan yang sudah
+> ada di sana: penimpaan manual bertahan sampai serial-nya sendiri berubah.
+> **Klaim memotret, tidak menunjuk** — perbaikan data unit bulan depan tidak
+> boleh menulis ulang sejarah klaim yang sudah diputus. `CostBorne` ikut
+> disimpan, bukan dihitung saat membaca, dengan alasan yang sama seperti kolom
+> ringkasan.
+>
+> **Principal tidak boleh melihat sisi customer sama sekali** — keputusan
+> pemilik repo, 12 Sep 2026. Bukan disembunyikan dengan CSS: ketiga kolom
+> customer dan `CostBorne` **tidak boleh ada di payload** yang sampai ke akun
+> principal. Perhatikan bahwa `shapeClaim_` (`src/Claims.gs:319`) tidak menerima
+> `session`, jadi penyaringannya harus dipasang sadar-peran; pilih tempatnya
+> baik-baik dan pastikan `claims.list`, detail klaim, **dan ekspor** semuanya
+> ikut tersaring. Ekspor yang bocor sama saja dengan layar yang bocor.
+>
+> Di klien (`src/Script.html`): form klaim menampilkan **dua** baris garansi
+> dengan penjelasan masing-masing, bukan satu; peringatan sebelum submit kalau
+> dua-duanya habis, bukan sesudah; daftar klaim dapat kolom garansi customer dan
+> saringan `CostBorne`. Klaim jalur distributor menyebut **distributor dan rumah
+> sakit sekaligus**.
+>
+> Penguji baru `tools/verify-two-tier.js`, dan pemeriksaan kebocoran payload
+> principal adalah yang **wajib** ada: keempat kotak kombinasi garansi,
+> `CostBorne` yang benar, potret yang tidak berubah saat data unit diperbaiki,
+> dan akun principal yang tidak menerima satu pun field customer di list, detail
+> maupun ekspor. Buktikan menangkap bugnya. Suite, `dist/`, commit, push.
+
+---
+
+## K · Layar aturan garansi
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H.
+>
+> `WarrantyRules` menentukan jawaban portal ke semua orang. Menyunting langsung
+> di Google Sheets ditolak pemilik repo: satu salah ketik bisa mengubah jawaban
+> garansi ratusan unit tanpa jejak siapa pun.
+>
+> Layar Administrator untuk `Products`, `WarrantyRules` dan `Distributors`:
+> daftar, tambah, sunting, non-aktifkan. Bukan hapus — `Active = FALSE`, karena
+> aturan yang pernah dipakai adalah bagian dari sejarah klaim yang sudah diputus.
+>
+> Validasi sebelum simpan, dan inilah isi sebenarnya butir ini: `Material` harus
+> ada di `Products`; `Basis` dan `Scope` harus salah satu nilai yang dikenal;
+> `Months` bilangan bulat positif; jendela `EffectiveFrom`/`To` yang tumpang
+> tindih untuk `Material` + `Scope` + `Channel` yang sama **ditolak dengan
+> menyebut baris mana yang bertabrakan** — bukan diterima lalu dibiarkan
+> `pickRule_` yang memilih diam-diam.
+>
+> Setiap perubahan masuk `AuditLog` dengan nilai lama dan barunya, lewat jalur
+> audit yang sudah ada di `src/Audit.gs`. Kosongkan cache indeks setelah
+> menyimpan, atau aturan barunya baru berlaku setengah jam kemudian dan tidak
+> akan ada yang paham kenapa.
+>
+> Penguji baru `tools/verify-rules-admin.js`: penolakan jendela yang tumpang
+> tindih, validasi tiap field, jejak audit yang tercatat, cache yang dikosongkan.
+> Buktikan menangkap bugnya. Suite, `dist/`, commit, push.
+
+---
+
+## L · Layar unit dan impor massal
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H, I, K.
+>
+> Sampai butir ini, kolom-kolom baru di `Population` hanya bisa diisi dengan
+> membuka Google Sheets. Butir ini memberi Administrator tempat yang benar untuk
+> merawatnya — dan tanpa ini, butir M tidak punya tempat mendaftarkan unit.
+>
+> Layar unit: cari berdasarkan serial, model, distributor atau rumah sakit;
+> sunting satu unit; daftarkan unit baru. Setiap penyimpanan memanggil
+> `recomputeUnitWarranty_` untuk unit itu saja dan menulis jejak audit.
+>
+> Impor massal: unggah berkas, petakan kolomnya, **tampilkan pratinjau beserta
+> baris yang akan ditolak sebelum satu sel pun ditulis**. Tanggal `dd/mm/yyyy`
+> lewat `parseLocalDate_` dari butir I; baris dengan tanggal ambigu ditolak
+> dengan menyebut nomor barisnya, tidak ditebak. Ingat batas
+> `MAX_UPLOAD_BYTES`/`MAX_IMPORT_BYTES` yang sudah ada di `src/Config.gs` dan
+> `src/Script.html`.
+>
+> **Batas eksekusi 6 menit.** 2.610 unit harus ditulis dengan operasi kolom
+> penuh di server dalam satu eksekusi, bukan satu perjalanan per baris dari
+> browser. Kalau impornya bisa melebihi itu, potong jadi beberapa gelombang yang
+> bisa dilanjutkan, dan katakan di layar sudah sampai mana.
+>
+> Layar "unit belum lengkap": unit yang `WarrantyEnd`-nya tidak bisa dihitung,
+> beserta **apa** yang kurang (`missing` dari `resolveWarranty_`), bisa disaring
+> per distributor dan per model. Itu yang membuat pengisian data punya ujung.
+>
+> Penguji baru `tools/verify-unit-admin.js`: pratinjau yang menolak sebelum
+> menulis, `dd/mm/yyyy` yang benar dan yang ambigu ditolak, recompute yang
+> terpicu setelah sunting, dan daftar "belum lengkap" yang menyebutkan alasan
+> yang tepat. Buktikan menangkap bugnya. Suite, `dist/`, commit, push.
+
+---
+
+## M · Unit tak terdaftar: tolak, simpan draft, minta pendaftaran
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh L.
+> Baca `docs/business-context.md` bagian "Unit yang tidak terdaftar".
+>
+> **Ini membalik keputusan bagian 2 deskripsi PR #1**, dan pembalikannya
+> disengaja: dulu serial di luar `Population` diterima dan ditandai untuk
+> pemeriksaan manual. Sekarang **submit ditolak**, karena ada sistem pencatatan
+> instalasi di luar portal yang harus diperbarui lebih dulu, dan karena ini
+> bentuk edukasi ke distributor agar melaporkan unit yang mereka pasang.
+> Perbarui deskripsi PR-nya saat mengerjakan ini.
+>
+> Tetapi **pekerjaan lapangan tidak boleh hilang.** Orang yang sedang berdiri di
+> depan alat rusak sudah mengetik keluhan dan memotret partnya. Yang benar:
+> klaimnya tersimpan sebagai `Draft` lengkap dengan lampirannya, dan satu baris
+> masuk ke sheet baru `UnitRequests` — `RequestID`, `SerialNumber`,
+> `ProductGuess`, `CustomerID`, `DistributorID`, `Note`, `DriveFolderId`,
+> `ClaimID` (draft yang menunggu), `Status` (`Open`/`Registered`/`Rejected`),
+> `RequestedBy`, `RequestedAt`, `HandledBy`, `HandledAt`.
+>
+> Administrator diberi tahu **lewat email dan antrean di layar**, keduanya —
+> keputusan pemilik repo. Pakai jalur email yang sudah ada di `src/Mailer.gs`
+> dengan template baru, dan hormati `SETTING_KEY.EMAIL_ENABLED`.
+>
+> Lingkarannya harus tertutup: begitu Administrator mendaftarkan unitnya lewat
+> layar butir L, permintaan itu jadi `Registered` dan **pengaju bisa langsung
+> meneruskan draftnya tanpa mengetik ulang apa pun**. Draft yang unitnya sudah
+> terdaftar tidak boleh tertinggal tanpa pemberitahuan.
+>
+> Penguji baru `tools/verify-unit-requests.js`: submit ditolak tapi draft
+> tersimpan lengkap dengan lampiran, permintaan yang terbentuk, email yang
+> tercatat, dan draft yang bisa diteruskan setelah unitnya didaftarkan.
+> Buktikan menangkap bugnya. Suite, `dist/`, commit, push.
+
+---
+
+## N · Laporan biaya garansi yang kita serap
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh J.
+>
+> Butir J menyimpan `CostBorne` per klaim. Butir ini membuatnya bisa dibaca:
+> berapa banyak, atas model apa, dari distributor mana, dalam rentang tanggal
+> yang dipilih. Diekspor lewat jalur `src/Export.gs` yang sudah ada.
+>
+> **Hati-hati pada paging.** Paging bersifat opt-in (`limit`) justru karena
+> halaman default akan diam-diam memotong ekspor jadi 50 baris yang tampak
+> lengkap. Laporan ini membaca seluruh himpunan.
+>
+> Nilai rupiah per sparepart **belum ada di portal** dan belum diputuskan. Jadi
+> laporan ini menghitung **jumlah klaim dan jumlah part**, bukan rupiah. Kalau
+> nilai rupiah diinginkan, itu butir tersendiri yang dimulai dari menambah harga
+> ke master `sparepart` — jangan diselundupkan ke sini.
+>
+> Penguji baru `tools/verify-cost-report.js`: pengelompokan yang benar, rentang
+> tanggal yang inklusif di kedua ujungnya, dan ekspor yang tidak terpotong.
+> Buktikan menangkap bugnya. Suite, `dist/`, commit, push.
 
 ---
 

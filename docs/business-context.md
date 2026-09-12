@@ -145,6 +145,12 @@ Satu tempat di mana:
    lain.
 5. Ada jejak yang bisa dipertahankan saat klaim dipersoalkan.
 
+## Sudah diputuskan
+
+- **Antarmuka tetap Bahasa Inggris.** Ditanyakan 12 Sep 2026, dijawab tidak
+  perlu diterjemahkan. Jangan usulkan lagi.
+- Keputusan model garansi selengkapnya ada di `docs/warranty-model.md` bagian 11.
+
 ## Yang belum dijawab
 
 Ditanyakan tapi belum dibahas tuntas; angkat lagi bila relevan:
@@ -156,6 +162,5 @@ Ditanyakan tapi belum dibahas tuntas; angkat lagi bila relevan:
 - Downtime alat
 - Teknisi dan laporan pekerjaannya
 - Kewajiban pelaporan ke regulator (vigilance)
-- Bahasa antarmuka — seluruhnya masih Inggris
 - Jalur "butuh informasi tambahan" untuk principal, yang sekarang hanya bisa
   diwakili dengan menolak

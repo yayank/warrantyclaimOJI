@@ -110,12 +110,16 @@ Aturan yang sudah berlaku:
   boleh hilang.
 - **`WarrantyType` berarti sisi principal**, bukan sisi pembeli. Garansi kita ke
   pembeli adalah kolom terpisah. Jangan tumpangkan artinya.
+- **Antarmuka tetap Bahasa Inggris.** Ditanyakan 12 Sep 2026, dijawab tidak
+  perlu diterjemahkan. Jangan usulkan lagi.
 - Dashboard, grafik, notifikasi realtime, aplikasi mobile terpisah: sudah
   ditimbang dan tidak disarankan.
 
 ## Kalau diminta mengerjakan butir backlog
 
-`docs/backlog.md` berisi prompt siap-tempel A–G, semuanya **sudah selesai**.
+`docs/backlog.md` berisi prompt siap-tempel. **A–G sudah selesai. H–N belum
+dikerjakan** — itu gelombang model garansi dua tingkat, urutannya mengikat, dan
+rancangannya ada di `docs/warranty-model.md` (sudah disetujui pemilik repo).
 Setiap butir mencatat koreksi terhadap promptnya sendiri kalau promptnya keliru
 — beberapa memang keliru. Kalau ada butir baru, tulis catatan koreksi yang sama
 bila menemukan promptnya salah.
