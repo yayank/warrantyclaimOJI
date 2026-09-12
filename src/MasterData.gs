@@ -30,6 +30,37 @@ function principalNames_() {
 }
 
 /**
+ * Distributors, by ID, because that is what a unit row carries.
+ *
+ * The account is the company's, not a person's — whoever sits behind it may
+ * change and the claim history stays where it is — so the name here is the
+ * company name and nothing more.
+ */
+function distributorsIndex_() {
+  const index = {};
+  readSheetRows_(SHEET.DISTRIBUTORS).forEach(function (d) {
+    const id = String(d.DistributorID || '').trim();
+    if (id) index[id] = String(d.Name || '').trim();
+  });
+  return index;
+}
+
+function distributorName_(id) {
+  const key = String(id || '').trim();
+  return key ? (distributorsIndex_()[key] || '') : '';
+}
+
+function distributorList_() {
+  return readSheetRows_(SHEET.DISTRIBUTORS)
+    .filter(function (d) { return isTrue_(d.Active); })
+    .map(function (d) {
+      return { id: String(d.DistributorID || '').trim(), name: String(d.Name || '').trim() };
+    })
+    .filter(function (d) { return d.id; })
+    .sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+}
+
+/**
  * Who to ask when something the portal will not accept needs a human — a
  * customer or a unit that is not on the master lists. Screens name the
  * administrator rather than telling the user to find one.
@@ -121,6 +152,11 @@ function referenceData_(session) {
       STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED],
     warrantyTypes: [WARRANTY_TYPE.PRINCIPAL, WARRANTY_TYPE.OUT, WARRANTY_TYPE.MANUAL,
       WARRANTY_TYPE.INTERNAL],
+    // What we still owe the buyer is not a principal's business, so neither is
+    // the list of answers it can have.
+    customerWarrantyTypes: session.role === ROLE.PRINCIPAL ? []
+      : [CUSTOMER_WARRANTY_TYPE.IN, CUSTOMER_WARRANTY_TYPE.OUT, CUSTOMER_WARRANTY_TYPE.MANUAL],
+    distributors: session.role === ROLE.PRINCIPAL ? [] : distributorList_(),
     principals: principalNames_(),
     productionCustomer: PRODUCTION_CUSTOMER,
     // Only the screens that fill a claim in need to name someone to ask; a

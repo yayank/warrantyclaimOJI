@@ -311,7 +311,8 @@ function searchUnits_(session, payload) {
  * warranty verdict with its working shown, and any open claim on the same unit.
  */
 function lookupSerial_(session, serial) {
-  const warranty = determineWarranty_(serial);
+  const twoTier = claimWarranty_(serial);
+  const warranty = twoTier.principal;
   const sn = String(serial || '').trim().toUpperCase();
 
   const openClaims = readLive_(SHEET.CLAIMS).filter(function (c) {
@@ -336,6 +337,10 @@ function lookupSerial_(session, serial) {
     productName: productName_(sn),
     principal: principalFor_(sn),
     warranty: warranty,
+    customerWarranty: twoTier.customer,
+    costBorne: twoTier.costBorne,
+    distributorId: twoTier.unit ? twoTier.unit.DistributorID : '',
+    distributorName: twoTier.unit ? distributorName_(twoTier.unit.DistributorID) : '',
     openClaims: openClaims.map(function (c) {
       return { claimId: c.ClaimID, status: c.Status, customer: c.CustomerName };
     }),

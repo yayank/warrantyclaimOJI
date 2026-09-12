@@ -40,6 +40,21 @@ SCHEMA[SHEET.CLAIMS] = [
   'CreatedAt', 'SubmittedAt', 'ForwardedAt', 'PrincipalNotifiedAt', 'ClosedAt',
   'ReturnReason', 'DriveFolderId',
 
+  // The other tier, photographed when the claim was filed.
+  //
+  // WarrantyType above still means the principal side and nothing else: it is
+  // what decides whether an order is forwarded, what a principal is allowed to
+  // see, and which tab a claim falls in. These say what we still owe whoever
+  // bought the unit, which is a different question with a different answer.
+  //
+  // CostBorne is the quadrant the board asks about: the principal has stopped
+  // covering it and we have not. Stored rather than worked out on read, for the
+  // same reason as the summary columns below — otherwise the report would
+  // resolve two warranties per row.
+  'DistributorID', 'DistributorName',
+  'CustomerWarrantyType', 'CustomerWarrantyExpiry', 'CustomerWarrantyBasis',
+  'CostBorne', 'WarrantySnapshotAt',
+
   // Counted from ClaimItems and written back here whenever an item changes.
   // The claim list reads these instead of the items, which is what lets it
   // answer without reading the item sheet at all. Nothing else may write them:

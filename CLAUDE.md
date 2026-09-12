@@ -114,7 +114,12 @@ Aturan yang sudah berlaku:
   tidak pernah lewat `new Date()`. `03/09/2025` adalah 3 September, dan
   `new Date()` membacanya 9 Maret.
 - **`WarrantyType` berarti sisi principal**, bukan sisi pembeli. Garansi kita ke
-  pembeli adalah kolom terpisah. Jangan tumpangkan artinya.
+  pembeli ada di `CustomerWarranty*`. Jangan tumpangkan artinya.
+- **Principal tidak boleh menerima satu pun field sisi customer.** Daftar
+  fieldnya di `CUSTOMER_SIDE_FIELDS` (`Claims.gs`), disaring dua kali:
+  `listClaims_`/`getClaim_` — karena **ekspor Excel ditulis di server dan tidak
+  pernah lewat dispatcher** — dan sekali lagi di `api()` untuk apa pun yang
+  ditulis nanti. Menambah field sisi customer berarti menambahnya ke daftar itu.
 - **Antarmuka tetap Bahasa Inggris.** Ditanyakan 12 Sep 2026, dijawab tidak
   perlu diterjemahkan. Jangan usulkan lagi.
 - Dashboard, grafik, notifikasi realtime, aplikasi mobile terpisah: sudah

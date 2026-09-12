@@ -32,10 +32,19 @@ const VIEW_NAME_MAX = 60;
  * without limit is a property that one day will not save.
  */
 const VIEW_FILTERS = ['statuses', 'warrantyTypes', 'customerId', 'customerName',
-  'principal', 'from', 'to'];
+  'principal', 'distributorId', 'costBorne', 'from', 'to'];
 
 /** Of those, the ones that hold a list. A missing one is an empty list, not ''. */
 const VIEW_LISTS = ['statuses', 'warrantyTypes'];
+
+/**
+ * And the ones that hold a yes or a no.
+ *
+ * Kept as a real boolean rather than stored as text: an unticked box saved as
+ * the string "false" reads as true everywhere it is tested, so the view would
+ * come back with a filter nobody asked for.
+ */
+const VIEW_BOOLS = ['costBorne'];
 
 function viewsKey_(session) {
   return VIEW_PREFIX + String(session.email || '').trim().toLowerCase();
@@ -73,6 +82,10 @@ function cleanViewFilters_(filters) {
   const out = {};
   VIEW_FILTERS.forEach(function (key) {
     const v = f[key];
+    if (VIEW_BOOLS.indexOf(key) !== -1) {
+      out[key] = isTrue_(v);
+      return;
+    }
     if (VIEW_LISTS.indexOf(key) !== -1) {
       out[key] = (Array.isArray(v) ? v : [])
         .slice(0, 20).map(function (s) { return String(s).slice(0, 80); });

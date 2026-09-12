@@ -20,14 +20,29 @@ function exportClaims_(session, filter) {
   const result = listClaims_(session, wanted);
   const flat = (filter && filter.view === 'item');
 
+  // The customer side is ours, not the principal's. listClaims_ has already
+  // taken those fields out of the rows for a principal; leaving the columns in
+  // would produce a report of blanks that still says what the columns are.
+  const twoTier = session.role !== ROLE.PRINCIPAL;
+  const tierHead = twoTier
+    ? ['Distributor', 'Our warranty', 'Our warranty basis', 'Cost borne by us'] : [];
+  function tierCells(c) {
+    return twoTier
+      ? [c.distributorName || '', c.customerWarrantyType || '',
+        c.customerWarrantyBasis || '', c.costBorne ? 'Yes' : '']
+      : [];
+  }
+
   const header = flat
     ? ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
-      'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Spare part', 'Qty',
-      'Item status', 'Advance issue', 'Reason', 'Availability date', 'Document ref',
-      'Shipped at', 'Part return', 'Requested by', 'Status', 'Attachments']
+      'Principal warranty', 'Principal warranty basis']
+      .concat(tierHead, ['Work order', 'Problem', 'Spare part', 'Qty',
+        'Item status', 'Advance issue', 'Reason', 'Availability date', 'Document ref',
+        'Shipped at', 'Part return', 'Requested by', 'Status', 'Attachments'])
     : ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
-      'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Parts', 'Approved',
-      'Rejected', 'Pending', 'Advance issued', 'Requested by', 'Status', 'Attachments'];
+      'Principal warranty', 'Principal warranty basis']
+      .concat(tierHead, ['Work order', 'Problem', 'Parts', 'Approved',
+        'Rejected', 'Pending', 'Advance issued', 'Requested by', 'Status', 'Attachments']);
 
   const folderLink = claimFolderLink_();
   const rows = [header];
@@ -40,30 +55,33 @@ function exportClaims_(session, filter) {
       // the part columns are simply blank.
       rows.push([
         c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-        c.problem, '', '', '', '', '', '', '', '', '',
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+      ].concat(tierCells(c), [
+        c.workOrderNo, c.problem, '', '', '', '', '', '', '', '', '',
         c.requesterName, c.status, link
-      ]);
+      ]));
     } else if (flat) {
       c.items.forEach(function (i) {
         rows.push([
           c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-          c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-          c.problem, i.partName, i.qty, i.itemStatus,
+          c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+        ].concat(tierCells(c), [
+          c.workOrderNo, c.problem, i.partName, i.qty, i.itemStatus,
           i.advanceIssued ? 'Yes — ' + (i.advanceNote || 'issued from local stock') : '',
           i.decisionReason, i.availabilityDate, i.documentRefNo, i.shippedAt,
           i.partReturnNote, c.requesterName, c.status, link
-        ]);
+        ]));
       });
     } else {
       rows.push([
         c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-        c.problem,
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+      ].concat(tierCells(c), [
+        c.workOrderNo, c.problem,
         c.items.map(function (i) { return i.partName + ' ×' + i.qty; }).join('; '),
         c.summary.approved, c.summary.rejected, c.summary.pending, c.summary.advance,
         c.requesterName, c.status, link
-      ]);
+      ]));
     }
   });
 

@@ -63,6 +63,15 @@ function listClaims_(session, filter) {
     rows = rows.filter(function (r) { return f.warrantyTypes.indexOf(r.warrantyType) !== -1; });
   }
   if (f.customerId) rows = rows.filter(function (r) { return r.customerId === f.customerId; });
+  if (f.distributorId) {
+    rows = rows.filter(function (r) { return r.distributorId === f.distributorId; });
+  }
+  // What we are covering and the principal is not. A principal asking the
+  // question would be told the answer by which rows came back, so the filter
+  // is not theirs to ask — and the payload does not carry the field either.
+  if (isTrue_(f.costBorne) && session.role !== ROLE.PRINCIPAL) {
+    rows = rows.filter(function (r) { return r.costBorne; });
+  }
   if (f.principal) rows = rows.filter(function (r) { return r.principal === f.principal; });
   if (f.partId) {
     rows = rows.filter(function (r) {
@@ -97,6 +106,8 @@ function listClaims_(session, filter) {
   // Asked for after the page is cut, so the parts of four hundred claims are
   // not shaped to show fifty.
   if (want === 'page' && !byClaim) attachItems_(page);
+
+  page.forEach(function (row) { redactForViewer_(session, row); });
 
   return { rows: page, total: total, counts: tabCounts_(session, shaped) };
 }
@@ -316,6 +327,28 @@ function advanceQueue_(session) {
  * way, so a caller that only needs to know where a claim stands — which tab it
  * falls in, how much is pending — never makes anybody read the item sheet.
  */
+/**
+ * What a principal must never be handed.
+ *
+ * Not hidden on the screen — removed from the answer. A principal is a partner
+ * outside the company, and whether we are still covering a unit they have
+ * stopped covering is our position in that conversation, not theirs.
+ *
+ * This runs on the way out of listClaims_ and getClaim_ rather than inside
+ * shapeClaim_, which has no session, and rather than only at the dispatcher:
+ * the Excel export writes its file on the server and never crosses that
+ * boundary at all. api() strips the same keys again on the way to the browser,
+ * for anything built after this was written.
+ */
+const CUSTOMER_SIDE_FIELDS = ['customerWarrantyType', 'customerWarrantyExpiry',
+  'customerWarrantyBasis', 'costBorne', 'customerWarranty', 'customerWarrantyTypes'];
+
+function redactForViewer_(session, row) {
+  if (!row || session.role !== ROLE.PRINCIPAL) return row;
+  CUSTOMER_SIDE_FIELDS.forEach(function (f) { delete row[f]; });
+  return row;
+}
+
 function shapeClaim_(c, items, countItems) {
   const shaped = items ? items.map(shapeItem_) : [];
   // Normally the columns; from the items themselves only while the columns are
@@ -337,6 +370,13 @@ function shapeClaim_(c, items, countItems) {
     warrantyBasis: c.WarrantyBasis,
     warrantyOverridden: isTrue_(c.WarrantyOverridden),
     warrantyOverrideReason: c.WarrantyOverrideReason,
+    distributorId: String(c.DistributorID || ''),
+    distributorName: String(c.DistributorName || ''),
+    customerWarrantyType: c.CustomerWarrantyType,
+    customerWarrantyExpiry: c.CustomerWarrantyExpiry,
+    customerWarrantyBasis: c.CustomerWarrantyBasis,
+    costBorne: isTrue_(c.CostBorne),
+    warrantySnapshotAt: c.WarrantySnapshotAt,
     problem: c.ProblemDescription,
     workOrderNo: c.WorkOrderNo,
     status: c.Status,
@@ -420,7 +460,7 @@ function getClaim_(session, claimId) {
   if (!visibleClaims_(session).some(function (c) { return c.ClaimID === claimId; })) throw forbid_();
 
   const items = readLive_(SHEET.ITEMS).filter(function (i) { return i.ClaimID === claimId; });
-  const shaped = shapeClaim_(claim, items);
+  const shaped = redactForViewer_(session, shapeClaim_(claim, items));
   shaped.attachments = attachmentsFor_(claimId);
   shaped.audit = auditForClaim_(claimId);
   shaped.canEdit = canEditClaimFields_(session, claim);
@@ -509,7 +549,8 @@ function saveClaim_(session, payload) {
 
     const customer = resolveCustomer_(session, payload.customerId);
     const serial = String(payload.serialNumber || '').trim().toUpperCase();
-    const warranty = determineWarranty_(serial);
+    const twoTier = claimWarranty_(serial);
+    const warranty = twoTier.principal;
 
     // An administrator changing the serial number is changing the basis of the
     // warranty decision, so it cannot be done without saying why.
@@ -543,7 +584,15 @@ function saveClaim_(session, payload) {
       fields.Principal = claim.Principal;
     }
 
-    // A manual override stands until the serial number itself changes.
+    // Who sold it, and to which hospital. A claim on the distributor channel
+    // has to name both: the same hospital can hold machines from several
+    // distributors, and one of them may be ours.
+    fields.DistributorID = twoTier.unit ? twoTier.unit.DistributorID : '';
+    fields.DistributorName = distributorName_(fields.DistributorID);
+
+    // A manual override stands until the serial number itself changes — and it
+    // holds both tiers, because half a snapshot moving while the other half
+    // stands is worse than either.
     if (!claim || !isTrue_(claim.WarrantyOverridden) ||
       serial !== String(claim.SerialNumber || '').toUpperCase()) {
       fields.WarrantyType = warranty.type;
@@ -551,6 +600,14 @@ function saveClaim_(session, payload) {
       fields.WarrantyBasis = warranty.basis;
       fields.WarrantyOverridden = false;
       fields.WarrantyOverrideReason = '';
+
+      // Photographed, not pointed at. Correcting a unit's installation date
+      // next month must not rewrite what a claim decided on last month.
+      fields.CustomerWarrantyType = twoTier.customer.type;
+      fields.CustomerWarrantyExpiry = twoTier.customer.expiry;
+      fields.CustomerWarrantyBasis = twoTier.customer.basis;
+      fields.CostBorne = twoTier.costBorne;
+      fields.WarrantySnapshotAt = nowIso_();
     }
 
     if (isNew) {
@@ -1080,11 +1137,16 @@ function overrideWarranty_(session, payload) {
       throw forbid_('The warranty can only be overridden before the claim is forwarded.');
     }
 
+    // Saying the principal still covers this, or no longer does, moves the
+    // quadrant with it. Leaving CostBorne at what the rules worked out would
+    // leave the cost report disagreeing with the claim on the same screen.
     update_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, {
       WarrantyType: type,
       WarrantyBasis: claim.WarrantyBasis + ' · overridden by administrator',
       WarrantyOverridden: true,
       WarrantyOverrideReason: reason,
+      CostBorne: type === WARRANTY_TYPE.OUT &&
+        claim.CustomerWarrantyType === CUSTOMER_WARRANTY_TYPE.IN,
       UpdatedAt: nowIso_(), UpdatedBy: session.email
     }, payload.rowVersion);
 

@@ -140,6 +140,15 @@ const sandbox = {
   determineWarranty_: function () {
     return { type: 'Principal Warranty', expiry: '2027-01', basis: 'assembled 2024-10' };
   },
+  claimWarranty_: function () {
+    return {
+      principal: { type: 'Principal Warranty', expiry: '2027-01', basis: 'assembled 2024-10' },
+      customer: { type: 'Under Our Warranty', expiry: '2027-10-01', basis: 'installed 2024-10' },
+      unit: { DistributorID: 'DST-1' },
+      costBorne: false
+    };
+  },
+  distributorName_: function () { return 'PT Distributor'; },
   productName_: function () { return 'Sansin SWS-4000'; },
   principalFor_: function () { return 'Sansin'; },
   principalNames_: function () { return ['Sansin']; },

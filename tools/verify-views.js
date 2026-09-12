@@ -95,7 +95,8 @@ function view(name, extra) {
     name: name, tab: 'action', group: 'customer',
     filters: {
       statuses: ['In Review'], warrantyTypes: [], customerId: 'C7',
-      customerName: 'RSUD Koja', principal: 'Sansin', from: '', to: ''
+      customerName: 'RSUD Koja', principal: 'Sansin',
+      distributorId: '', costBorne: false, from: '', to: ''
     }
   }, extra || {});
 }
@@ -270,7 +271,8 @@ const saved = {
   name: 'Sansin, waiting on me', tab: 'action', group: 'customer',
   filters: {
     statuses: ['In Review'], warrantyTypes: [], customerId: 'C7',
-    customerName: 'RSUD Koja', principal: 'Sansin', from: '', to: ''
+    customerName: 'RSUD Koja', principal: 'Sansin',
+    distributorId: '', costBorne: false, from: '', to: ''
   }
 };
 

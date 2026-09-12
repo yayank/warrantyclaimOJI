@@ -54,6 +54,21 @@ SCHEMA[SHEET.CLAIMS] = [
   'CreatedAt', 'SubmittedAt', 'ForwardedAt', 'PrincipalNotifiedAt', 'ClosedAt',
   'ReturnReason', 'DriveFolderId',
 
+  // The other tier, photographed when the claim was filed.
+  //
+  // WarrantyType above still means the principal side and nothing else: it is
+  // what decides whether an order is forwarded, what a principal is allowed to
+  // see, and which tab a claim falls in. These say what we still owe whoever
+  // bought the unit, which is a different question with a different answer.
+  //
+  // CostBorne is the quadrant the board asks about: the principal has stopped
+  // covering it and we have not. Stored rather than worked out on read, for the
+  // same reason as the summary columns below — otherwise the report would
+  // resolve two warranties per row.
+  'DistributorID', 'DistributorName',
+  'CustomerWarrantyType', 'CustomerWarrantyExpiry', 'CustomerWarrantyBasis',
+  'CostBorne', 'WarrantySnapshotAt',
+
   // Counted from ClaimItems and written back here whenever an item changes.
   // The claim list reads these instead of the items, which is what lets it
   // answer without reading the item sheet at all. Nothing else may write them:
@@ -1371,7 +1386,8 @@ function searchUnits_(session, payload) {
  * warranty verdict with its working shown, and any open claim on the same unit.
  */
 function lookupSerial_(session, serial) {
-  const warranty = determineWarranty_(serial);
+  const twoTier = claimWarranty_(serial);
+  const warranty = twoTier.principal;
   const sn = String(serial || '').trim().toUpperCase();
 
   const openClaims = readLive_(SHEET.CLAIMS).filter(function (c) {
@@ -1396,6 +1412,10 @@ function lookupSerial_(session, serial) {
     productName: productName_(sn),
     principal: principalFor_(sn),
     warranty: warranty,
+    customerWarranty: twoTier.customer,
+    costBorne: twoTier.costBorne,
+    distributorId: twoTier.unit ? twoTier.unit.DistributorID : '',
+    distributorName: twoTier.unit ? distributorName_(twoTier.unit.DistributorID) : '',
     openClaims: openClaims.map(function (c) {
       return { claimId: c.ClaimID, status: c.Status, customer: c.CustomerName };
     }),
@@ -1806,6 +1826,37 @@ function resolveWarranty_(unit, scope, today) {
 }
 
 /**
+ * Both tiers for one serial number, as a claim records them.
+ *
+ * The principal side goes through determineWarranty_ so that the fallback for
+ * models with no rule yet still applies, and so that every existing caller and
+ * every existing check keeps the answer it had. The customer side has no
+ * fallback and none is wanted: there has never been a figure for it, and
+ * inventing one would be the fault this replaced.
+ *
+ * costBorne is the expensive quadrant — the principal has stopped covering the
+ * unit and we have not. It is only ever true when both sides are known: a
+ * warranty waiting on a person is not a cost anybody has established.
+ */
+function claimWarranty_(serial, today) {
+  const now = today || new Date();
+  const principal = determineWarranty_(serial, now);
+  const unit = unitOf_(serial);
+
+  const customer = unit
+    ? resolveWarranty_(unit, WARRANTY_SCOPE.CUSTOMER, now)
+    : manualVerdict_(WARRANTY_SCOPE.CUSTOMER,
+      ['this serial number is not on the unit register'], null);
+
+  return {
+    principal: principal,
+    customer: customer,
+    unit: unit,
+    costBorne: customer.active === true && principal.type === WARRANTY_TYPE.OUT
+  };
+}
+
+/**
  * The unit as the engine needs to see it, from the population index.
  *
  * One shape, built in one place — unitRowToUnit_ in Units.gs — whether the row
@@ -1963,6 +2014,8 @@ function unitRowToUnit_(row) {
     SerialNumber: String(r.Batch || '').trim().toUpperCase(),
     Material: String(r.Material || '').trim().toUpperCase(),
     Channel: String(r.Channel || '').trim().toLowerCase(),
+    DistributorID: String(r.DistributorID || '').trim(),
+    CustomerID: String(r.CustomerID || '').trim(),
     SellingInDate: parseLocalDate_(r.SellingInDate).iso,
     ReceivedAtDistributor: parseLocalDate_(r.ReceivedAtDistributor).iso,
     InstalledAt: parseLocalDate_(r.InstalledAt).iso,
@@ -3146,6 +3199,15 @@ function listClaims_(session, filter) {
     rows = rows.filter(function (r) { return f.warrantyTypes.indexOf(r.warrantyType) !== -1; });
   }
   if (f.customerId) rows = rows.filter(function (r) { return r.customerId === f.customerId; });
+  if (f.distributorId) {
+    rows = rows.filter(function (r) { return r.distributorId === f.distributorId; });
+  }
+  // What we are covering and the principal is not. A principal asking the
+  // question would be told the answer by which rows came back, so the filter
+  // is not theirs to ask — and the payload does not carry the field either.
+  if (isTrue_(f.costBorne) && session.role !== ROLE.PRINCIPAL) {
+    rows = rows.filter(function (r) { return r.costBorne; });
+  }
   if (f.principal) rows = rows.filter(function (r) { return r.principal === f.principal; });
   if (f.partId) {
     rows = rows.filter(function (r) {
@@ -3180,6 +3242,8 @@ function listClaims_(session, filter) {
   // Asked for after the page is cut, so the parts of four hundred claims are
   // not shaped to show fifty.
   if (want === 'page' && !byClaim) attachItems_(page);
+
+  page.forEach(function (row) { redactForViewer_(session, row); });
 
   return { rows: page, total: total, counts: tabCounts_(session, shaped) };
 }
@@ -3399,6 +3463,28 @@ function advanceQueue_(session) {
  * way, so a caller that only needs to know where a claim stands — which tab it
  * falls in, how much is pending — never makes anybody read the item sheet.
  */
+/**
+ * What a principal must never be handed.
+ *
+ * Not hidden on the screen — removed from the answer. A principal is a partner
+ * outside the company, and whether we are still covering a unit they have
+ * stopped covering is our position in that conversation, not theirs.
+ *
+ * This runs on the way out of listClaims_ and getClaim_ rather than inside
+ * shapeClaim_, which has no session, and rather than only at the dispatcher:
+ * the Excel export writes its file on the server and never crosses that
+ * boundary at all. api() strips the same keys again on the way to the browser,
+ * for anything built after this was written.
+ */
+const CUSTOMER_SIDE_FIELDS = ['customerWarrantyType', 'customerWarrantyExpiry',
+  'customerWarrantyBasis', 'costBorne', 'customerWarranty', 'customerWarrantyTypes'];
+
+function redactForViewer_(session, row) {
+  if (!row || session.role !== ROLE.PRINCIPAL) return row;
+  CUSTOMER_SIDE_FIELDS.forEach(function (f) { delete row[f]; });
+  return row;
+}
+
 function shapeClaim_(c, items, countItems) {
   const shaped = items ? items.map(shapeItem_) : [];
   // Normally the columns; from the items themselves only while the columns are
@@ -3420,6 +3506,13 @@ function shapeClaim_(c, items, countItems) {
     warrantyBasis: c.WarrantyBasis,
     warrantyOverridden: isTrue_(c.WarrantyOverridden),
     warrantyOverrideReason: c.WarrantyOverrideReason,
+    distributorId: String(c.DistributorID || ''),
+    distributorName: String(c.DistributorName || ''),
+    customerWarrantyType: c.CustomerWarrantyType,
+    customerWarrantyExpiry: c.CustomerWarrantyExpiry,
+    customerWarrantyBasis: c.CustomerWarrantyBasis,
+    costBorne: isTrue_(c.CostBorne),
+    warrantySnapshotAt: c.WarrantySnapshotAt,
     problem: c.ProblemDescription,
     workOrderNo: c.WorkOrderNo,
     status: c.Status,
@@ -3503,7 +3596,7 @@ function getClaim_(session, claimId) {
   if (!visibleClaims_(session).some(function (c) { return c.ClaimID === claimId; })) throw forbid_();
 
   const items = readLive_(SHEET.ITEMS).filter(function (i) { return i.ClaimID === claimId; });
-  const shaped = shapeClaim_(claim, items);
+  const shaped = redactForViewer_(session, shapeClaim_(claim, items));
   shaped.attachments = attachmentsFor_(claimId);
   shaped.audit = auditForClaim_(claimId);
   shaped.canEdit = canEditClaimFields_(session, claim);
@@ -3592,7 +3685,8 @@ function saveClaim_(session, payload) {
 
     const customer = resolveCustomer_(session, payload.customerId);
     const serial = String(payload.serialNumber || '').trim().toUpperCase();
-    const warranty = determineWarranty_(serial);
+    const twoTier = claimWarranty_(serial);
+    const warranty = twoTier.principal;
 
     // An administrator changing the serial number is changing the basis of the
     // warranty decision, so it cannot be done without saying why.
@@ -3626,7 +3720,15 @@ function saveClaim_(session, payload) {
       fields.Principal = claim.Principal;
     }
 
-    // A manual override stands until the serial number itself changes.
+    // Who sold it, and to which hospital. A claim on the distributor channel
+    // has to name both: the same hospital can hold machines from several
+    // distributors, and one of them may be ours.
+    fields.DistributorID = twoTier.unit ? twoTier.unit.DistributorID : '';
+    fields.DistributorName = distributorName_(fields.DistributorID);
+
+    // A manual override stands until the serial number itself changes — and it
+    // holds both tiers, because half a snapshot moving while the other half
+    // stands is worse than either.
     if (!claim || !isTrue_(claim.WarrantyOverridden) ||
       serial !== String(claim.SerialNumber || '').toUpperCase()) {
       fields.WarrantyType = warranty.type;
@@ -3634,6 +3736,14 @@ function saveClaim_(session, payload) {
       fields.WarrantyBasis = warranty.basis;
       fields.WarrantyOverridden = false;
       fields.WarrantyOverrideReason = '';
+
+      // Photographed, not pointed at. Correcting a unit's installation date
+      // next month must not rewrite what a claim decided on last month.
+      fields.CustomerWarrantyType = twoTier.customer.type;
+      fields.CustomerWarrantyExpiry = twoTier.customer.expiry;
+      fields.CustomerWarrantyBasis = twoTier.customer.basis;
+      fields.CostBorne = twoTier.costBorne;
+      fields.WarrantySnapshotAt = nowIso_();
     }
 
     if (isNew) {
@@ -4163,11 +4273,16 @@ function overrideWarranty_(session, payload) {
       throw forbid_('The warranty can only be overridden before the claim is forwarded.');
     }
 
+    // Saying the principal still covers this, or no longer does, moves the
+    // quadrant with it. Leaving CostBorne at what the rules worked out would
+    // leave the cost report disagreeing with the claim on the same screen.
     update_(SHEET.CLAIMS, 'ClaimID', claim.ClaimID, {
       WarrantyType: type,
       WarrantyBasis: claim.WarrantyBasis + ' · overridden by administrator',
       WarrantyOverridden: true,
       WarrantyOverrideReason: reason,
+      CostBorne: type === WARRANTY_TYPE.OUT &&
+        claim.CustomerWarrantyType === CUSTOMER_WARRANTY_TYPE.IN,
       UpdatedAt: nowIso_(), UpdatedBy: session.email
     }, payload.rowVersion);
 
@@ -4932,6 +5047,37 @@ function principalNames_() {
 }
 
 /**
+ * Distributors, by ID, because that is what a unit row carries.
+ *
+ * The account is the company's, not a person's — whoever sits behind it may
+ * change and the claim history stays where it is — so the name here is the
+ * company name and nothing more.
+ */
+function distributorsIndex_() {
+  const index = {};
+  readSheetRows_(SHEET.DISTRIBUTORS).forEach(function (d) {
+    const id = String(d.DistributorID || '').trim();
+    if (id) index[id] = String(d.Name || '').trim();
+  });
+  return index;
+}
+
+function distributorName_(id) {
+  const key = String(id || '').trim();
+  return key ? (distributorsIndex_()[key] || '') : '';
+}
+
+function distributorList_() {
+  return readSheetRows_(SHEET.DISTRIBUTORS)
+    .filter(function (d) { return isTrue_(d.Active); })
+    .map(function (d) {
+      return { id: String(d.DistributorID || '').trim(), name: String(d.Name || '').trim() };
+    })
+    .filter(function (d) { return d.id; })
+    .sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+}
+
+/**
  * Who to ask when something the portal will not accept needs a human — a
  * customer or a unit that is not on the master lists. Screens name the
  * administrator rather than telling the user to find one.
@@ -5023,6 +5169,11 @@ function referenceData_(session) {
       STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED],
     warrantyTypes: [WARRANTY_TYPE.PRINCIPAL, WARRANTY_TYPE.OUT, WARRANTY_TYPE.MANUAL,
       WARRANTY_TYPE.INTERNAL],
+    // What we still owe the buyer is not a principal's business, so neither is
+    // the list of answers it can have.
+    customerWarrantyTypes: session.role === ROLE.PRINCIPAL ? []
+      : [CUSTOMER_WARRANTY_TYPE.IN, CUSTOMER_WARRANTY_TYPE.OUT, CUSTOMER_WARRANTY_TYPE.MANUAL],
+    distributors: session.role === ROLE.PRINCIPAL ? [] : distributorList_(),
     principals: principalNames_(),
     productionCustomer: PRODUCTION_CUSTOMER,
     // Only the screens that fill a claim in need to name someone to ask; a
@@ -5316,10 +5467,19 @@ const VIEW_NAME_MAX = 60;
  * without limit is a property that one day will not save.
  */
 const VIEW_FILTERS = ['statuses', 'warrantyTypes', 'customerId', 'customerName',
-  'principal', 'from', 'to'];
+  'principal', 'distributorId', 'costBorne', 'from', 'to'];
 
 /** Of those, the ones that hold a list. A missing one is an empty list, not ''. */
 const VIEW_LISTS = ['statuses', 'warrantyTypes'];
+
+/**
+ * And the ones that hold a yes or a no.
+ *
+ * Kept as a real boolean rather than stored as text: an unticked box saved as
+ * the string "false" reads as true everywhere it is tested, so the view would
+ * come back with a filter nobody asked for.
+ */
+const VIEW_BOOLS = ['costBorne'];
 
 function viewsKey_(session) {
   return VIEW_PREFIX + String(session.email || '').trim().toLowerCase();
@@ -5357,6 +5517,10 @@ function cleanViewFilters_(filters) {
   const out = {};
   VIEW_FILTERS.forEach(function (key) {
     const v = f[key];
+    if (VIEW_BOOLS.indexOf(key) !== -1) {
+      out[key] = isTrue_(v);
+      return;
+    }
     if (VIEW_LISTS.indexOf(key) !== -1) {
       out[key] = (Array.isArray(v) ? v : [])
         .slice(0, 20).map(function (s) { return String(s).slice(0, 80); });
@@ -5562,14 +5726,29 @@ function exportClaims_(session, filter) {
   const result = listClaims_(session, wanted);
   const flat = (filter && filter.view === 'item');
 
+  // The customer side is ours, not the principal's. listClaims_ has already
+  // taken those fields out of the rows for a principal; leaving the columns in
+  // would produce a report of blanks that still says what the columns are.
+  const twoTier = session.role !== ROLE.PRINCIPAL;
+  const tierHead = twoTier
+    ? ['Distributor', 'Our warranty', 'Our warranty basis', 'Cost borne by us'] : [];
+  function tierCells(c) {
+    return twoTier
+      ? [c.distributorName || '', c.customerWarrantyType || '',
+        c.customerWarrantyBasis || '', c.costBorne ? 'Yes' : '']
+      : [];
+  }
+
   const header = flat
     ? ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
-      'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Spare part', 'Qty',
-      'Item status', 'Advance issue', 'Reason', 'Availability date', 'Document ref',
-      'Shipped at', 'Part return', 'Requested by', 'Status', 'Attachments']
+      'Principal warranty', 'Principal warranty basis']
+      .concat(tierHead, ['Work order', 'Problem', 'Spare part', 'Qty',
+        'Item status', 'Advance issue', 'Reason', 'Availability date', 'Document ref',
+        'Shipped at', 'Part return', 'Requested by', 'Status', 'Attachments'])
     : ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
-      'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Parts', 'Approved',
-      'Rejected', 'Pending', 'Advance issued', 'Requested by', 'Status', 'Attachments'];
+      'Principal warranty', 'Principal warranty basis']
+      .concat(tierHead, ['Work order', 'Problem', 'Parts', 'Approved',
+        'Rejected', 'Pending', 'Advance issued', 'Requested by', 'Status', 'Attachments']);
 
   const folderLink = claimFolderLink_();
   const rows = [header];
@@ -5582,30 +5761,33 @@ function exportClaims_(session, filter) {
       // the part columns are simply blank.
       rows.push([
         c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-        c.problem, '', '', '', '', '', '', '', '', '',
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+      ].concat(tierCells(c), [
+        c.workOrderNo, c.problem, '', '', '', '', '', '', '', '', '',
         c.requesterName, c.status, link
-      ]);
+      ]));
     } else if (flat) {
       c.items.forEach(function (i) {
         rows.push([
           c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-          c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-          c.problem, i.partName, i.qty, i.itemStatus,
+          c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+        ].concat(tierCells(c), [
+          c.workOrderNo, c.problem, i.partName, i.qty, i.itemStatus,
           i.advanceIssued ? 'Yes — ' + (i.advanceNote || 'issued from local stock') : '',
           i.decisionReason, i.availabilityDate, i.documentRefNo, i.shippedAt,
           i.partReturnNote, c.requesterName, c.status, link
-        ]);
+        ]));
       });
     } else {
       rows.push([
         c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-        c.problem,
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+      ].concat(tierCells(c), [
+        c.workOrderNo, c.problem,
         c.items.map(function (i) { return i.partName + ' ×' + i.qty; }).join('; '),
         c.summary.approved, c.summary.rejected, c.summary.pending, c.summary.advance,
         c.requesterName, c.status, link
-      ]);
+      ]));
     }
   });
 
@@ -6338,7 +6520,11 @@ function api(request) {
   try {
     const session = resolveSession_(req.token, req.simulatedRole);
     const data = route_(session, req.action, req.payload || {});
-    return { ok: true, data: jsonSafe_(data), session: publicSession_(session) };
+    return {
+      ok: true,
+      data: jsonSafe_(redactForRole_(session, data)),
+      session: publicSession_(session)
+    };
   } catch (err) {
     return {
       ok: false,
@@ -6348,6 +6534,28 @@ function api(request) {
       current: err && err.stale ? err.current : undefined
     };
   }
+}
+
+/**
+ * The customer side of a warranty, taken back out of whatever is being sent.
+ *
+ * listClaims_ and getClaim_ already strip it, and they have to — the Excel
+ * export is written on the server and never passes this way. This is the second
+ * fence: a screen added next year that returns a claim through some new
+ * endpoint gets the same treatment without anybody having to remember.
+ */
+function redactForRole_(session, value) {
+  if (!session || session.role !== ROLE.PRINCIPAL) return value;
+  if (Array.isArray(value)) return value.map(function (v) { return redactForRole_(session, v); });
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    const out = {};
+    Object.keys(value).forEach(function (k) {
+      if (CUSTOMER_SIDE_FIELDS.indexOf(k) !== -1) return;
+      out[k] = redactForRole_(session, value[k]);
+    });
+    return out;
+  }
+  return value;
 }
 
 /**

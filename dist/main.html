@@ -198,6 +198,11 @@ label.field>span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
    look, not what the claim is. */
 .p-new{background:var(--info-soft);color:var(--info);font-size:10.5px;
   letter-spacing:.04em;text-transform:uppercase}
+/* The principal has stopped covering this unit and we have not, so the part
+   comes out of our own pocket. Warn-coloured rather than critical: it is a
+   cost to account for, not a fault to fix. */
+.p-cost{background:var(--warn-soft);color:var(--warn);font-size:10.5px;
+  letter-spacing:.04em;text-transform:uppercase}
 
 /* -------------------------------------------------------------- tables */
 .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
@@ -571,7 +576,7 @@ const S = {
 function blankFilters() {
   return {
     search: '', statuses: [], warrantyTypes: [], customerId: '', customerName: '',
-    partId: '', principal: '', from: '', to: ''
+    partId: '', principal: '', distributorId: '', costBorne: false, from: '', to: ''
   };
 }
 
@@ -587,6 +592,12 @@ const ITEM = {
 const WARRANTY = {
   PRINCIPAL: 'Principal Warranty', OUT: 'Out of Principal Warranty',
   MANUAL: 'Manual Verification Required', INTERNAL: 'Internal Warranty'
+};
+// The other tier: what we still owe whoever bought the unit. A different
+// question from the one above, and frequently a different answer.
+const OUR_WARRANTY = {
+  IN: 'Under Our Warranty', OUT: 'Out of Our Warranty',
+  MANUAL: 'Manual Verification Required'
 };
 const ROLE = {
   REQUESTER: 'Requester', PRODUCTION: 'Production',
@@ -670,6 +681,30 @@ function seesInternals() {
 /** The advance-issue markers belong to whoever owns the stock. */
 function seesAdvanceIssue() {
   return S.session.role === ROLE.ADMIN;
+}
+
+/**
+ * What we still owe the buyer, and whether that is costing us.
+ *
+ * Only for the people inside the company: to a principal it is none of their
+ * business, and the server does not send it to them at all; to a field
+ * engineer it is an accounting question they cannot act on at the machine.
+ */
+function ourWarrantyPill(c) {
+  if (!seesInternals() || S.session.role === ROLE.PRINCIPAL) return '';
+  const out = [];
+  if (c.customerWarrantyType === OUR_WARRANTY.IN) {
+    out.push('<span class="pill flat p-ok">Ours to ' +
+      (c.customerWarrantyExpiry ? monthLabel(c.customerWarrantyExpiry) : 'cover') + '</span>');
+  } else if (c.customerWarrantyType === OUR_WARRANTY.OUT) {
+    out.push('<span class="pill flat p-no">Our cover ended</span>');
+  } else if (c.customerWarrantyType) {
+    out.push('<span class="pill flat p-wait">Our cover unchecked</span>');
+  }
+  // The quadrant nobody could see before: the principal has stopped and we
+  // have not, so this part is ours to pay for.
+  if (c.costBorne) out.push('<span class="pill flat p-cost">We absorb</span>');
+  return out.join('');
 }
 
 function warrantyPill(type) {
@@ -1053,6 +1088,8 @@ function renderClaims() {
         : '',
       customerFilter(),
       principalFilter(),
+      distributorFilter(),
+      costBorneToggle(),
       groupFilter(),
       viewFilter(),
       '<button class="btn" id="manageViews" type="button">Save view</button>',
@@ -1454,7 +1491,8 @@ function promptBulkInternal(claims) {
  * lets go of the view by itself and no handler has to remember to say so.
  */
 
-const VIEW_FIELDS = ['statuses', 'warrantyTypes', 'customerId', 'principal', 'from', 'to'];
+const VIEW_FIELDS = ['statuses', 'warrantyTypes', 'customerId', 'principal',
+  'distributorId', 'costBorne', 'from', 'to'];
 
 function sameFilterValue(a, b) {
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -1632,6 +1670,30 @@ function principalFilter() {
     }).join('') + '</select>';
 }
 
+/** Which distributor sold the machine. Ours to ask; not a principal's. */
+function distributorFilter() {
+  const list = (S.reference.distributors || []);
+  if (S.session.role !== ROLE.ADMIN || !list.length) return '';
+  return '<select id="distributorFilter"><option value="">All distributors</option>' +
+    list.map(function (d) {
+      return '<option value="' + h(d.id) + '"' +
+        (S.filters.distributorId === d.id ? ' selected' : '') + '>' + h(d.name) + '</option>';
+    }).join('') + '</select>';
+}
+
+/**
+ * The claims we are covering and the principal is not.
+ *
+ * This is the question the board asks and the portal could not answer: not
+ * "how many are out of warranty", but "how many are out of the principal's
+ * warranty while still inside ours".
+ */
+function costBorneToggle() {
+  if (S.session.role !== ROLE.ADMIN) return '';
+  return '<label class="inline"><input type="checkbox" id="costBorne"' +
+    (S.filters.costBorne ? ' checked' : '') + '> We absorb the cost</label>';
+}
+
 function activeChips() {
   const chips = [];
   if (S.filters.statuses.length) {
@@ -1644,6 +1706,13 @@ function activeChips() {
     chips.push(chip('Customer', S.filters.customerName || S.filters.customerId, 'customerId'));
   }
   if (S.filters.principal) chips.push(chip('Principal', S.filters.principal, 'principal'));
+  if (S.filters.distributorId) {
+    const d = (S.reference.distributors || []).filter(function (x) {
+      return x.id === S.filters.distributorId;
+    })[0];
+    chips.push(chip('Distributor', d ? d.name : S.filters.distributorId, 'distributorId'));
+  }
+  if (S.filters.costBorne) chips.push(chip('Cost', 'we absorb it', 'costBorne'));
   if (!chips.length) return '';
   return '<div class="toolbar">' + chips.join('') + '</div>';
 }
@@ -1794,10 +1863,17 @@ function claimTable() {
       cells.push('<td class="c-principal' + (c.principal ? '' : ' dimmer') + '">' +
         h(c.principal || 'unattributed') + '</td>');
     }
-    if (showCustomer) cells.push('<td class="c-cust">' + h(c.customerName) + '</td>');
+    // The hospital, and who sold the machine to it. A claim on the distributor
+    // channel has to name both: the same hospital holds machines from several
+    // distributors, and one of them may be ours.
+    if (showCustomer) {
+      cells.push('<td class="stack c-cust">' + h(c.customerName) +
+        (c.distributorName && seesInternals()
+          ? '<span class="tiny dim">via ' + h(c.distributorName) + '</span>' : '') + '</td>');
+    }
     cells.push(
       '<td class="stack c-serial"><span class="mono">' + h(c.serialNumber) + '</span>' +
-        warrantyPill(c.warrantyType) + '</td>',
+        warrantyPill(c.warrantyType) + ourWarrantyPill(c) + '</td>',
       '<td class="c-parts">' + c.items.length + ' item' + (c.items.length === 1 ? '' : 's') + '</td>'
     );
     if (showRequester) cells.push('<td class="dim c-req">' + h(c.requesterName) + '</td>');
@@ -1917,7 +1993,10 @@ function wireClaimsToolbar() {
   el('view').querySelectorAll('[data-clear]').forEach(function (b) {
     b.addEventListener('click', function () {
       const key = b.dataset.clear;
-      S.filters[key] = Array.isArray(S.filters[key]) ? [] : '';
+      // A tick box clears to false, not to ''. Left as a string it would come
+      // back as "false", which is a string, which is true.
+      S.filters[key] = Array.isArray(S.filters[key]) ? []
+        : (typeof S.filters[key] === 'boolean' ? false : '');
       // The id is what filters; the name is only what the chip and the box read
       // back, and it has to go with it.
       if (key === 'customerId') S.filters.customerName = '';
@@ -1940,6 +2019,14 @@ function wireClaimsToolbar() {
   const wf = el('warrantyFilter');
   if (wf) wf.addEventListener('change', function () {
     S.filters.warrantyTypes = this.value ? [this.value] : []; loadClaims();
+  });
+  const df = el('distributorFilter');
+  if (df) df.addEventListener('change', function () {
+    S.filters.distributorId = this.value; loadClaims();
+  });
+  const cb = el('costBorne');
+  if (cb) cb.addEventListener('change', function () {
+    S.filters.costBorne = this.checked; loadClaims();
   });
   if (el('customerFilter')) wireCombo('customerFilter');
   const gb = el('groupBy');
@@ -2938,7 +3025,7 @@ function adminContactHtml() {
 
 /* ========================================================== claim form */
 
-const FORM = { claim: null, items: [], files: {}, lookup: null };
+const FORM = { claim: null, items: [], files: {}, lookup: null, warnedNoCover: false };
 
 function openClaimForm(existing) {
   FORM.claim = existing || null;
@@ -2957,6 +3044,8 @@ function openClaimForm(existing) {
     REPORT: { file: null, has: existing ? (existing.attachments || []).some(function (a) { return a.kind === 'REPORT'; }) : false }
   };
   FORM.lookup = null;
+  // A fresh form has not warned anybody about anything yet.
+  FORM.warnedNoCover = false;
 
   openModal({
     title: existing ? (S.session.role === ROLE.ADMIN ? 'Amend Claim' : 'Edit Claim') : 'New Warranty Claim',
@@ -3189,7 +3278,10 @@ function runLookup(serial) {
   clearTimeout(lookupTimer);
   const box = el('lookupBox');
   if (!box) return;
-  if (!serial) { box.innerHTML = ''; FORM.lookup = null; return; }
+  if (!serial) { box.innerHTML = ''; FORM.lookup = null; FORM.warnedNoCover = false; return; }
+  // A different unit is a different question: whatever was acknowledged about
+  // the last one says nothing about this one.
+  FORM.warnedNoCover = false;
   box.innerHTML = '<div class="lookup none"><div class="l1">' + h(serial) + '</div>' +
     '<div class="tiny">Checking…</div></div>';
 
@@ -3210,15 +3302,21 @@ function runLookup(serial) {
     const cls = w.type === WARRANTY.PRINCIPAL ? 'ok'
       : w.type === WARRANTY.OUT ? 'out'
         : w.type === WARRANTY.MANUAL ? 'manual' : 'none';
-    // The answer, not the arithmetic. How the months were counted is the
-    // administrator's working; to a requester it is a calculation they did not
-    // make and cannot change, and it only invites an argument neither of them
-    // can settle at the machine.
+    // Two tiers, and which of them a person is shown depends on which one is
+    // theirs to act on.
+    //
+    // What the principal still covers is our commercial position with them, and
+    // the field engineer standing at the machine can do nothing with it. What
+    // they need to know is whether WE are covering the repair — so that is the
+    // one line they get, and where it is not yet known it says so rather than
+    // answering the other question and hoping the two agree. They frequently
+    // do not; that is the entire reason for the second tier.
+    const ours = data.customerWarranty;
     const verdict = !seesInternals()
-      ? (w.type === WARRANTY.PRINCIPAL
-        ? 'UNDER WARRANTY' + (w.expiry ? ' — until ' + monthLabel(w.expiry) : '')
-        : w.type === WARRANTY.OUT
-          ? 'OUT OF WARRANTY' + (w.expiry ? ' — since ' + monthLabel(w.expiry) : '')
+      ? (ours && ours.type === OUR_WARRANTY.IN
+        ? 'UNDER WARRANTY' + (ours.expiry ? ' — until ' + monthLabel(ours.expiry) : '')
+        : ours && ours.type === OUR_WARRANTY.OUT
+          ? 'OUT OF WARRANTY' + (ours.expiry ? ' — since ' + monthLabel(ours.expiry) : '')
           : 'THE ADMINISTRATOR WILL CHECK THIS UNIT')
       : w.type === WARRANTY.PRINCIPAL
         ? 'PRINCIPAL WARRANTY — valid until ' + monthLabel(w.expiry) +
@@ -3226,6 +3324,21 @@ function runLookup(serial) {
         : w.type === WARRANTY.OUT
           ? 'OUT OF PRINCIPAL WARRANTY — expired ' + monthLabel(w.expiry)
           : 'MANUAL VERIFICATION REQUIRED — the administrator will check this';
+
+    // The second line, for the people inside the company. Underneath it, the
+    // quadrant that costs money: their warranty has run out and ours has not.
+    const oursLine = (seesInternals() && ours)
+      ? '<div class="l3">' + (ours.type === OUR_WARRANTY.IN
+        ? 'OUR WARRANTY TO THE BUYER — valid until ' + monthLabel(ours.expiry)
+        : ours.type === OUR_WARRANTY.OUT
+          ? 'OUR WARRANTY TO THE BUYER — ended ' + monthLabel(ours.expiry)
+          : 'OUR WARRANTY TO THE BUYER — not established') + '</div>' +
+        '<div class="tiny" style="color:inherit">' + h(ours.basis) + '</div>' +
+        (data.costBorne
+          ? '<div class="tiny" style="color:inherit"><b>We absorb the cost of this one</b> — ' +
+            'the principal no longer covers it and we still do.</div>'
+          : '')
+      : '';
 
     box.innerHTML =
       '<div class="lookup ' + cls + '">' +
@@ -3235,9 +3348,13 @@ function runLookup(serial) {
           ? '<div class="tiny" style="color:inherit">Principal: ' +
             (data.principal ? h(data.principal) : 'not attributed — the administrator will assign one') +
             '</div>' +
+            (data.distributorName
+              ? '<div class="tiny" style="color:inherit">Sold through: ' +
+                h(data.distributorName) + '</div>' : '') +
             '<div class="tiny" style="color:inherit">' + h(w.basis) + '</div>'
           : '') +
         '<div class="l3">' + verdict + '</div>' +
+        oursLine +
       '</div>' +
       (data.registered === false
         ? '<div class="notice" style="margin-top:8px">⚠ <b class="mono">' + h(data.serial) +
@@ -3321,6 +3438,30 @@ function clearFormProblem() {
   if (box) box.remove();
 }
 
+/**
+ * Whether this claim is covered by nobody, said before it is sent rather than
+ * after.
+ *
+ * Out of the principal's warranty and out of ours as well means the hospital
+ * is going to be quoted for the part. Finding that out after the claim has
+ * been filed wastes a round trip and, worse, an expectation somebody has
+ * already given the hospital. A warning, not a block: an uncovered claim is a
+ * perfectly ordinary thing to file — it becomes a spare-part order.
+ *
+ * Silent when either side is still to be checked. "Nobody covers this" and
+ * "nobody has worked it out yet" are not the same sentence.
+ */
+function noCoverWarning(lookup) {
+  if (!lookup || !lookup.warranty) return '';
+  const ours = lookup.customerWarranty;
+  if (!ours) return '';
+  if (lookup.warranty.type !== WARRANTY.OUT) return '';
+  if (ours.type !== OUR_WARRANTY.OUT) return '';
+  return 'This unit is outside both warranties — the principal\u2019s and ours. ' +
+    'The claim can still be filed, but the parts will be chargeable. ' +
+    'Press <b>Submit</b> again to send it anyway.';
+}
+
 function saveForm(thenSubmit) {
   const customerId = el('fCustomer') ? el('fCustomer').value : '';
   const serial = el('fSerial').value.trim();
@@ -3350,6 +3491,13 @@ function saveForm(thenSubmit) {
         '. <b>Save Draft</b> keeps everything you have entered, and you can add the rest later.');
       toast('Still missing ' + missing.length + ' thing' + (missing.length === 1 ? '' : 's') +
         ' — see the top of the form.', 'err');
+      return;
+    }
+    const uncovered = noCoverWarning(FORM.lookup);
+    if (uncovered && !FORM.warnedNoCover) {
+      FORM.warnedNoCover = true;
+      showFormProblem(uncovered);
+      toast('Nothing covers this unit — see the top of the form.', 'err');
       return;
     }
   }

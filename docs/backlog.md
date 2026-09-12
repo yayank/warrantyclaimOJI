@@ -554,7 +554,36 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## J · Dua tingkat garansi pada klaim
+## J · Dua tingkat garansi pada klaim — ✅ SELESAI (12 Sep 2026)
+
+> Catatan koreksi, empat hal:
+>
+> 1. **Teknisi lapangan tidak diberi dua baris, tapi satu — baris kita.**
+>    Prompt bilang form klaim menampilkan dua baris untuk semua orang. Itu
+>    keliru: apa yang masih ditanggung principal adalah posisi dagang kita
+>    dengan mereka, dan orang yang berdiri di depan alat rusak tidak bisa
+>    berbuat apa-apa dengannya. Yang perlu dia tahu adalah apakah **kita**
+>    menanggung perbaikannya. Dua baris tetap ada, tapi untuk orang dalam
+>    perusahaan. Kalau sisi kita belum diketahui, layarnya bilang begitu —
+>    bukan menjawab pertanyaan yang lain dan berharap keduanya sama. Sering
+>    tidak sama; itu justru alasan adanya tingkat kedua.
+> 2. **Penyaringannya di dua tempat, bukan satu.** `listClaims_` dan
+>    `getClaim_`, **dan** sekali lagi di `api()`. Bukan berlebihan: **ekspor
+>    Excel ditulis di server lalu diserahkan sebagai tautan Drive, dan tidak
+>    pernah lewat dispatcher sama sekali** — penyaringan di dispatcher saja
+>    akan meloloskan seluruh isi berkasnya.
+> 3. **`costBorne` wajib lewat `isTrue_`.** Prompt tidak menyinggung saved
+>    views, padahal saringan baru ikut tersimpan di sana — dan kotak yang tidak
+>    dicentang, disimpan sebagai teks, kembali sebagai string `"false"`, yang
+>    bernilai benar. `VIEW_BOOLS` ditambahkan di `Views.gs` supaya tersimpan
+>    sebagai boolean sungguhan.
+> 4. Judul kolom ekspor `Warranty` jadi `Principal warranty`, karena sekarang
+>    ada dua. Saringan distributor ditambahkan di luar prompt — klaim sudah
+>    menyebut distributornya, dan admin jelas akan mencarinya begitu.
+>
+> Terukur: baris `Claims` bertambah 7 kolom, `measure-list.js` naik dari
+> 16.520 jadi **19.411 sel (+17%)** untuk 412 klaim, tetap **satu `getValues`**.
+> Sisi customer tidak pernah dibaca dari `Population` saat menggambar daftar.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H dan I.
 > Baca `docs/warranty-model.md` bagian 5 dan 7, dan

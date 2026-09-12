@@ -93,7 +93,11 @@ function api(request) {
   try {
     const session = resolveSession_(req.token, req.simulatedRole);
     const data = route_(session, req.action, req.payload || {});
-    return { ok: true, data: jsonSafe_(data), session: publicSession_(session) };
+    return {
+      ok: true,
+      data: jsonSafe_(redactForRole_(session, data)),
+      session: publicSession_(session)
+    };
   } catch (err) {
     return {
       ok: false,
@@ -103,6 +107,28 @@ function api(request) {
       current: err && err.stale ? err.current : undefined
     };
   }
+}
+
+/**
+ * The customer side of a warranty, taken back out of whatever is being sent.
+ *
+ * listClaims_ and getClaim_ already strip it, and they have to — the Excel
+ * export is written on the server and never passes this way. This is the second
+ * fence: a screen added next year that returns a claim through some new
+ * endpoint gets the same treatment without anybody having to remember.
+ */
+function redactForRole_(session, value) {
+  if (!session || session.role !== ROLE.PRINCIPAL) return value;
+  if (Array.isArray(value)) return value.map(function (v) { return redactForRole_(session, v); });
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    const out = {};
+    Object.keys(value).forEach(function (k) {
+      if (CUSTOMER_SIDE_FIELDS.indexOf(k) !== -1) return;
+      out[k] = redactForRole_(session, value[k]);
+    });
+    return out;
+  }
+  return value;
 }
 
 /**

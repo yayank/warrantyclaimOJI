@@ -140,6 +140,8 @@ function unitRowToUnit_(row) {
     SerialNumber: String(r.Batch || '').trim().toUpperCase(),
     Material: String(r.Material || '').trim().toUpperCase(),
     Channel: String(r.Channel || '').trim().toLowerCase(),
+    DistributorID: String(r.DistributorID || '').trim(),
+    CustomerID: String(r.CustomerID || '').trim(),
     SellingInDate: parseLocalDate_(r.SellingInDate).iso,
     ReceivedAtDistributor: parseLocalDate_(r.ReceivedAtDistributor).iso,
     InstalledAt: parseLocalDate_(r.InstalledAt).iso,

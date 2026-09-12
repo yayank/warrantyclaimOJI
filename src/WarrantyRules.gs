@@ -397,6 +397,37 @@ function resolveWarranty_(unit, scope, today) {
 }
 
 /**
+ * Both tiers for one serial number, as a claim records them.
+ *
+ * The principal side goes through determineWarranty_ so that the fallback for
+ * models with no rule yet still applies, and so that every existing caller and
+ * every existing check keeps the answer it had. The customer side has no
+ * fallback and none is wanted: there has never been a figure for it, and
+ * inventing one would be the fault this replaced.
+ *
+ * costBorne is the expensive quadrant — the principal has stopped covering the
+ * unit and we have not. It is only ever true when both sides are known: a
+ * warranty waiting on a person is not a cost anybody has established.
+ */
+function claimWarranty_(serial, today) {
+  const now = today || new Date();
+  const principal = determineWarranty_(serial, now);
+  const unit = unitOf_(serial);
+
+  const customer = unit
+    ? resolveWarranty_(unit, WARRANTY_SCOPE.CUSTOMER, now)
+    : manualVerdict_(WARRANTY_SCOPE.CUSTOMER,
+      ['this serial number is not on the unit register'], null);
+
+  return {
+    principal: principal,
+    customer: customer,
+    unit: unit,
+    costBorne: customer.active === true && principal.type === WARRANTY_TYPE.OUT
+  };
+}
+
+/**
  * The unit as the engine needs to see it, from the population index.
  *
  * One shape, built in one place — unitRowToUnit_ in Units.gs — whether the row
