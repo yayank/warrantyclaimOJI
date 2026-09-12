@@ -32,6 +32,7 @@ membuat daftar berkas yang disentuh kecuali diminta.
 | `src/Claims.gs` | daftar klaim, aturan tab, transisi, aksi massal, kolom ringkasan — **berkas terbesar, 1.800 baris** |
 | `src/Warranty.gs` | jaring pengaman garansi 22 bulan dari serial, indeks unit |
 | `src/WarrantyRules.gs` | aturan garansi per model dari sheet, dua tingkat, `resolveWarranty_` |
+| `src/Units.gs` | kolom garansi pada baris unit, `parseLocalDate_` (dd/mm/yyyy), `recomputeUnitWarranty_` |
 | `src/Audit.gs` | jejak audit + arsip per tahun |
 | `src/Visits.gs` | stempel kunjungan, penanda "baru sejak terakhir dilihat" |
 | `src/Views.gs` | saved views per orang |
@@ -109,6 +110,9 @@ Aturan yang sudah berlaku:
   yang harus diperbarui lebih dulu. Klaimnya tetap tersimpan sebagai draft dan
   memicu permintaan pendaftaran unit ke Administrator — pekerjaan lapangan tidak
   boleh hilang.
+- **Tanggal impor selalu `dd/mm/yyyy`.** Lewat `parseLocalDate_` di `Units.gs`,
+  tidak pernah lewat `new Date()`. `03/09/2025` adalah 3 September, dan
+  `new Date()` membacanya 9 Maret.
 - **`WarrantyType` berarti sisi principal**, bukan sisi pembeli. Garansi kita ke
   pembeli adalah kolom terpisah. Jangan tumpangkan artinya.
 - **Antarmuka tetap Bahasa Inggris.** Ditanyakan 12 Sep 2026, dijawab tidak

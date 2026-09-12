@@ -114,7 +114,7 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
-['Config.gs', 'Repo.gs', 'Warranty.gs', 'WarrantyRules.gs'].forEach(function (f) {
+['Config.gs', 'Repo.gs', 'Warranty.gs', 'WarrantyRules.gs', 'Units.gs'].forEach(function (f) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'),
     sandbox, { filename: f });
 });

@@ -139,14 +139,8 @@ function rulesIndex_() {
 function forgetWarrantyRules_() {
   delete INDEX_MEMO.products;
   delete INDEX_MEMO.rules;
-  const cache = CacheService.getScriptCache();
-  ['productsIndex', 'rulesIndex'].forEach(function (key) {
-    const head = cache.get(key + ':n');
-    const count = head ? Number(head) : 0;
-    const keys = [key + ':n'];
-    for (let i = 0; i < count && i < CACHE_MAX_CHUNKS; i++) keys.push(key + ':' + i);
-    try { cache.removeAll(keys); } catch (e) { /* an empty cache is a fine cache */ }
-  });
+  cacheRemoveLarge_('productsIndex');
+  cacheRemoveLarge_('rulesIndex');
 }
 
 /* ------------------------------------------------------------------- dates */
@@ -405,22 +399,11 @@ function resolveWarranty_(unit, scope, today) {
 /**
  * The unit as the engine needs to see it, from the population index.
  *
- * The columns for channel, the two later dates and the extended months arrive
- * with the next backlog item; reading them now costs nothing and means that
- * item only has to add columns, not rewire anything.
+ * One shape, built in one place — unitRowToUnit_ in Units.gs — whether the row
+ * came from the cached index or was just read off the sheet. Two readings of
+ * the same row is how a screen and a recompute end up disagreeing about a date.
  */
 function unitOf_(serial) {
-  const sn = String(serial || '').trim().toUpperCase();
-  const hit = populationIndex_()[sn];
-  if (!hit) return null;
-  return {
-    SerialNumber: sn,
-    Material: hit.material || '',
-    Channel: hit.channel || '',
-    SellingInDate: hit.sellingIn || '',
-    ReceivedAtDistributor: hit.received || '',
-    InstalledAt: hit.installed || '',
-    ExtendedMonthsPrincipal: hit.extendedPrincipal || 0,
-    ExtendedMonthsCustomer: hit.extendedCustomer || 0
-  };
+  const hit = populationIndex_()[String(serial || '').trim().toUpperCase()];
+  return hit && hit.unit ? hit.unit : null;
 }

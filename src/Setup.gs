@@ -13,6 +13,7 @@ function setUp() {
   seedPrincipal_();
   assignMasterIds_();
   const summaries = backfillClaimSummaries_();
+  const units = backfillUnitWarranty_();
   const folder = rootFolder_();
   return [
     'Sheets ready.',
@@ -22,6 +23,8 @@ function setUp() {
       : 'Every sheet already had its header row.',
     'Claim summary columns: ' + summaries.claims + ' claims counted, ' +
       summaries.corrected + ' corrected.',
+    'Unit warranty columns: ' + units.units + ' units worked out, ' +
+      units.changed + ' changed.',
     'Drive root: ' + folder.getName() + ' (' + folder.getId() + ')',
     'Next: put your OAuth Client ID in Settings!GoogleClientId, add yourself to the users sheet',
     'as Administrator, deploy the web app, paste its URL into Settings!AppUrl, then run',
@@ -85,6 +88,37 @@ function backfillClaimSummaries_() {
     s.getRange(2, cols[n] + 1, columns[n].length, 1).setValues(columns[n]);
   });
   return { claims: counted, corrected: corrected };
+}
+
+/**
+ * Fills in the warranty columns on every unit.
+ *
+ * Same job as backfillClaimSummaries_ and the same reasoning: units that
+ * predate the columns have nothing in them, and an empty end date reads as
+ * "no cover" rather than as "nobody has worked it out yet".
+ *
+ * Cheap to repeat. Nothing it writes depends on today, so running it twice in
+ * a row reports nothing changed the second time — which is also how you can
+ * tell it is not quietly disagreeing with itself.
+ */
+function backfillUnitWarranty_() {
+  return recomputeUnitWarranty_(null);
+}
+
+/**
+ * Run from the editor after editing the rules sheet by hand.
+ *
+ * Changing a rule does not change any unit until this runs: the dates on the
+ * unit are what every screen reads, and they were worked out under the old
+ * rule. Until there is a screen for the rules sheet, this is the step that
+ * makes an edit take effect.
+ */
+function backfillUnitWarranties() {
+  forgetWarrantyRules_();
+  const r = backfillUnitWarranty_();
+  return r.changed
+    ? 'Worked out ' + r.units + ' units; ' + r.changed + ' now say something different.'
+    : 'Worked out ' + r.units + ' units; every one already agreed with the rules on file.';
 }
 
 /**

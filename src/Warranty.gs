@@ -211,9 +211,9 @@ function populationIndex_() {
   if (INDEX_MEMO.population) return INDEX_MEMO.population;
 
   // The key is deliberately not versioned even though the shape changed. An
-  // entry cached by the previous revision has no material on it, so the units
-  // it holds are answered by the fallback below until it expires — which is
-  // what they were answered by before this deploy. Half an hour of unchanged
+  // entry cached by the previous revision carries no unit, so the units it
+  // holds are answered by the fallback below until it expires — which is what
+  // they were answered by before this deploy. Half an hour of unchanged
   // behaviour, never a wrong date.
   const cached = cacheGetLarge_('populationIndex');
   if (cached) { INDEX_MEMO.population = cached; return cached; }
@@ -225,16 +225,10 @@ function populationIndex_() {
     index[sn] = {
       product: String(r.ItemDescription || ''),
       principal: String(r.Principal || '').trim(),
-      // What the warranty rules count from. The last five columns do not exist
-      // on the sheet yet and read as blank until the next backlog item adds
-      // them, which is why nothing here insists on them.
-      material: String(r.Material || '').trim().toUpperCase(),
-      sellingIn: String(r.SellingInDate || ''),
-      channel: String(r.Channel || '').trim().toLowerCase(),
-      received: String(r.ReceivedAtDistributor || ''),
-      installed: String(r.InstalledAt || ''),
-      extendedPrincipal: Number(r.ExtendedMonthsPrincipal) || 0,
-      extendedCustomer: Number(r.ExtendedMonthsCustomer) || 0
+      // What the warranty rules count from, read the same way the recompute
+      // reads it. A hand-typed dd/mm/yyyy cell has to mean the same date here
+      // as it does there.
+      unit: unitRowToUnit_(r)
     };
   });
   cachePutLarge_('populationIndex', index, 1800);

@@ -265,6 +265,7 @@ function clearReferenceCache_() {
   // The in-memory copies would otherwise outlive the import that replaced them.
   delete INDEX_MEMO.warranty;
   delete INDEX_MEMO.population;
+  forgetWarrantyRules_();
 }
 
 /* ------------------------------------------------------------- unit data */

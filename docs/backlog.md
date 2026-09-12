@@ -469,7 +469,39 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## I · Kolom garansi pada unit, dan pengisian awalnya
+## I · Kolom garansi pada unit, dan pengisian awalnya — ✅ SELESAI (12 Sep 2026)
+
+> Catatan koreksi, empat hal:
+>
+> 1. **`setCells_` tidak dipakai, dan tidak seharusnya.** Ia murah kalau
+>    barisnya sudah di tangan; tidak ada yang memegang baris `Population`, jadi
+>    mencarinya berarti membaca sheet — dan setelah dibaca, yang murah adalah
+>    menulis satu kolom penuh. Menghitung ulang satu unit dan menghitung ulang
+>    semuanya jadi sama biayanya, dan jalur kodenya satu, bukan dua yang bisa
+>    berbeda pendapat.
+> 2. **"Tidak menaikkan `RowVersion`" tidak berlaku di sini** — `Population`
+>    tidak punya kolom itu. Yang diuji sebagai gantinya: satu penghitungan ulang
+>    menyentuh tujuh kolomnya sendiri dan stempelnya, dan **tidak satu sel pun
+>    di luar itu**, termasuk tidak merapikan `dd/mm/yyyy` yang diketik orang
+>    menjadi ISO.
+> 3. **`populationIndex_` harus membaca baris lewat `unitRowToUnit_` juga.**
+>    Prompt tidak menyebutnya, dan tanpa itu form klaim dan kolom tersimpan bisa
+>    berbeda pendapat tentang tanggal yang sama: satu membaca `20/05/2024`, satu
+>    lagi tidak bisa membacanya sama sekali. Satu bentuk unit, satu tempat.
+> 4. **`parseLocalDate_` juga menerima ISO**, karena itulah yang sudah ada di
+>    sheet dan satu-satunya bentuk lain yang tidak bisa salah baca. `mm/dd/yyyy`
+>    ditolak dengan harga berapa pun. Pemeriksaan `Date`-nya memakai
+>    `Object.prototype.toString.call`, bukan `instanceof` — `Date` dari konteks
+>    lain tetap `Date`.
+>
+> Berkasnya `src/Units.gs`, bukan menumpang di `WarrantyRules.gs`: yang satu
+> soal aturan, yang satu soal register unit.
+>
+> Terukur: `populationIndex_` jadi **840.286 byte untuk 2.610 unit — 10 dari 40
+> potongan cache** yang boleh dipakai, jadi tetap muat lewat `cachePutLarge_`.
+> Satu penghitungan ulang membaca 65.275 sel dan menulis 8 kolom, berapa pun
+> jumlah unit yang diminta. `measure-list.js` **tidak bergerak sama sekali**:
+> tetap 2 getValues / 30.846 sel, karena kolom garansi klaim ada di baris klaim.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H.
 > Baca `docs/warranty-model.md` bagian 2, 4 dan 8.

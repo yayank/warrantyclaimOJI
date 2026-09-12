@@ -94,7 +94,28 @@ SCHEMA[SHEET.SETTINGS] = ['Key', 'Value'];
 SCHEMA[SHEET.WARRANTY] = ['SellingInDate', 'Material', 'Batch', 'Status', 'exp', 'Expired'];
 SCHEMA[SHEET.POPULATION] = [
   'Delivery', 'SellingInDate', 'Material', 'ItemDescription', 'Batch',
-  'DeliveryQuantity', 'ShipToParty', 'Principal'
+  'DeliveryQuantity', 'ShipToParty', 'Principal',
+
+  // Filled in by an administrator or by an import. Which of these a unit needs
+  // depends on what its model's warranty rule counts from: a rule reading the
+  // installation date is answered by InstalledAt and by nothing else.
+  'Channel', 'DistributorID', 'CustomerID',
+  'ReceivedAtDistributor', 'InstalledAt',
+  'ExtendedMonthsPrincipal', 'ExtendedMonthsCustomer',
+  'ContractRef', 'WarrantyNote',
+
+  // Worked out from the columns above and the rules sheet, then written back
+  // here. Nothing else may write them and nobody should edit them by hand:
+  // they are recomputed from source every time, never adjusted. See
+  // unitWarrantyOf_ and recomputeUnitWarranty_ in Units.gs.
+  //
+  // Dates, never a status. "Still under warranty" is a different answer
+  // tomorrow morning, so what is stored is when cover ends and the verdict is
+  // worked out when somebody asks.
+  'AssemblyMonth',
+  'WarrantyStartPrincipal', 'WarrantyEndPrincipal', 'WarrantyBasisPrincipal',
+  'WarrantyStartCustomer', 'WarrantyEndCustomer', 'WarrantyBasisCustomer',
+  'WarrantyComputedAt'
 ];
 
 /**
