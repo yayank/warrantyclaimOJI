@@ -663,7 +663,39 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## L · Layar unit dan impor massal
+## L · Layar unit dan impor massal — ✅ SELESAI (12 Sep 2026)
+
+> Catatan koreksi, lima hal:
+>
+> 1. **Butir ini tidak butuh K.** Prompt bilang "Butuh H, I, K"; K adalah layar
+>    aturan garansi dan tidak menyentuh apa pun di sini. Dikerjakan setelah J,
+>    tanpa K, tanpa masalah.
+> 2. **Ada bug serius yang ditemukan saat mengerjakannya, dan itu bagian
+>    terpenting dari butir ini.** `importUnits_` mengosongkan **seluruh lebar
+>    baris** sebelum menulis balik kolom dari berkas principal. Berkas itu hanya
+>    membawa delapan kolom miliknya sendiri — jadi sejak butir I, satu impor
+>    rutin akan **menghapus seluruh `Channel`, `InstalledAt`, `ExtendedMonths`
+>    dan kolom garansi terhitung pada 2.610 unit**, tanpa pesan apa pun, dan baru
+>    terlihat berbulan-bulan kemudian sebagai garansi yang tiba-tiba tidak bisa
+>    dihitung. Sekarang hanya kolom yang benar-benar dibawa berkasnya yang
+>    disentuh, dan impor memanggil `recomputeUnitWarranty_` setelahnya.
+> 3. **Impornya CSV/TSV, bukan xlsx.** Alasannya: pemetaan kolom butuh header
+>    berkasnya di browser, dan pratinjau harus melihat **baris yang sama persis**
+>    dengan yang nanti ditulis. Lewat Drive, keduanya harus dibaca dua kali dan
+>    bisa berbeda. Impor workbook principal yang lama tetap ada, tidak berubah.
+>    Pemisahnya dikenali sendiri — koma, titik koma (yang ditulis Excel
+>    Indonesia), atau tab dari tempelan spreadsheet.
+> 4. **"Layar unit belum lengkap" jadi saringan pada layar unit**, bukan layar
+>    terpisah: sumbernya sama, kolomnya sama, dan digabung ia bisa dipersempit
+>    per distributor dan per model sekaligus — yang mengubahnya dari daftar jadi
+>    perintah kerja.
+> 5. **Tanggal disimpan sebagai ISO**, dinormalkan saat disimpan lewat form atau
+>    impor. `recomputeUnitWarranty_` tetap tidak pernah menulis ulang sel yang
+>    bukan miliknya, jadi sel yang tidak disunting siapa pun tetap apa adanya.
+>
+> Gelombang impor 500 baris per panggilan, tiap gelombang satu lintasan penuh
+> dan utuh sendiri; layar bilang sudah sampai berapa. Menulis satu kolom sekali,
+> bukan satu baris sekali — dibuktikan dengan menghitung `setValues`.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H, I, K.
 >

@@ -211,6 +211,9 @@ function route_(session, action, payload) {
     case 'master.units': return listUnits_(session, payload);
     case 'master.importPreview': return previewUnitImport_(session, payload);
     case 'master.import': return importUnits_(session, payload);
+    case 'master.saveUnit': return saveUnit_(session, payload);
+    case 'master.previewUnits': return previewUnitUpdate_(session, payload);
+    case 'master.applyUnits': return applyUnitUpdate_(session, payload);
     case 'master.unknownPrincipals': return unknownPrincipals_(session);
     case 'master.searchCustomers': return searchCustomers_(session, payload);
     case 'master.customer': return customerById_(session, payload.customerId);

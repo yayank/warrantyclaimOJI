@@ -73,6 +73,7 @@ node tools/verify-visits.js                 # 39 pemeriksaan
 node tools/verify-rules.js                  # 65 pemeriksaan
 node tools/verify-unit-warranty.js          # 54 pemeriksaan
 node tools/verify-two-tier.js               # 57 pemeriksaan
+node tools/verify-unit-admin.js             # 56 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.

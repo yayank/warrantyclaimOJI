@@ -2100,6 +2100,405 @@ function recomputeUnitWarranty_(serials) {
   return { units: units, changed: changed };
 }
 
+/* ==================================================== the register, as a screen */
+
+/**
+ * The columns an administrator may set. Everything else on a population row is
+ * either the principal's own data or worked out from it.
+ */
+const UNIT_EDITABLE = ['Material', 'ItemDescription', 'Principal', 'ShipToParty',
+  'SellingInDate', 'Channel', 'DistributorID', 'CustomerID',
+  'ReceivedAtDistributor', 'InstalledAt',
+  'ExtendedMonthsPrincipal', 'ExtendedMonthsCustomer', 'ContractRef', 'WarrantyNote'];
+
+/** Of those, the three that hold a date and must never meet new Date(). */
+const UNIT_DATE_FIELDS = ['SellingInDate', 'ReceivedAtDistributor', 'InstalledAt'];
+
+/** The most rows one import call will write. See applyUnitUpdate_. */
+const UNIT_IMPORT_MAX = 1000;
+
+/**
+ * One unit as the administration screen shows it: what is on the row, what was
+ * worked out from it, and — when nothing could be — what is missing.
+ *
+ * The missing list is the point of the screen. "Manual verification required"
+ * on two thousand units is a wall; "no installation date" on two thousand units
+ * is an afternoon's work with an end to it.
+ */
+function unitAdminRow_(row) {
+  const unit = unitRowToUnit_(row);
+  const principal = resolveWarranty_(unit, WARRANTY_SCOPE.PRINCIPAL, new Date());
+  const customer = resolveWarranty_(unit, WARRANTY_SCOPE.CUSTOMER, new Date());
+
+  // A date nobody can read is worse than a blank one: the screen would show the
+  // cell as filled in while the engine treats it as empty.
+  const unreadable = [];
+  UNIT_DATE_FIELDS.forEach(function (f) {
+    const raw = row[f];
+    if (raw !== '' && raw !== undefined && raw !== null && !parseLocalDate_(raw).iso) {
+      unreadable.push(f + ' is not a date the portal can read: "' + raw + '"');
+    }
+  });
+
+  const missing = unreadable
+    .concat(principal.missing || [])
+    .concat(customer.missing || []);
+
+  return {
+    serialNumber: unit.SerialNumber,
+    material: unit.Material,
+    product: String(row.ItemDescription || ''),
+    principalName: String(row.Principal || '').trim(),
+    customerId: unit.CustomerID,
+    shipTo: String(row.ShipToParty || ''),
+    channel: unit.Channel,
+    distributorId: unit.DistributorID,
+    distributorName: distributorName_(unit.DistributorID),
+    sellingInDate: unit.SellingInDate,
+    receivedAtDistributor: unit.ReceivedAtDistributor,
+    installedAt: unit.InstalledAt,
+    extendedMonthsPrincipal: unit.ExtendedMonthsPrincipal,
+    extendedMonthsCustomer: unit.ExtendedMonthsCustomer,
+    contractRef: String(row.ContractRef || ''),
+    warrantyNote: String(row.WarrantyNote || ''),
+    assemblyMonth: String(row.AssemblyMonth || ''),
+    warrantyType: principal.type,
+    warrantyEndPrincipal: principal.expiry,
+    warrantyBasisPrincipal: principal.basis,
+    customerWarrantyType: customer.type,
+    warrantyEndCustomer: customer.expiry,
+    warrantyBasisCustomer: customer.basis,
+    computedAt: String(row.WarrantyComputedAt || ''),
+    complete: missing.length === 0,
+    missing: missing
+  };
+}
+
+/**
+ * The unit register, searchable and narrowable.
+ *
+ * `incomplete` is the filter that turns filling the data in from an open-ended
+ * chore into a list that gets shorter. Combined with a distributor or a model it
+ * is also a work order: these forty units, this one distributor, one email.
+ */
+function listUnits_(session, filter) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const f = filter || {};
+  const q = String(f.search || '').trim().toUpperCase();
+
+  let rows = readAll_(SHEET.POPULATION)
+    .filter(function (r) { return String(r.Batch || '').trim(); })
+    .map(unitAdminRow_);
+
+  if (q) {
+    rows = rows.filter(function (r) {
+      return [r.serialNumber, r.material, r.product, r.distributorName, r.shipTo,
+        r.customerId].join(' ').toUpperCase().indexOf(q) !== -1;
+    });
+  }
+  if (f.material) rows = rows.filter(function (r) { return r.material === f.material; });
+  if (f.distributorId) {
+    rows = rows.filter(function (r) { return r.distributorId === f.distributorId; });
+  }
+  if (isTrue_(f.incomplete)) rows = rows.filter(function (r) { return !r.complete; });
+
+  const total = rows.length;
+  const incomplete = rows.filter(function (r) { return !r.complete; }).length;
+  const offset = Math.max(0, Number(f.offset) || 0);
+  const limit = Math.min(Math.max(1, Number(f.limit) || 200), 500);
+
+  return {
+    total: total,
+    incomplete: incomplete,
+    offset: offset,
+    rows: rows.slice(offset, offset + limit),
+    materials: Object.keys(rows.reduce(function (set, r) {
+      if (r.material) set[r.material] = true;
+      return set;
+    }, {})).sort()
+  };
+}
+
+/* ------------------------------------------------------------ one unit at a time */
+
+/**
+ * Checks one unit's worth of values and hands back what to write.
+ *
+ * Returns { fields, errors }. Nothing is written from here: the same function
+ * runs behind the single-unit form and behind the import preview, so what the
+ * preview promises and what the import does cannot drift apart.
+ */
+function checkUnitFields_(payload, options) {
+  const p = payload || {};
+  const opts = options || {};
+  const errors = [];
+  const fields = {};
+
+  UNIT_EDITABLE.forEach(function (name) {
+    if (p[name] === undefined) return;               // not offered, not changed
+
+    if (UNIT_DATE_FIELDS.indexOf(name) !== -1) {
+      const read = parseLocalDate_(p[name]);
+      if (read.error) { errors.push(name + ': ' + read.error); return; }
+      fields[name] = read.iso;
+      return;
+    }
+
+    if (name === 'ExtendedMonthsPrincipal' || name === 'ExtendedMonthsCustomer') {
+      const raw = String(p[name] === null || p[name] === undefined ? '' : p[name]).trim();
+      if (raw === '') { fields[name] = ''; return; }
+      const n = Number(raw);
+      if (!isFinite(n) || n < 0 || n !== Math.floor(n)) {
+        errors.push(name + ': "' + raw + '" is not a whole number of months');
+        return;
+      }
+      fields[name] = n;
+      return;
+    }
+
+    fields[name] = String(p[name] === null || p[name] === undefined ? '' : p[name]).trim();
+  });
+
+  if (fields.Material !== undefined) fields.Material = String(fields.Material).toUpperCase();
+  if (fields.Channel !== undefined) {
+    fields.Channel = String(fields.Channel).toLowerCase();
+    if (fields.Channel && [SALES_CHANNEL.DIRECT, SALES_CHANNEL.DISTRIBUTOR]
+      .indexOf(fields.Channel) === -1) {
+      errors.push('Channel: "' + fields.Channel + '" is neither direct nor distributor');
+    }
+  }
+
+  // A model with no product row has no warranty rule either, so the unit would
+  // be filed as unanswerable the moment it was saved.
+  if (fields.Material && !opts.skipMaterial && !productsIndex_()[fields.Material]) {
+    errors.push('Material: "' + fields.Material + '" is not on the product list');
+  }
+  if (fields.DistributorID && !distributorsIndex_()[fields.DistributorID]) {
+    errors.push('DistributorID: "' + fields.DistributorID + '" is not on the distributor list');
+  }
+
+  // Saying it was sold through a distributor without saying which one leaves the
+  // claim unable to name both parties, which is the one thing it must do.
+  const channel = fields.Channel !== undefined ? fields.Channel : opts.currentChannel;
+  const distributor = fields.DistributorID !== undefined
+    ? fields.DistributorID : opts.currentDistributor;
+  if (channel === SALES_CHANNEL.DISTRIBUTOR && !distributor) {
+    errors.push('DistributorID: a unit sold through a distributor has to say which one');
+  }
+
+  return { fields: fields, errors: errors };
+}
+
+/**
+ * Creates or updates one unit, then works its warranty out again.
+ *
+ * The recompute is not optional and not deferred: the dates on the row are what
+ * every screen reads, and leaving them at yesterday's answer after changing the
+ * date they were counted from is the whole failure this design exists to avoid.
+ */
+function saveUnit_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const p = payload || {};
+  const serial = String(p.Batch || p.serialNumber || '').trim().toUpperCase();
+  if (!serial) throw new Error('A unit needs a serial number.');
+
+  return withLock_(function () {
+    const existing = findBy_(SHEET.POPULATION, 'Batch', serial);
+    if (p.isNew && existing) {
+      throw new Error(serial + ' is already on the register.');
+    }
+    if (!p.isNew && !existing) throw new Error(serial + ' is not on the register.');
+
+    const checked = checkUnitFields_(p, {
+      currentChannel: existing ? String(existing.Channel || '').toLowerCase() : '',
+      currentDistributor: existing ? String(existing.DistributorID || '').trim() : ''
+    });
+    if (checked.errors.length) throw new Error(checked.errors.join('; '));
+
+    if (existing) {
+      const before = {};
+      Object.keys(checked.fields).forEach(function (k) { before[k] = existing[k]; });
+      setCells_(SHEET.POPULATION, 'Batch', serial, checked.fields);
+      Object.keys(checked.fields).forEach(function (k) {
+        if (String(before[k] === undefined ? '' : before[k]) === String(checked.fields[k])) return;
+        audit_(session, 'MasterDataChange', {
+          field: 'unit.' + serial + '.' + k,
+          oldValue: before[k], newValue: checked.fields[k]
+        });
+      });
+    } else {
+      const row = Object.assign({ Batch: serial, DeliveryQuantity: 1 }, checked.fields);
+      insert_(SHEET.POPULATION, row);
+      audit_(session, 'MasterDataChange', {
+        field: 'unit.' + serial, newValue: 'registered'
+      });
+    }
+
+    clearReferenceCache_();
+    recomputeUnitWarranty_([serial]);
+    return unitAdminRow_(findBy_(SHEET.POPULATION, 'Batch', serial));
+  });
+}
+
+/* ------------------------------------------------------------------ in bulk */
+
+/**
+ * What an import would do, said before it does any of it.
+ *
+ * Every row is checked and nothing is written. A row the portal will not accept
+ * comes back with its line number and the reason, because "the import failed"
+ * on a two thousand row file is not something anybody can act on.
+ *
+ * A serial number the register has never heard of is refused rather than
+ * created. This fills columns in on units that exist; adding a unit is a
+ * decision with a person behind it, and it has a form of its own.
+ */
+function previewUnitUpdate_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const rows = (payload && payload.rows) || [];
+  const known = {};
+  readAll_(SHEET.POPULATION).forEach(function (r) {
+    const sn = String(r.Batch || '').trim().toUpperCase();
+    if (sn) known[sn] = r;
+  });
+
+  const accepted = [];
+  const rejected = [];
+  const seen = {};
+
+  rows.forEach(function (row, i) {
+    const line = Number(row.__line) || (i + 2);
+    const serial = String(row.Batch || '').trim().toUpperCase();
+    if (!serial) {
+      rejected.push({ line: line, serial: '', reasons: ['no serial number in this row'] });
+      return;
+    }
+    if (!known[serial]) {
+      rejected.push({
+        line: line, serial: serial,
+        reasons: [serial + ' is not on the unit register — register it first']
+      });
+      return;
+    }
+    if (seen[serial]) {
+      rejected.push({
+        line: line, serial: serial,
+        reasons: ['the same serial number appears earlier in this file, on line ' + seen[serial]]
+      });
+      return;
+    }
+    seen[serial] = line;
+
+    const current = known[serial];
+    const checked = checkUnitFields_(row, {
+      currentChannel: String(current.Channel || '').toLowerCase(),
+      currentDistributor: String(current.DistributorID || '').trim()
+    });
+    if (checked.errors.length) {
+      rejected.push({ line: line, serial: serial, reasons: checked.errors });
+      return;
+    }
+
+    const changes = {};
+    Object.keys(checked.fields).forEach(function (k) {
+      const was = current[k] === undefined ? '' : current[k];
+      if (String(was) !== String(checked.fields[k])) {
+        changes[k] = { from: String(was), to: String(checked.fields[k]) };
+      }
+    });
+
+    accepted.push({
+      line: line, serial: serial,
+      fields: checked.fields,
+      changed: Object.keys(changes).length,
+      changes: changes
+    });
+  });
+
+  return {
+    total: rows.length,
+    accepted: accepted.length,
+    unchanged: accepted.filter(function (a) { return !a.changed; }).length,
+    rejected: rejected,
+    sample: accepted.filter(function (a) { return a.changed; }).slice(0, 20),
+    max: UNIT_IMPORT_MAX
+  };
+}
+
+/**
+ * Writes what the preview accepted.
+ *
+ * One pass over the sheet and one write per column, whatever the file's size —
+ * a round trip per row would not finish two thousand units inside the six
+ * minutes an execution gets. A file larger than UNIT_IMPORT_MAX arrives in
+ * waves, each one complete in itself, so an import that stops halfway has
+ * written half the units properly rather than all of them badly.
+ */
+function applyUnitUpdate_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const p = payload || {};
+  const rows = (p.rows || []).slice(0, UNIT_IMPORT_MAX);
+
+  return withLock_(function () {
+    const checked = previewUnitUpdate_(session, { rows: rows });
+    if (checked.rejected.length) {
+      throw new Error('This batch still has ' + checked.rejected.length +
+        ' row(s) the portal will not accept. Run the preview again.');
+    }
+
+    const accepted = {};
+    rows.forEach(function (row) {
+      const serial = String(row.Batch || '').trim().toUpperCase();
+      if (!serial) return;
+      const one = checkUnitFields_(row, {});
+      accepted[serial] = one.fields;
+    });
+
+    const s = sheet_(SHEET.POPULATION);
+    const last = s.getLastRow();
+    const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+    const keyCol = head.indexOf('Batch');
+    const grid = s.getRange(2, 1, Math.max(0, last - 1), head.length).getValues();
+
+    const touched = {};
+    let written = 0;
+    grid.forEach(function (raw) {
+      const serial = String(raw[keyCol] || '').trim().toUpperCase();
+      const fields = serial ? accepted[serial] : null;
+      if (!fields) return;
+      written++;
+      Object.keys(fields).forEach(function (name) {
+        const col = head.indexOf(name);
+        if (col === -1) return;
+        raw[col] = fields[name];
+        touched[name] = true;
+      });
+    });
+
+    // One write per column that actually changed, rather than one per row.
+    Object.keys(touched).forEach(function (name) {
+      const col = head.indexOf(name);
+      s.getRange(2, col + 1, grid.length, 1).setValues(grid.map(function (raw) {
+        return [raw[col]];
+      }));
+    });
+
+    audit_(session, 'MasterDataChange', {
+      field: 'units.update',
+      newValue: written + ' unit(s), ' + Object.keys(touched).join(', ')
+    });
+
+    clearReferenceCache_();
+    const recomputed = recomputeUnitWarranty_(Object.keys(accepted));
+    return {
+      written: written,
+      columns: Object.keys(touched),
+      recomputed: recomputed.changed,
+      remaining: Math.max(0, (p.rows || []).length - rows.length)
+    };
+  });
+}
+
 /* ==========================================================================
  * Audit.gs
  * ========================================================================== */
@@ -5182,135 +5581,14 @@ function referenceData_(session) {
   };
 }
 
-/** Administrator view: every row including inactive ones, plus usage counts. */
-function listMaster_(session, kind) {
-  requireRole_(session, [ROLE.ADMIN]);
-  const def = MASTER[kind];
-  if (!def) throw new Error('Unknown master data set.');
-
-  const rows = readAll_(def.sheet);
-  const usage = masterUsage_(kind);
-
-  return rows.map(function (r) {
-    const out = {};
-    SCHEMA[def.sheet].forEach(function (h) { out[h] = r[h]; });
-    out.Active = isTrue_(r.Active);
-    out.__used = usage[String(r[def.key])] || 0;
-    return out;
-  });
-}
-
-function masterUsage_(kind) {
-  const counts = {};
-  if (kind === 'parts') {
-    readLive_(SHEET.ITEMS).forEach(function (i) {
-      counts[i.PartID] = (counts[i.PartID] || 0) + 1;
-    });
-  } else if (kind === 'customers') {
-    readLive_(SHEET.CLAIMS).forEach(function (c) {
-      counts[c.CustomerID] = (counts[c.CustomerID] || 0) + 1;
-    });
-  } else if (kind === 'users') {
-    readLive_(SHEET.CLAIMS).forEach(function (c) {
-      const e = String(c.RequesterEmail || '').toLowerCase();
-      counts[e] = (counts[e] || 0) + 1;
-    });
-  } else if (kind === 'recipients') {
-    readLive_(SHEET.ITEMS).forEach(function (i) {
-      if (i.ForwardedTo) counts[i.ForwardedTo] = (counts[i.ForwardedTo] || 0) + 1;
-    });
-  } else if (kind === 'principals') {
-    const byName = {};
-    readLive_(SHEET.CLAIMS).forEach(function (c) {
-      const n = String(c.Principal || '').trim();
-      if (n) byName[n] = (byName[n] || 0) + 1;
-    });
-    readAll_(SHEET.PRINCIPALS).forEach(function (p) {
-      counts[p.PrincipalID] = byName[String(p.Name).trim()] || 0;
-    });
-  }
-  return counts;
-}
-
-function saveMaster_(session, kind, record) {
-  requireRole_(session, [ROLE.ADMIN]);
-  const def = MASTER[kind];
-  if (!def) throw new Error('Unknown master data set.');
-
-  return withLock_(function () {
-    const keyValue = record[def.key];
-    const existing = keyValue ? findBy_(def.sheet, def.key, keyValue) : null;
-
-    if (kind === 'users') validateUsers_(record, existing);
-
-    if (!existing) {
-      const row = {};
-      SCHEMA[def.sheet].forEach(function (h) { row[h] = record[h] === undefined ? '' : record[h]; });
-      if (def.prefix && !row[def.key]) row[def.key] = nextMasterId_(def);
-      if (row.Active === '') row.Active = true;
-      if (SCHEMA[def.sheet].indexOf('CreatedAt') !== -1) row.CreatedAt = nowIso_();
-      insert_(def.sheet, row);
-      audit_(session, 'MasterDataChange', {
-        field: kind + '.' + row[def.key], oldValue: '', newValue: row[def.label] || ''
-      });
-      clearReferenceCache_();
-      return row;
-    }
-
-    const changes = [];
-    const patch = {};
-    SCHEMA[def.sheet].forEach(function (h) {
-      if (record[h] === undefined || h === def.key) return;
-      if (String(existing[h]) !== String(record[h])) {
-        changes.push({ field: h, oldValue: existing[h], newValue: record[h] });
-      }
-      patch[h] = record[h];
-    });
-    const updated = update_(def.sheet, def.key, keyValue, patch);
-    auditChanges_(session, 'MasterDataChange', '', changes.map(function (c) {
-      return { field: kind + '.' + keyValue + '.' + c.field, oldValue: c.oldValue, newValue: c.newValue };
-    }), record.__reason || '', false);
-    clearReferenceCache_();
-    return updated;
-  });
-}
-
-function validateUsers_(record, existing) {
-  const email = String(record.Email || '').trim().toLowerCase();
-  if (!email || email.indexOf('@') === -1) throw new Error('Enter a valid email address.');
-  const roles = [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL, ROLE.TESTER];
-  if (roles.indexOf(record.Role) === -1) throw new Error('Choose a valid role.');
-
-  // Without a principal, a Principal account has no claims to see and no digest
-  // to receive, so the account would simply not work.
-  if (record.Role === ROLE.PRINCIPAL) {
-    const principal = String(record.Principal || '').trim();
-    if (!principal) throw new Error('A Principal account must be assigned to a principal.');
-    if (principalNames_().indexOf(principal) === -1) {
-      throw new Error('"' + principal + '" is not an active principal.');
-    }
-  }
-
-  // Losing the last administrator would lock everyone out of master data.
-  const admins = readAll_(SHEET.USERS).filter(function (u) {
-    return u.Role === ROLE.ADMIN && isTrue_(u.Active);
-  });
-  const wasAdmin = existing && existing.Role === ROLE.ADMIN && isTrue_(existing.Active);
-  const willBeAdmin = record.Role === ROLE.ADMIN && isTrue_(record.Active);
-  if (wasAdmin && !willBeAdmin && admins.length <= 1) {
-    throw new Error('At least one active administrator must remain.');
-  }
-}
-
-function nextMasterId_(def) {
-  let max = 0;
-  readAll_(def.sheet).forEach(function (r) {
-    const m = new RegExp('^' + def.prefix + '-(\\d+)$').exec(String(r[def.key] || ''));
-    if (m) max = Math.max(max, Number(m[1]));
-  });
-  return def.prefix + '-' + padLeft_(max + 1, 3);
-}
-
+/**
+ * Forgets cached settings and reference data.
+ *
+ * Settings are cached for five minutes, which is right in normal use and
+ * exactly wrong while setting up: a corrected Client ID appears not to take
+ * effect and the same authorization error keeps coming back. Run this from the
+ * editor after changing anything in the Settings sheet.
+ */
 function clearReferenceCache_() {
   CacheService.getScriptCache().remove('settings');
   cacheRemoveLarge_('warrantyIndex');
@@ -5323,36 +5601,15 @@ function clearReferenceCache_() {
 
 /* ------------------------------------------------------------- unit data */
 
-
-function listUnits_(session, filter) {
-  requireRole_(session, [ROLE.ADMIN]);
-  const f = filter || {};
-  let rows = readAll_(SHEET.WARRANTY);
-  if (f.search) {
-    const q = String(f.search).toUpperCase();
-    rows = rows.filter(function (r) { return String(r.Batch).toUpperCase().indexOf(q) !== -1; });
-  }
-  return {
-    total: rows.length,
-    rows: rows.slice(0, f.limit || 200).map(function (r) {
-      const w = determineWarranty_(r.Batch);
-      return {
-        serialNumber: r.Batch,
-        sellingInDate: formatDate_(r.SellingInDate),
-        material: r.Material,
-        product: productName_(r.Batch),
-        principal: principalFor_(r.Batch),
-        computedType: w.type,
-        computedBasis: w.basis
-      };
-    })
-  };
-}
-
 /**
- * Replaces the unit reference sheets from an uploaded workbook. Row-by-row
- * editing would be the wrong shape for 2,610 rows that arrive from the
- * principal as a file.
+ * Replaces the unit reference sheets from the workbook the principal sends.
+ *
+ * That file carries the principal's own columns and nothing else. The columns
+ * an administrator fills in here — the sales channel, the installation date,
+ * the extension months — and the warranty dates worked out from them are not in
+ * it, and clearing the whole row before writing the file's columns back would
+ * wipe every one of them on every import. So only the columns the file actually
+ * brings are replaced, and the rest of each row is left where it is.
  */
 function importUnits_(session, payload) {
   requireRole_(session, [ROLE.ADMIN]);
@@ -5379,19 +5636,25 @@ function importUnits_(session, payload) {
       if (!source || source.getLastRow() < 2) return;
       const values = source.getRange(1, 1, source.getLastRow(), source.getLastColumn()).getValues();
       const target = sheet_(spec.to);
+      const width = Math.min(values[0].length, target.getLastColumn());
       if (target.getLastRow() > 1) {
-        target.getRange(2, 1, target.getLastRow() - 1, target.getLastColumn()).clearContent();
+        target.getRange(2, 1, target.getLastRow() - 1, width).clearContent();
       }
-      const body = values.slice(1);
-      if (body.length) target.getRange(2, 1, body.length, values[0].length).setValues(body);
+      const body = values.slice(1).map(function (row) { return row.slice(0, width); });
+      if (body.length) target.getRange(2, 1, body.length, width).setValues(body);
       result[spec.key] = body.length;
     });
 
     clearReferenceCache_();
+    // The units that arrived are answered by whatever the rules say about them,
+    // and until this runs their warranty columns are blank or belong to the
+    // unit that used to sit on that row.
+    const recomputed = recomputeUnitWarranty_(null);
     audit_(session, 'MasterDataChange', {
       field: 'units.import',
       newValue: result.warranty + ' warranty rows, ' + result.population + ' population rows'
     });
+    result.recomputed = recomputed.changed;
     return result;
   } finally {
     Drive.Files.remove(file.id);
@@ -6638,6 +6901,9 @@ function route_(session, action, payload) {
     case 'master.units': return listUnits_(session, payload);
     case 'master.importPreview': return previewUnitImport_(session, payload);
     case 'master.import': return importUnits_(session, payload);
+    case 'master.saveUnit': return saveUnit_(session, payload);
+    case 'master.previewUnits': return previewUnitUpdate_(session, payload);
+    case 'master.applyUnits': return applyUnitUpdate_(session, payload);
     case 'master.unknownPrincipals': return unknownPrincipals_(session);
     case 'master.searchCustomers': return searchCustomers_(session, payload);
     case 'master.customer': return customerById_(session, payload.customerId);

@@ -22,7 +22,7 @@ const S = {
   advance: null,            // the stock-issue queue, once fetched
   advanceView: 'awaiting',  // 'awaiting' | 'issued'
   deepLink: window.APP_DEEP_LINK || {},
-  master: { kind: 'users', rows: [] },
+  master: { kind: 'users', rows: [], units: null, unitFilters: null },
   templates: [],
   templateCode: 'DAILY_DIGEST'
 };
@@ -3912,8 +3912,13 @@ function loadMaster(kind) {
   S.master.kind = kind;
   el('view').innerHTML = skeleton(5);
   if (kind === 'units') {
-    api('master.units', {}).then(function (data) {
+    const f = unitFilters();
+    api('master.units', {
+      search: f.search, material: f.material, distributorId: f.distributorId,
+      incomplete: f.incomplete, limit: 200
+    }).then(function (data) {
       S.master.rows = data.rows;
+      S.master.units = data;
       renderMaster(data.total);
     }).catch(fail);
     return;
@@ -3944,17 +3949,34 @@ function renderMaster(total) {
     customers: ['ID', 'Name', 'Active', 'Claims', ''],
     parts: ['ID', 'Name', 'Active', 'Used in claims', ''],
     recipients: ['ID', 'Name', 'Email', 'Company', 'Principal', 'Active', ''],
-    units: ['Serial number', 'Product', 'Principal', 'Selling in', 'Computed warranty']
+    units: ['Serial number', 'Product', 'Sold through', 'Principal warranty',
+      'Our warranty', 'Still needed', '']
   }[kind];
 
   const body = rows.map(function (r) {
     if (kind === 'units') {
-      return '<tr><td class="mono">' + h(r.serialNumber) + '</td><td>' + h(r.product) + '</td>' +
-        '<td' + (r.principal ? '' : ' class="dimmer"') + '>' +
-          h(r.principal || 'unattributed') + '</td>' +
-        '<td>' + h(r.sellingInDate) + '</td>' +
-        '<td class="stack">' + warrantyPill(r.computedType) +
-          '<span class="tiny">' + h(r.computedBasis) + '</span></td></tr>';
+      return '<tr><td class="mono">' + h(r.serialNumber) + '</td>' +
+        '<td class="stack">' + h(r.product) +
+          '<span class="tiny dim">' + h(r.material || 'no model code') + '</span></td>' +
+        '<td class="stack' + (r.distributorName ? '' : ' dimmer') + '">' +
+          h(r.distributorName || (r.channel === 'direct' ? 'sold direct' : 'not recorded')) +
+          (r.installedAt ? '<span class="tiny dim">installed ' + h(r.installedAt) + '</span>' : '') +
+          '</td>' +
+        '<td class="stack">' + warrantyPill(r.warrantyType) +
+          (r.warrantyEndPrincipal
+            ? '<span class="tiny">to ' + h(monthLabel(r.warrantyEndPrincipal)) + '</span>' : '') +
+          '</td>' +
+        '<td class="stack">' + ourWarrantyPill({
+          customerWarrantyType: r.customerWarrantyType,
+          customerWarrantyExpiry: r.warrantyEndCustomer
+        }) + '</td>' +
+        // What to go and fill in, on the row that needs it. "Manual
+        // verification required" on two thousand units is a wall; "no
+        // installation date" is an afternoon with an end to it.
+        '<td class="tiny' + (r.complete ? ' dimmer' : '') + '">' +
+          (r.complete ? '—' : h(r.missing.join('; '))) + '</td>' +
+        '<td><button class="btn sm" data-unit="' + h(r.serialNumber) + '" type="button">Edit</button></td>' +
+        '</tr>';
     }
     const cells = [];
     if (kind === 'users') {
@@ -3989,17 +4011,22 @@ function renderMaster(total) {
         (kind === 'units' ? '' : ' · ' + active + ' active') + '</span>',
       '<span class="spacer"></span>',
       kind === 'units'
-        ? '<button class="btn pri" id="importUnits" type="button">Import from Excel</button>'
+        ? '<button class="btn" id="updateUnits" type="button">Update from CSV</button>' +
+          '<button class="btn" id="importUnits" type="button">Import from Excel</button>' +
+          '<button class="btn pri" id="addUnit" type="button">Register unit</button>'
         : '<button class="btn pri" id="addMaster" type="button">Add</button>',
     '</div>',
+    kind === 'units' ? unitToolbar() : '',
     '<div class="tablewrap"><table class="data"><thead><tr>' +
       head.map(function (x) { return '<th>' + h(x) + '</th>'; }).join('') +
       '</tr></thead><tbody>' + body + '</tbody></table></div>',
     kind === 'units'
       ? '<div id="principalHealth"></div>' +
-        '<p class="tiny">Unit data is read-only here. It arrives from the principal as a file, so it ' +
-        'is replaced by import rather than edited row by row. Warranty is computed from the serial ' +
-        'number; the Status column of the source sheet is never used.</p>'
+        '<p class="tiny">The principal\u2019s file brings the serial numbers and what they are. ' +
+        'How the unit reached the hospital \u2014 direct or through a distributor, when it was ' +
+        'installed, any extension bought with it \u2014 is filled in here, one unit at a time or from ' +
+        'a CSV. Warranty dates are worked out from the rules and written back; they are not ' +
+        'editable, and the Status column of the source sheet is never used.</p>'
       : '<p class="tiny">Entries are never deleted — deactivating one hides it from selection lists ' +
         'while older claims keep showing the name they were submitted with.</p>'
   ].join('');
@@ -4017,6 +4044,18 @@ function renderMaster(total) {
   if (add) add.addEventListener('click', function () { openMasterForm(kind, null); });
   const imp = el('importUnits');
   if (imp) imp.addEventListener('click', promptImportUnits);
+  const addU = el('addUnit');
+  if (addU) addU.addEventListener('click', function () { openUnitForm(null); });
+  const upd = el('updateUnits');
+  if (upd) upd.addEventListener('click', promptUnitUpdate);
+  el('view').querySelectorAll('[data-unit]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      openUnitForm(rows.filter(function (r) {
+        return r.serialNumber === b.dataset.unit;
+      })[0]);
+    });
+  });
+  wireUnitToolbar();
 
   // Units the population sheet cannot place reach no principal at all, so it is
   // worth saying so rather than letting them sit unnoticed.
@@ -4039,6 +4078,401 @@ function renderMaster(total) {
         : '';
     }).catch(function () { /* advisory only */ });
   }
+}
+
+/* ------------------------------------------------------------- units screen */
+
+function unitFilters() {
+  if (!S.master.unitFilters) {
+    S.master.unitFilters = { search: '', material: '', distributorId: '', incomplete: false };
+  }
+  return S.master.unitFilters;
+}
+
+/**
+ * The controls that turn the register into a work list.
+ *
+ * "Only units still missing something", narrowed to one distributor or one
+ * model, is not a filter so much as a job: these forty units, this distributor,
+ * one email. Without it, filling the data in has no end anybody can see.
+ */
+function unitToolbar() {
+  const f = unitFilters();
+  const u = S.master.units || { total: 0, incomplete: 0, materials: [] };
+  return '<div class="toolbar">' +
+    '<input type="text" id="uSearch" class="grow" placeholder="Serial number, model, ' +
+      'distributor or hospital\u2026" value="' + h(f.search) + '">' +
+    '<select id="uMaterial"><option value="">All models</option>' +
+      (u.materials || []).map(function (m) {
+        return '<option value="' + h(m) + '"' + (f.material === m ? ' selected' : '') +
+          '>' + h(m) + '</option>';
+      }).join('') + '</select>' +
+    '<select id="uDistributor"><option value="">All distributors</option>' +
+      (S.reference.distributors || []).map(function (d) {
+        return '<option value="' + h(d.id) + '"' +
+          (f.distributorId === d.id ? ' selected' : '') + '>' + h(d.name) + '</option>';
+      }).join('') + '</select>' +
+    '<label class="inline"><input type="checkbox" id="uIncomplete"' +
+      (f.incomplete ? ' checked' : '') + '> Only units still missing something</label>' +
+    '<span class="spacer"></span>' +
+    '<span class="tiny' + (u.incomplete ? '' : ' dimmer') + '">' + u.incomplete +
+      ' of ' + u.total + ' still need something</span>' +
+    '</div>';
+}
+
+function wireUnitToolbar() {
+  const f = unitFilters();
+  const q = el('uSearch');
+  if (q) {
+    let timer = null;
+    q.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { f.search = q.value.trim(); loadMaster('units'); }, 350);
+    });
+  }
+  const m = el('uMaterial');
+  if (m) m.addEventListener('change', function () { f.material = this.value; loadMaster('units'); });
+  const d = el('uDistributor');
+  if (d) d.addEventListener('change', function () {
+    f.distributorId = this.value; loadMaster('units');
+  });
+  const i = el('uIncomplete');
+  if (i) i.addEventListener('change', function () {
+    f.incomplete = this.checked; loadMaster('units');
+  });
+}
+
+/** The fields an administrator may set, and how each is asked for. */
+const UNIT_FORM = [
+  { key: 'Material', label: 'Model code', from: 'material' },
+  { key: 'ItemDescription', label: 'Product', from: 'product' },
+  { key: 'Principal', label: 'Principal', from: 'principalName' },
+  { key: 'ShipToParty', label: 'Hospital', from: 'shipTo' },
+  { key: 'Channel', label: 'Sold', from: 'channel',
+    options: ['', 'direct', 'distributor'] },
+  { key: 'DistributorID', label: 'Distributor', from: 'distributorId', distributors: true },
+  { key: 'CustomerID', label: 'Customer ID', from: 'customerId' },
+  { key: 'SellingInDate', label: 'Selling-in date', from: 'sellingInDate', date: true },
+  { key: 'ReceivedAtDistributor', label: 'Received by distributor', from: 'receivedAtDistributor', date: true },
+  { key: 'InstalledAt', label: 'Installed (BAST)', from: 'installedAt', date: true },
+  { key: 'ExtendedMonthsPrincipal', label: 'Extended months, principal side', from: 'extendedMonthsPrincipal' },
+  { key: 'ExtendedMonthsCustomer', label: 'Extended months, our side', from: 'extendedMonthsCustomer' },
+  { key: 'ContractRef', label: 'Contract reference', from: 'contractRef' },
+  { key: 'WarrantyNote', label: 'Note', from: 'warrantyNote' }
+];
+
+function openUnitForm(record) {
+  const isNew = !record;
+  const field = function (spec) {
+    const value = record ? (record[spec.from] === undefined ? '' : record[spec.from]) : '';
+    let input;
+    if (spec.options) {
+      input = '<select id="u_' + spec.key + '">' + spec.options.map(function (o) {
+        return '<option value="' + h(o) + '"' + (String(value) === o ? ' selected' : '') +
+          '>' + h(o || '\u2014 not recorded \u2014') + '</option>';
+      }).join('') + '</select>';
+    } else if (spec.distributors) {
+      input = '<select id="u_' + spec.key + '"><option value="">\u2014 none \u2014</option>' +
+        (S.reference.distributors || []).map(function (d) {
+          return '<option value="' + h(d.id) + '"' +
+            (String(value) === d.id ? ' selected' : '') + '>' + h(d.name) + '</option>';
+        }).join('') + '</select>';
+    } else {
+      input = '<input type="text" id="u_' + spec.key + '" value="' + h(value) + '"' +
+        (spec.date ? ' placeholder="dd/mm/yyyy"' : '') + '>';
+    }
+    return '<label class="field"><span>' + h(spec.label) + '</span>' + input + '</label>';
+  };
+
+  openModal({
+    title: isNew ? 'Register a unit' : 'Edit unit',
+    meta: isNew ? '' : record.serialNumber,
+    body:
+      (isNew
+        ? '<label class="field"><span>Serial number</span>' +
+          '<input type="text" id="u_Batch" class="mono"></label>'
+        : '<p class="tiny">Warranty dates are worked out from the rules when this is saved. ' +
+          'They are not editable here.</p>') +
+      UNIT_FORM.map(field).join('') +
+      // Dates are read day first. Saying so on the form is cheaper than
+      // explaining a warranty that came out half a year wrong.
+      '<p class="tiny">Dates are read as <b>dd/mm/yyyy</b>. 03/09/2025 is 3 September.</p>' +
+      (record && !record.complete
+        ? '<div class="notice">Still needed: ' + h(record.missing.join('; ')) + '</div>'
+        : ''),
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: isNew ? 'Register' : 'Save', primary: true, onClick: function (close) {
+        const payload = { isNew: isNew };
+        payload.Batch = isNew ? el('u_Batch').value.trim() : record.serialNumber;
+        UNIT_FORM.forEach(function (spec) { payload[spec.key] = el('u_' + spec.key).value; });
+        api('master.saveUnit', payload).then(function () {
+          close();
+          toast(isNew ? payload.Batch + ' registered.' : payload.Batch + ' saved.', 'ok');
+          loadMaster('units');
+        }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/* --------------------------------------------------------- update from a file */
+
+/**
+ * A delimited file, read without guessing.
+ *
+ * Excel writes a comma here and a semicolon there depending on the locale it
+ * was saved from, and a tab when it is pasted straight out of a sheet. The
+ * separator is taken from whichever of the three appears most in the header
+ * line rather than assumed, because getting it wrong turns every row into one
+ * column and the error it produces says nothing useful.
+ */
+function parseDelimited(text) {
+  const clean = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!clean) return { header: [], rows: [] };
+  const firstLine = clean.split('\n')[0];
+  const counts = [
+    { sep: '\t', n: (firstLine.match(/\t/g) || []).length },
+    { sep: ';', n: (firstLine.match(/;/g) || []).length },
+    { sep: ',', n: (firstLine.match(/,/g) || []).length }
+  ].sort(function (a, b) { return b.n - a.n; });
+  const sep = counts[0].n ? counts[0].sep : ',';
+
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (quoted) {
+      if (ch === '"' && clean[i + 1] === '"') { cell += '"'; i++; continue; }
+      if (ch === '"') { quoted = false; continue; }
+      cell += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === sep) { row.push(cell.trim()); cell = ''; continue; }
+    if (ch === '\n') { row.push(cell.trim()); rows.push(row); row = []; cell = ''; continue; }
+    cell += ch;
+  }
+  row.push(cell.trim());
+  rows.push(row);
+
+  return { header: rows[0] || [], rows: rows.slice(1), separator: sep };
+}
+
+/** Column names the file might use for each field, so most files map themselves. */
+const UNIT_ALIASES = {
+  Batch: ['batch', 'serial', 'serialnumber', 'serialno', 'sn', 'nomorseri'],
+  Material: ['material', 'model', 'materialcode', 'modelcode'],
+  Channel: ['channel', 'saleschannel', 'jalur'],
+  DistributorID: ['distributorid', 'distributor', 'distributorcode'],
+  CustomerID: ['customerid', 'customer', 'hospitalid'],
+  SellingInDate: ['sellingindate', 'sellingin', 'tanggalsellingin'],
+  ReceivedAtDistributor: ['receivedatdistributor', 'received', 'tanggalterima'],
+  InstalledAt: ['installedat', 'installed', 'bast', 'tanggalinstalasi'],
+  ExtendedMonthsPrincipal: ['extendedmonthsprincipal', 'extendedprincipal'],
+  ExtendedMonthsCustomer: ['extendedmonthscustomer', 'extendedcustomer'],
+  ContractRef: ['contractref', 'contract', 'kontrak'],
+  WarrantyNote: ['warrantynote', 'note', 'catatan']
+};
+
+function normaliseHeader(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function guessMapping(header) {
+  const map = {};
+  header.forEach(function (name, i) {
+    const key = normaliseHeader(name);
+    Object.keys(UNIT_ALIASES).forEach(function (field) {
+      if (map[field] !== undefined) return;
+      if (normaliseHeader(field) === key || UNIT_ALIASES[field].indexOf(key) !== -1) {
+        map[field] = i;
+      }
+    });
+  });
+  return map;
+}
+
+/**
+ * The mapped rows, with the file's own line number kept for the rejection list.
+ *
+ * Numbered before the blank lines are dropped, not after: a rejection that
+ * names line 7 has to mean line 7 of the file the person is looking at.
+ */
+function mappedRows(parsed, mapping) {
+  return parsed.rows
+    .map(function (r, i) {
+      const out = { __line: i + 2, __blank: !r.some(function (c) { return c !== ''; }) };
+      Object.keys(mapping).forEach(function (field) {
+        const at = mapping[field];
+        if (at === undefined || at === '' || at === -1) return;
+        out[field] = r[Number(at)] === undefined ? '' : r[Number(at)];
+      });
+      return out;
+    })
+    .filter(function (r) { return !r.__blank; });
+}
+
+const UPDATE = { parsed: null, mapping: {}, rows: [] };
+
+function promptUnitUpdate() {
+  UPDATE.parsed = null;
+  UPDATE.mapping = {};
+  UPDATE.rows = [];
+  openModal({
+    title: 'Update units from a file',
+    body:
+      '<p class="tiny">A CSV or tab-separated file, with a header row. It fills columns in on ' +
+      'units already on the register \u2014 it never adds one. Comma, semicolon and tab all work. ' +
+      'Dates are read as <b>dd/mm/yyyy</b>.</p>' +
+      '<label class="filebtn" style="padding:9px 12px">Choose file\u2026' +
+      '<input type="file" id="uFile" accept=".csv,.tsv,.txt"></label>' +
+      '<label class="field"><span>\u2026or paste it here</span>' +
+      '<textarea id="uPaste" rows="5"></textarea></label>' +
+      '<div id="uMap"></div><div id="uPreview"></div>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Check the file', onClick: function () { runUnitPreview(); } },
+      { label: 'Write the changes', primary: true, onClick: function (close) {
+        if (!UPDATE.rows.length) { toast('Check the file first.', 'err'); return; }
+        writeUnitUpdate(close);
+      } }
+    ],
+    onOpen: function () {
+      el('uFile').addEventListener('change', function () {
+        const file = this.files[0];
+        if (!file) return;
+        if (file.size > MAX_IMPORT_BYTES) {
+          toast('That file is larger than the portal will take.', 'err');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = function () { el('uPaste').value = String(reader.result); showUnitMapping(); };
+        reader.readAsText(file);
+      });
+      el('uPaste').addEventListener('change', showUnitMapping);
+    }
+  });
+}
+
+function showUnitMapping() {
+  const parsed = parseDelimited(el('uPaste').value);
+  UPDATE.parsed = parsed;
+  if (!parsed.header.length) { el('uMap').innerHTML = ''; return; }
+  UPDATE.mapping = guessMapping(parsed.header);
+
+  el('uMap').innerHTML = '<p class="tiny">' + parsed.rows.length + ' row' +
+    (parsed.rows.length === 1 ? '' : 's') + ', separated by ' +
+    (parsed.separator === '\t' ? 'tabs' : '"' + parsed.separator + '"') +
+    '. Check the columns line up:</p>' +
+    '<div class="tablewrap"><table class="data"><tbody>' +
+    Object.keys(UNIT_ALIASES).map(function (field) {
+      return '<tr><td>' + h(field) + '</td><td><select data-map="' + h(field) + '">' +
+        '<option value="">\u2014 not in this file \u2014</option>' +
+        parsed.header.map(function (name, i) {
+          return '<option value="' + i + '"' +
+            (UPDATE.mapping[field] === i ? ' selected' : '') + '>' + h(name) + '</option>';
+        }).join('') + '</select></td></tr>';
+    }).join('') + '</tbody></table></div>';
+
+  el('uMap').querySelectorAll('[data-map]').forEach(function (sel) {
+    sel.addEventListener('change', function () {
+      const field = sel.dataset.map;
+      if (sel.value === '') delete UPDATE.mapping[field];
+      else UPDATE.mapping[field] = Number(sel.value);
+      el('uPreview').innerHTML = '';
+      UPDATE.rows = [];
+    });
+  });
+}
+
+/**
+ * What would happen, before any of it happens.
+ *
+ * Every rejected row is named by its line number and its reason. "The import
+ * failed" against a two thousand row file is not something a person can do
+ * anything with.
+ */
+function runUnitPreview() {
+  if (!UPDATE.parsed) showUnitMapping();
+  if (!UPDATE.parsed || !UPDATE.parsed.header.length) {
+    toast('Choose a file or paste the rows first.', 'err');
+    return;
+  }
+  if (UPDATE.mapping.Batch === undefined) {
+    toast('One column has to be the serial number.', 'err');
+    return;
+  }
+  const rows = mappedRows(UPDATE.parsed, UPDATE.mapping);
+  api('master.previewUnits', { rows: rows }).then(function (p) {
+    UPDATE.rows = p.rejected.length ? [] : rows;
+    const changing = p.accepted - p.unchanged;
+    el('uPreview').innerHTML =
+      '<div class="notice' + (p.rejected.length ? '' : ' ok') + '">' +
+        '<b>' + changing + '</b> unit' + (changing === 1 ? '' : 's') + ' would change, ' +
+        p.unchanged + ' already say this' +
+        (p.rejected.length
+          ? ', and <b>' + p.rejected.length + '</b> row' +
+            (p.rejected.length === 1 ? '' : 's') + ' will not be accepted. ' +
+            'Nothing is written until every row is accepted.'
+          : '.') +
+      '</div>' +
+      (p.rejected.length
+        ? '<div class="tablewrap"><table class="data"><thead><tr><th>Line</th>' +
+          '<th>Serial number</th><th>Why not</th></tr></thead><tbody>' +
+          p.rejected.slice(0, 50).map(function (r) {
+            return '<tr><td class="num">' + r.line + '</td><td class="mono">' +
+              h(r.serial || '\u2014') + '</td><td class="tiny">' +
+              h(r.reasons.join('; ')) + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '') +
+      (p.sample.length
+        ? '<p class="tiny">For example: ' + p.sample.slice(0, 3).map(function (a) {
+          return h(a.serial) + ' \u2014 ' + Object.keys(a.changes).map(function (k) {
+            return k + ' \u2192 ' + (a.changes[k].to || 'blank');
+          }).join(', ');
+        }).join(' \u00b7 ') + '</p>'
+        : '');
+  }).catch(fail);
+}
+
+/**
+ * Writes it, in waves.
+ *
+ * An execution gets six minutes and each wave is a full pass over the sheet, so
+ * a large file goes up in batches that are each complete in themselves. An
+ * import that stops halfway has written half the units properly rather than all
+ * of them badly, and the screen says how far it got.
+ */
+function writeUnitUpdate(close) {
+  const all = UPDATE.rows.slice();
+  let done = 0;
+  let changed = 0;
+
+  const wave = function () {
+    if (!all.length) {
+      close();
+      toast('Updated ' + done + ' unit' + (done === 1 ? '' : 's') + '; ' +
+        changed + ' warranty date' + (changed === 1 ? '' : 's') + ' moved.', 'ok');
+      loadMaster('units');
+      return;
+    }
+    const batch = all.splice(0, 500);
+    el('uPreview').innerHTML = '<div class="notice">Writing\u2026 ' + done + ' of ' +
+      (done + batch.length + all.length) + '.</div>';
+    api('master.applyUnits', { rows: batch }).then(function (r) {
+      done += r.written;
+      changed += r.recomputed;
+      wave();
+    }).catch(function (e) {
+      el('uPreview').innerHTML = '<div class="notice">Stopped after ' + done +
+        ' unit(s). ' + h(String(e.error || e.message || e)) + '</div>';
+      fail(e);
+    });
+  };
+  wave();
 }
 
 function masterKey(kind, r) {

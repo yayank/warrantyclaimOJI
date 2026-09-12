@@ -165,135 +165,14 @@ function referenceData_(session) {
   };
 }
 
-/** Administrator view: every row including inactive ones, plus usage counts. */
-function listMaster_(session, kind) {
-  requireRole_(session, [ROLE.ADMIN]);
-  const def = MASTER[kind];
-  if (!def) throw new Error('Unknown master data set.');
-
-  const rows = readAll_(def.sheet);
-  const usage = masterUsage_(kind);
-
-  return rows.map(function (r) {
-    const out = {};
-    SCHEMA[def.sheet].forEach(function (h) { out[h] = r[h]; });
-    out.Active = isTrue_(r.Active);
-    out.__used = usage[String(r[def.key])] || 0;
-    return out;
-  });
-}
-
-function masterUsage_(kind) {
-  const counts = {};
-  if (kind === 'parts') {
-    readLive_(SHEET.ITEMS).forEach(function (i) {
-      counts[i.PartID] = (counts[i.PartID] || 0) + 1;
-    });
-  } else if (kind === 'customers') {
-    readLive_(SHEET.CLAIMS).forEach(function (c) {
-      counts[c.CustomerID] = (counts[c.CustomerID] || 0) + 1;
-    });
-  } else if (kind === 'users') {
-    readLive_(SHEET.CLAIMS).forEach(function (c) {
-      const e = String(c.RequesterEmail || '').toLowerCase();
-      counts[e] = (counts[e] || 0) + 1;
-    });
-  } else if (kind === 'recipients') {
-    readLive_(SHEET.ITEMS).forEach(function (i) {
-      if (i.ForwardedTo) counts[i.ForwardedTo] = (counts[i.ForwardedTo] || 0) + 1;
-    });
-  } else if (kind === 'principals') {
-    const byName = {};
-    readLive_(SHEET.CLAIMS).forEach(function (c) {
-      const n = String(c.Principal || '').trim();
-      if (n) byName[n] = (byName[n] || 0) + 1;
-    });
-    readAll_(SHEET.PRINCIPALS).forEach(function (p) {
-      counts[p.PrincipalID] = byName[String(p.Name).trim()] || 0;
-    });
-  }
-  return counts;
-}
-
-function saveMaster_(session, kind, record) {
-  requireRole_(session, [ROLE.ADMIN]);
-  const def = MASTER[kind];
-  if (!def) throw new Error('Unknown master data set.');
-
-  return withLock_(function () {
-    const keyValue = record[def.key];
-    const existing = keyValue ? findBy_(def.sheet, def.key, keyValue) : null;
-
-    if (kind === 'users') validateUsers_(record, existing);
-
-    if (!existing) {
-      const row = {};
-      SCHEMA[def.sheet].forEach(function (h) { row[h] = record[h] === undefined ? '' : record[h]; });
-      if (def.prefix && !row[def.key]) row[def.key] = nextMasterId_(def);
-      if (row.Active === '') row.Active = true;
-      if (SCHEMA[def.sheet].indexOf('CreatedAt') !== -1) row.CreatedAt = nowIso_();
-      insert_(def.sheet, row);
-      audit_(session, 'MasterDataChange', {
-        field: kind + '.' + row[def.key], oldValue: '', newValue: row[def.label] || ''
-      });
-      clearReferenceCache_();
-      return row;
-    }
-
-    const changes = [];
-    const patch = {};
-    SCHEMA[def.sheet].forEach(function (h) {
-      if (record[h] === undefined || h === def.key) return;
-      if (String(existing[h]) !== String(record[h])) {
-        changes.push({ field: h, oldValue: existing[h], newValue: record[h] });
-      }
-      patch[h] = record[h];
-    });
-    const updated = update_(def.sheet, def.key, keyValue, patch);
-    auditChanges_(session, 'MasterDataChange', '', changes.map(function (c) {
-      return { field: kind + '.' + keyValue + '.' + c.field, oldValue: c.oldValue, newValue: c.newValue };
-    }), record.__reason || '', false);
-    clearReferenceCache_();
-    return updated;
-  });
-}
-
-function validateUsers_(record, existing) {
-  const email = String(record.Email || '').trim().toLowerCase();
-  if (!email || email.indexOf('@') === -1) throw new Error('Enter a valid email address.');
-  const roles = [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL, ROLE.TESTER];
-  if (roles.indexOf(record.Role) === -1) throw new Error('Choose a valid role.');
-
-  // Without a principal, a Principal account has no claims to see and no digest
-  // to receive, so the account would simply not work.
-  if (record.Role === ROLE.PRINCIPAL) {
-    const principal = String(record.Principal || '').trim();
-    if (!principal) throw new Error('A Principal account must be assigned to a principal.');
-    if (principalNames_().indexOf(principal) === -1) {
-      throw new Error('"' + principal + '" is not an active principal.');
-    }
-  }
-
-  // Losing the last administrator would lock everyone out of master data.
-  const admins = readAll_(SHEET.USERS).filter(function (u) {
-    return u.Role === ROLE.ADMIN && isTrue_(u.Active);
-  });
-  const wasAdmin = existing && existing.Role === ROLE.ADMIN && isTrue_(existing.Active);
-  const willBeAdmin = record.Role === ROLE.ADMIN && isTrue_(record.Active);
-  if (wasAdmin && !willBeAdmin && admins.length <= 1) {
-    throw new Error('At least one active administrator must remain.');
-  }
-}
-
-function nextMasterId_(def) {
-  let max = 0;
-  readAll_(def.sheet).forEach(function (r) {
-    const m = new RegExp('^' + def.prefix + '-(\\d+)$').exec(String(r[def.key] || ''));
-    if (m) max = Math.max(max, Number(m[1]));
-  });
-  return def.prefix + '-' + padLeft_(max + 1, 3);
-}
-
+/**
+ * Forgets cached settings and reference data.
+ *
+ * Settings are cached for five minutes, which is right in normal use and
+ * exactly wrong while setting up: a corrected Client ID appears not to take
+ * effect and the same authorization error keeps coming back. Run this from the
+ * editor after changing anything in the Settings sheet.
+ */
 function clearReferenceCache_() {
   CacheService.getScriptCache().remove('settings');
   cacheRemoveLarge_('warrantyIndex');
@@ -306,36 +185,15 @@ function clearReferenceCache_() {
 
 /* ------------------------------------------------------------- unit data */
 
-
-function listUnits_(session, filter) {
-  requireRole_(session, [ROLE.ADMIN]);
-  const f = filter || {};
-  let rows = readAll_(SHEET.WARRANTY);
-  if (f.search) {
-    const q = String(f.search).toUpperCase();
-    rows = rows.filter(function (r) { return String(r.Batch).toUpperCase().indexOf(q) !== -1; });
-  }
-  return {
-    total: rows.length,
-    rows: rows.slice(0, f.limit || 200).map(function (r) {
-      const w = determineWarranty_(r.Batch);
-      return {
-        serialNumber: r.Batch,
-        sellingInDate: formatDate_(r.SellingInDate),
-        material: r.Material,
-        product: productName_(r.Batch),
-        principal: principalFor_(r.Batch),
-        computedType: w.type,
-        computedBasis: w.basis
-      };
-    })
-  };
-}
-
 /**
- * Replaces the unit reference sheets from an uploaded workbook. Row-by-row
- * editing would be the wrong shape for 2,610 rows that arrive from the
- * principal as a file.
+ * Replaces the unit reference sheets from the workbook the principal sends.
+ *
+ * That file carries the principal's own columns and nothing else. The columns
+ * an administrator fills in here — the sales channel, the installation date,
+ * the extension months — and the warranty dates worked out from them are not in
+ * it, and clearing the whole row before writing the file's columns back would
+ * wipe every one of them on every import. So only the columns the file actually
+ * brings are replaced, and the rest of each row is left where it is.
  */
 function importUnits_(session, payload) {
   requireRole_(session, [ROLE.ADMIN]);
@@ -362,19 +220,25 @@ function importUnits_(session, payload) {
       if (!source || source.getLastRow() < 2) return;
       const values = source.getRange(1, 1, source.getLastRow(), source.getLastColumn()).getValues();
       const target = sheet_(spec.to);
+      const width = Math.min(values[0].length, target.getLastColumn());
       if (target.getLastRow() > 1) {
-        target.getRange(2, 1, target.getLastRow() - 1, target.getLastColumn()).clearContent();
+        target.getRange(2, 1, target.getLastRow() - 1, width).clearContent();
       }
-      const body = values.slice(1);
-      if (body.length) target.getRange(2, 1, body.length, values[0].length).setValues(body);
+      const body = values.slice(1).map(function (row) { return row.slice(0, width); });
+      if (body.length) target.getRange(2, 1, body.length, width).setValues(body);
       result[spec.key] = body.length;
     });
 
     clearReferenceCache_();
+    // The units that arrived are answered by whatever the rules say about them,
+    // and until this runs their warranty columns are blank or belong to the
+    // unit that used to sit on that row.
+    const recomputed = recomputeUnitWarranty_(null);
     audit_(session, 'MasterDataChange', {
       field: 'units.import',
       newValue: result.warranty + ' warranty rows, ' + result.population + ' population rows'
     });
+    result.recomputed = recomputed.changed;
     return result;
   } finally {
     Drive.Files.remove(file.id);
