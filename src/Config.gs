@@ -147,6 +147,14 @@ const WARRANTY_TYPE = {
   INTERNAL: 'Internal Warranty'
 };
 
+/**
+ * How many claims cross to the browser at once, and the most a caller may ask
+ * for. The screen loads more on request rather than drawing a thousand rows
+ * nobody scrolls to.
+ */
+const CLAIM_PAGE = 50;
+const CLAIM_PAGE_MAX = 200;
+
 const ATTACHMENT_KIND = { PART: 'PART', FAULT: 'FAULT', REPORT: 'REPORT' };
 
 /** Sansin machines carry a 22 month principal warranty from the assembly month. */

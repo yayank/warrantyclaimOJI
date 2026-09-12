@@ -219,6 +219,8 @@ table.data tr.ref-header+tr.click td{border-top:0}
 .age-warn{color:var(--warn);font-weight:600}
 .age-crit{color:var(--crit);font-weight:600}
 
+.morebar{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 2px 0;font-size:12.5px;flex-wrap:wrap}
 .empty{padding:44px 20px;text-align:center;color:var(--ink-3);font-size:13.5px}
 .skel{height:38px;border-radius:5px;background:linear-gradient(90deg,var(--mute-soft),
   var(--surface-2),var(--mute-soft));background-size:200% 100%;animation:sh 1.2s linear infinite}
@@ -469,6 +471,7 @@ const S = {
   filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', customerName: '',
     partId: '', principal: '', from: '', to: '' },
   rows: [],
+  total: 0,                 // how many the filter matches, not how many are shown
   counts: { action: 0, advance: 0 },
   collapsed: {},            // claims whose parts the reader has folded away
   group: 'status',          // 'status' | 'customer' — what the list is cut by
@@ -885,11 +888,22 @@ function skeleton(rows) {
 
 /* ============================================================== claims */
 
-function loadClaims() {
-  el('view').innerHTML = skeleton(6);
-  const filter = Object.assign({ tab: S.tab }, S.filters);
+const CLAIM_PAGE = 50;
+
+/**
+ * `append` asks for the next page and keeps what is already on screen. Anything
+ * that changes what is being looked at — a tab, a filter, the search — calls
+ * this without it and starts again from the top.
+ */
+function loadClaims(append) {
+  if (!append) el('view').innerHTML = skeleton(6);
+  const filter = Object.assign({ tab: S.tab, limit: CLAIM_PAGE }, S.filters);
+  // The name is what the box and the chip read back; only the id filters.
+  delete filter.customerName;
+  filter.offset = append ? S.rows.length : 0;
   api('claims.list', filter).then(function (data) {
-    S.rows = data.rows;
+    S.rows = append ? S.rows.concat(data.rows) : data.rows;
+    S.total = data.total;
     S.counts = data.counts;
     renderChrome();            // the Advance Issue badge follows this count
     renderClaims();
@@ -938,12 +952,33 @@ function renderClaims() {
     '</div>',
     activeChips(),
     S.rows.length
-      ? claimTable()
+      ? claimTable() + moreBar()
       : '<div class="tablewrap"><div class="empty">Nothing here yet.</div></div>'
   ].join('');
 
   el('view').innerHTML = html;
   wireClaimsToolbar();
+}
+
+/**
+ * How much of the filtered set is on screen, and the way to more of it.
+ *
+ * The block headings count the rows below them, which is what is shown rather
+ * than what exists — so the total is stated plainly here, or a heading reading
+ * "Closed 50" out of four hundred would pass for the whole story.
+ */
+function moreBar() {
+  const shown = S.rows.length;
+  const total = S.total || shown;
+  const n = total.toLocaleString();
+  if (shown >= total) {
+    return '<div class="morebar"><span class="dim">' + n + ' claim' +
+      (total === 1 ? '' : 's') + '</span></div>';
+  }
+  return '<div class="morebar"><span class="dim">Showing ' + shown.toLocaleString() +
+    ' of ' + n + ' claims</span>' +
+    '<button class="btn" id="loadMore" type="button">Load ' +
+    Math.min(CLAIM_PAGE, total - shown) + ' more</button></div>';
 }
 
 function tabButton(id, label, count) {
@@ -1233,6 +1268,12 @@ function claimTable() {
 }
 
 function wireClaimsToolbar() {
+  const more = el('loadMore');
+  if (more) more.addEventListener('click', function () {
+    more.disabled = true;
+    more.textContent = 'Loading…';
+    loadClaims(true);
+  });
   el('view').querySelectorAll('[data-tab]').forEach(function (b) {
     b.addEventListener('click', function () { S.tab = b.dataset.tab; loadClaims(); });
   });

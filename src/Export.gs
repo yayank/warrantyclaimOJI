@@ -11,7 +11,13 @@
  */
 
 function exportClaims_(session, filter) {
-  const result = listClaims_(session, filter || {});
+  // Everything the filter matches, not the page the screen happens to be
+  // showing: an export of the first fifty rows is a wrong report, not a short
+  // one. listClaims_ pages only when asked, and this never asks.
+  const wanted = Object.assign({}, filter || {});
+  delete wanted.limit;
+  delete wanted.offset;
+  const result = listClaims_(session, wanted);
   const flat = (filter && filter.view === 'item');
 
   const header = flat

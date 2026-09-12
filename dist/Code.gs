@@ -161,6 +161,14 @@ const WARRANTY_TYPE = {
   INTERNAL: 'Internal Warranty'
 };
 
+/**
+ * How many claims cross to the browser at once, and the most a caller may ask
+ * for. The screen loads more on request rather than drawing a thousand rows
+ * nobody scrolls to.
+ */
+const CLAIM_PAGE = 50;
+const CLAIM_PAGE_MAX = 200;
+
 const ATTACHMENT_KIND = { PART: 'PART', FAULT: 'FAULT', REPORT: 'REPORT' };
 
 /** Sansin machines carry a 22 month principal warranty from the assembly month. */
@@ -2123,7 +2131,26 @@ function listClaims_(session, filter) {
 
   rows.sort(function (a, b) { return String(b.sortDate).localeCompare(String(a.sortDate)); });
 
-  return { rows: rows, counts: tabCounts_(session, claims, byClaim) };
+  // Only a page crosses to the browser. `total` is the whole filtered set, so
+  // the screen can say how much of it is being shown rather than letting a page
+  // pass for the answer.
+  //
+  // This is a smaller payload and a shorter table, not fewer sheet reads: the
+  // rows above were all read and filtered here, because the tab rules depend on
+  // item totals per claim and a spreadsheet cannot answer that in a query.
+  // Paging is opt-in. A default page size would silently truncate every caller
+  // that does not know to ask for more — the Excel export runs through here and
+  // would have started producing the first fifty claims and calling it the
+  // report.
+  const total = rows.length;
+  let page = rows;
+  if (f.limit) {
+    const offset = Math.max(0, Number(f.offset) || 0);
+    const limit = Math.min(Math.max(1, Number(f.limit)), CLAIM_PAGE_MAX);
+    page = rows.slice(offset, offset + limit);
+  }
+
+  return { rows: page, total: total, counts: tabCounts_(session, claims, byClaim) };
 }
 
 function matchesTab_(session, row, tab) {
@@ -3956,7 +3983,13 @@ function unknownPrincipals_(session) {
  */
 
 function exportClaims_(session, filter) {
-  const result = listClaims_(session, filter || {});
+  // Everything the filter matches, not the page the screen happens to be
+  // showing: an export of the first fifty rows is a wrong report, not a short
+  // one. listClaims_ pages only when asked, and this never asks.
+  const wanted = Object.assign({}, filter || {});
+  delete wanted.limit;
+  delete wanted.offset;
+  const result = listClaims_(session, wanted);
   const flat = (filter && filter.view === 'item');
 
   const header = flat

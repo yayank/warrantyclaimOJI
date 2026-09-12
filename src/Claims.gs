@@ -46,7 +46,26 @@ function listClaims_(session, filter) {
 
   rows.sort(function (a, b) { return String(b.sortDate).localeCompare(String(a.sortDate)); });
 
-  return { rows: rows, counts: tabCounts_(session, claims, byClaim) };
+  // Only a page crosses to the browser. `total` is the whole filtered set, so
+  // the screen can say how much of it is being shown rather than letting a page
+  // pass for the answer.
+  //
+  // This is a smaller payload and a shorter table, not fewer sheet reads: the
+  // rows above were all read and filtered here, because the tab rules depend on
+  // item totals per claim and a spreadsheet cannot answer that in a query.
+  // Paging is opt-in. A default page size would silently truncate every caller
+  // that does not know to ask for more — the Excel export runs through here and
+  // would have started producing the first fifty claims and calling it the
+  // report.
+  const total = rows.length;
+  let page = rows;
+  if (f.limit) {
+    const offset = Math.max(0, Number(f.offset) || 0);
+    const limit = Math.min(Math.max(1, Number(f.limit)), CLAIM_PAGE_MAX);
+    page = rows.slice(offset, offset + limit);
+  }
+
+  return { rows: page, total: total, counts: tabCounts_(session, claims, byClaim) };
 }
 
 function matchesTab_(session, row, tab) {
