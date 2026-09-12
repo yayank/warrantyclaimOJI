@@ -215,6 +215,58 @@ table.data tr.ref-header+tr.click td{border-top:0}
 .group-n{display:inline-block;margin-left:7px;padding:0 6px;border-radius:9px;
   background:var(--mute-soft);color:var(--ink-3);font-size:10.5px;letter-spacing:0}
 .caret{color:var(--ink-3);font-size:10px;width:22px;cursor:pointer;user-select:none}
+
+/*
+ * Below this width the claim table stops being a table.
+ *
+ * Eight columns for a requester, eleven for an administrator, and the only
+ * thing standing between a phone and all of them was a sideways scrollbar. The
+ * people filing claims are in hospitals holding phones.
+ *
+ * No second markup: the same rows become cards. Cells are placed by what they
+ * are (.c-claim, .c-status …) rather than by position, because which columns a
+ * role gets varies and placing by position would reshuffle the card between
+ * roles. The block headings stay as they are and keep separating the cards.
+ */
+@media (max-width:700px){
+  .tablewrap{overflow-x:visible}
+  /* The base rule floors the table at 720px, which is what made it scroll
+     sideways in the first place. A card has no columns to keep apart. */
+  table.data{min-width:0}
+  table.data,table.data tbody,table.data tr,table.data td{display:block}
+  table.data thead{display:none}
+  table.data td{border-bottom:0;padding:0}
+
+  table.data tr.click{
+    display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px;
+    padding:11px 12px;border-bottom:1px solid var(--line-soft)}
+  table.data tr.click td.stack{display:flex}
+
+  .c-caret{order:0;width:auto;padding-top:2px}
+  .c-claim{order:1;flex:1 1 auto;min-width:0}
+  /* Pushed to the far end of the first line, and reading right to left there. */
+  .c-status{order:2;margin-left:auto;align-items:flex-end;text-align:right}
+  .c-cust{order:3;flex:1 0 100%;font-weight:500}
+  .c-serial{order:4;flex:1 0 100%}
+  .c-principal,.c-req,.c-wo{order:5;flex:1 0 100%;font-size:12px;color:var(--ink-3)}
+  /* The three smallest facts share the last line rather than taking one each. */
+  .c-date,.c-parts,.c-age{order:6;font-size:12px;color:var(--ink-3)}
+  .c-parts::before,.c-age::before{content:"·";margin-right:8px;color:var(--line)}
+
+  table.data tr.sub{
+    display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px;
+    padding:7px 12px 7px 28px}
+  /* The spacer cells that align a part row under a table have nothing to
+     align to once the table is a stack of cards. */
+  table.data tr.sub td:empty{display:none}
+  table.data tr.sub td.part{flex:1 1 auto;padding-left:0}
+  table.data tr.sub td.part::before{display:none}
+  table.data tr.sub td.stack{display:flex;margin-left:auto;align-items:flex-end;text-align:right}
+  table.data tr.sub+tr.click td{border-top:0}
+
+  table.data tr.group-header td,table.data tr.ref-header td{padding:10px 12px 7px}
+  table.data tr.ref-header td{padding-left:22px}
+}
 .age-warn{color:var(--warn);font-weight:600}
 .age-crit{color:var(--crit);font-weight:600}
 

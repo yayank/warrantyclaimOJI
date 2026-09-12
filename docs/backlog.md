@@ -67,7 +67,13 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## B · Kartu untuk layar kecil
+## B · Kartu untuk layar kecil — ✅ SELESAI (12 Sep 2026)
+
+> Catatan: penyebab sebenarnya bukan hanya tiadanya media query — `table.data`
+> punya `min-width:720px` di aturan dasarnya, dibuat untuk pendekatan geser-
+> samping. Tanpa mencabutnya di dalam media query, kartunya terbentuk tapi
+> halamannya tetap bisa digeser ke samping.
+
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 >

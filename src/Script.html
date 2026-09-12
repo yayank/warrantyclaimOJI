@@ -733,40 +733,43 @@ function claimTable() {
   const claimRows = function (c, underRef) {
     const open = !S.collapsed[c.claimId];
     const cells = [
-      '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
+      // Each cell says what it is, not merely where it sits. Which columns a
+      // role gets varies, so a card layout that placed cells by position would
+      // reshuffle itself between roles.
+      '<td class="caret c-caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
       // Under a reference heading the row is only its own id — the heading
       // above already carries the reference. Flat, nothing carries it but the
       // row, so both lines come back; and a claim with no reference at all
       // leads with the only name it has.
-      '<td class="stack">' + (underRef
+      '<td class="stack c-claim">' + (underRef
         ? '<span class="mono">' + h(c.claimId) + '</span>'
         : (c.refNo
           ? '<span class="mono">' + h(c.refNo) + '</span>' +
             '<span class="mono tiny">' + h(c.claimId) + '</span>'
           : '<span class="mono">' + h(c.claimId) + '</span>' +
             '<span class="mono tiny">not submitted</span>')) + '</td>',
-      '<td>' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
+      '<td class="c-date">' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
     ];
     if (showPrincipal) {
-      cells.push('<td' + (c.principal ? '' : ' class="dimmer"') + '>' +
+      cells.push('<td class="c-principal' + (c.principal ? '' : ' dimmer') + '">' +
         h(c.principal || 'unattributed') + '</td>');
     }
-    if (showCustomer) cells.push('<td>' + h(c.customerName) + '</td>');
+    if (showCustomer) cells.push('<td class="c-cust">' + h(c.customerName) + '</td>');
     cells.push(
-      '<td class="stack"><span class="mono">' + h(c.serialNumber) + '</span>' +
+      '<td class="stack c-serial"><span class="mono">' + h(c.serialNumber) + '</span>' +
         warrantyPill(c.warrantyType) + '</td>',
-      '<td>' + c.items.length + ' item' + (c.items.length === 1 ? '' : 's') + '</td>'
+      '<td class="c-parts">' + c.items.length + ' item' + (c.items.length === 1 ? '' : 's') + '</td>'
     );
-    if (showRequester) cells.push('<td class="dim">' + h(c.requesterName) + '</td>');
+    if (showRequester) cells.push('<td class="dim c-req">' + h(c.requesterName) + '</td>');
     if (showWo) {
-      cells.push('<td class="mono' + (c.workOrderNo ? '' : ' dimmer') + '">' +
+      cells.push('<td class="mono c-wo' + (c.workOrderNo ? '' : ' dimmer') + '">' +
         h(c.workOrderNo || '— required') + '</td>');
     }
     cells.push(
-      '<td class="stack">' + statusPill(c.status) +
+      '<td class="stack c-status">' + statusPill(c.status) +
         (summaryText(c.summary) ? '<span class="tiny">' + h(summaryText(c.summary)) + '</span>' : '') +
         '</td>',
-      '<td>' + ageCell(c.ageDays) + '</td>'
+      '<td class="c-age">' + ageCell(c.ageDays) + '</td>'
     );
 
     const rowHtml = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
@@ -816,6 +819,14 @@ function claimTable() {
 }
 
 function wireClaimsToolbar() {
+  // The tab strip scrolls sideways when it does not fit, which on a phone puts
+  // the tab you are actually on past the right edge — the screen stops saying
+  // where you are. Bring it back into view after every draw.
+  const onTab = el('view').querySelector('.tabs button.on');
+  if (onTab && onTab.scrollIntoView) {
+    onTab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
   const more = el('loadMore');
   if (more) more.addEventListener('click', function () {
     more.disabled = true;

@@ -282,7 +282,7 @@ check('and says so rather than leaving a gap',
 function claimCell(rows, tab, group) {
   return render(ROLE.REQUESTER, tab || 'all', rows, {}, group)
     .filter(function (e) { return e.kind === 'claim'; })[0].html
-    .match(/<td class="stack">([\s\S]*?)<\/td>/)[1]
+    .match(/<td class="stack c-claim">([\s\S]*?)<\/td>/)[1]
     .replace(/<[^>]*>/g, '|').replace(/\|+/g, '|').replace(/^\||\|$/g, '');
 }
 
@@ -409,6 +409,26 @@ check('the group control offers all three cuts',
   ['status', 'customer', 'none'].every(function (v) {
     return groupFilter().indexOf('value="' + v + '"') !== -1;
   }), groupFilter());
+
+/* ------------------- the cells the card layout places by name */
+
+// Below 700px the same rows are laid out as cards, and the CSS places each cell
+// by what it is rather than where it sits — which columns a role gets varies,
+// so placing by position would reshuffle the card between roles. Losing a class
+// would break the phone layout silently, since the table still looks right.
+[[ROLE.REQUESTER, ['c-caret', 'c-claim', 'c-date', 'c-cust', 'c-serial', 'c-parts',
+    'c-status', 'c-age']],
+ [ROLE.ADMIN, ['c-caret', 'c-claim', 'c-date', 'c-principal', 'c-cust', 'c-serial',
+    'c-parts', 'c-req', 'c-wo', 'c-status', 'c-age']]
+].forEach(function (pair) {
+  const html = render(pair[0], 'all', mixed)
+    .filter(function (e) { return e.kind === 'claim'; })[0].html;
+  const missing = pair[1].filter(function (cls) {
+    return html.indexOf(cls) === -1;
+  });
+  check(pair[0] + ' rows carry every cell the card layout places', !missing.length,
+    'missing ' + missing.join(', '));
+});
 
 /* --------------------------------------------- which tab opens, and for whom */
 
