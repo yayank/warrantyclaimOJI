@@ -149,7 +149,49 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## D · Kolom ringkasan, lalu QUERY
+## D · Kolom ringkasan, lalu QUERY — ✅ TAHAP 1 & 2 SELESAI, TAHAP 3 DITOLAK (12 Sep 2026)
+
+> **Tahap 1** (`51f7d8f`). Delapan kolom pada `Claims`: `ItemCount`,
+> `PendingCount`, `ApprovedCount`, `RejectedCount`, `ShippedCount`,
+> `AwaitingReturnCount`, `AdvanceCount`, `AdvanceQueueCount`. Prompt ini menyuruh
+> menggantung pemeliharaannya pada `recomputeClaimStatus_` saja — itu keliru:
+> **enam jalur mengubah item tanpa pernah memanggilnya** (`syncItems_`,
+> `mergeIntoClaim_`, `setAvailability_`, `forwardOrder_`, `fulfilFromStock_`,
+> `setAdvanceIssue_`). Semuanya sekarang menghitung ulang. Selalu hitung ulang
+> dari itemnya, tidak pernah menambah/mengurangi angka yang sudah ada. Ditulis
+> lewat `setCells_` supaya `RowVersion` tidak ikut naik — angka yang dihitung
+> server sendiri bukan suntingan siapa pun. `backfillClaimSummaries_()` untuk
+> klaim lama, jalan dari `setUp()` dan dari `backfillSummaries()` di editor.
+>
+> **Tahap 2** (`9eafaa0`). Seluruh aturan tab, filter dan badge dijawab dari
+> kolom. `listClaims_` menerima `items: 'all' | 'page' | 'none'`; defaultnya
+> `'all'` karena layar Orders dan ekspor Excel butuh part tiap baris. Filter
+> `partId` satu-satunya pertanyaan yang tidak bisa dijawab kolom, jadi ia tetap
+> memaksa pembacaan. Sheet yang belum dimigrasi dideteksi (`summariesReady_`)
+> dan jatuh kembali ke menghitung item — lambat, bukan salah diam-diam.
+>
+> **Ukurannya** (`node tools/measure-list.js`, 412 klaim / 550 item):
+>
+> | | getValues | sel dibaca |
+> |---|---|---|
+> | daftar dengan part | 2 | 30.846 |
+> | daftar tanpa part | 1 | 16.520 |
+>
+> Jadi target "`ClaimItems` tidak dibaca sama sekali" **belum tercapai** untuk
+> tabel klaim, dan bukan karena kodenya: tabel itu menggambar baris sparepart di
+> bawah tiap klaim, jadi ia memang butuh itemnya. Penghematan 46% itu tersedia
+> hanya kalau baris sparepart tidak lagi digambar di muka. Itu keputusan tampilan,
+> bukan keputusan teknis.
+>
+> **Tahap 3 — tidak dipakai.** `gviz/tq` bisa memfilter dan memotong di sisi
+> Google, tapi satu `claims.list` butuh tiga jawaban: halamannya, total set
+> tersaring, dan dua angka badge atas seluruh set yang terlihat. Itu tiga
+> permintaan HTTPS ber-OAuth dari Apps Script, masing-masing dengan lantai
+> latensinya sendiri, menggantikan **satu** `getValues()` 16.520 sel. Latensi
+> Apps Script tidak bisa saya ukur dari luar, jadi keputusan ini berdiri di atas
+> jumlah perjalanan — dan tiga perjalanan tidak akan mengalahkan satu pembacaan.
+> Jangan dipakai.
+
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. **Ini yang paling
 > berisiko di backlog — menyentuh skema dan data hidup. Kerjakan dalam dua
