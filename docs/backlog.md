@@ -181,7 +181,11 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 > tabel klaim, dan bukan karena kodenya: tabel itu menggambar baris sparepart di
 > bawah tiap klaim, jadi ia memang butuh itemnya. Penghematan 46% itu tersedia
 > hanya kalau baris sparepart tidak lagi digambar di muka. Itu keputusan tampilan,
-> bukan keputusan teknis.
+> bukan keputusan teknis — **dan sudah diputuskan: tampilan tetap seperti sekarang**
+> (12 Sep 2026). Baris sparepart tetap terbuka otomatis; daftar tetap membaca
+> `ClaimItems`. Jangan diubah tanpa diminta. Jalannya tetap terbuka kalau suatu
+> hari berubah pikiran: `listClaims_` sudah menerima `items: 'none'`, dan
+> pengujinya sudah membuktikan jawabannya identik tanpa part.
 >
 > **Tahap 3 — tidak dipakai.** `gviz/tq` bisa memfilter dan memotong di sisi
 > Google, tapi satu `claims.list` butuh tiga jawaban: halamannya, total set
