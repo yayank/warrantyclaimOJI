@@ -67,6 +67,7 @@ node tools/verify-grouping.js               # 70 pemeriksaan
 node tools/verify-paging.js                 # 18 pemeriksaan
 node tools/verify-audit.js                  # 42 pemeriksaan
 node tools/verify-summary.js                # 75 pemeriksaan
+node tools/verify-views.js                  # 51 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.
@@ -80,6 +81,8 @@ Penguji audit membuktikan bahwa pemindahan jejak tahun lama ke sheet arsipnya se
 Ukur biaya satu `claims.list` dengan `node tools/measure-list.js` — ia menghitung panggilan `getValues()` beserta jumlah selnya, sehingga perubahan cara daftar dijawab bisa dinilai dari angka, bukan dari argumen.
 
 Penguji ringkasan menjaga kolom hitungan pada baris `Claims` — salinan dari `ClaimItems` yang dipakai aturan tab. Salinan yang melenceng diam-diam lebih buruk daripada tidak ada salinan, jadi penguji ini menelusuri **setiap** klaim setelah **setiap** jenis perubahan item dan membandingkan angka tersimpan dengan hitungan segar dari `ClaimItems`. Ia juga membaca `src/Claims.gs` sebagai teks: jalur mana pun yang menulis item tanpa menghitung ulang akan gagal di sini, sebelum ada yang sempat memikirkan fixture untuknya.
+
+Penguji saved views menjaga satu jebakan yang tidak kelihatan dari layar: aplikasi web ini dijalankan sebagai orang yang men-deploy-nya, jadi `PropertiesService.getUserProperties()` — tempat yang paling wajar untuk preset per pengguna — sebenarnya milik satu orang itu untuk semua pengunjung. Preset karenanya disimpan pada properti skrip dengan alamat si penandatangan sebagai kuncinya, dan pemeriksaan pertama di penguji itu adalah dua orang yang menyimpan di pagi yang sama tetap punya presetnya masing-masing.
 
 Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah saling melihat klaim, klaim yang belum terpetakan tidak sampai ke siapa pun, dan klaim uji tersembunyi dari semua peran kecuali Tester.
 

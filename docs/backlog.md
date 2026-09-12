@@ -237,7 +237,31 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## E · Saved views *(opsional)*
+## E · Saved views — ✅ SELESAI (12 Sep 2026)
+
+> Catatan koreksi: prompt di bawah bilang "`PropertiesService` per pengguna sudah
+> cukup". **Itu keliru dan diam-diam.** Web app ini di-deploy dengan
+> `executeAs: USER_DEPLOYING`, jadi `getUserProperties()` adalah milik orang yang
+> men-deploy — untuk semua pengunjung. Satu administrator akan membuka portal dan
+> menemukan preset orang lain, dan menyimpan berarti menimpanya. Tidak ada satu
+> pun layar yang akan memberi tahu. Preset disimpan pada properti **skrip**
+> dengan alamat si penandatangan sebagai kunci; alamat itu tetap yang asli
+> walaupun seorang Tester sedang menyimulasikan peran lain, karena preset milik
+> orangnya, bukan milik topi yang sedang dipakai.
+>
+> Yang dikerjakan: `src/Views.gs` (`views.list` / `views.save` / `views.delete`),
+> pemilih di toolbar Claims, dan satu modal untuk menyimpan sekaligus menghapus.
+> Yang disimpan: tab, potongan grouping, dan filter — **bukan kotak pencarian**,
+> yang adalah pertanyaan sekali tanya, bukan cara kerja. Nama yang sama menimpa
+> di tempat, batas 20 view, dan apa pun di luar field yang dikenal dibuang
+> sebelum disimpan. Tidak ada state "view mana yang sedang dipilih": kecocokannya
+> dihitung dari layar, jadi mengubah satu filter melepas view itu sendiri.
+>
+> Customer yang sudah tidak aktif: view-nya tetap terbuka, tab dan filter lain
+> tetap terpasang, dan layar menyebut nama rumah sakitnya beserta alasan kenapa
+> kosong, dengan satu tombol untuk membersihkan filter customer-nya.
+> `tools/verify-views.js`, 51 pemeriksaan, terbukti menangkap sembilan bug.
+
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 >

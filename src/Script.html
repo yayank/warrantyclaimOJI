@@ -7,8 +7,9 @@ const S = {
   reference: null,
   page: 'claims',
   tab: 'all',
-  filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', customerName: '',
-    partId: '', principal: '', from: '', to: '' },
+  filters: blankFilters(),
+  views: null,              // saved filter combinations; null until fetched once
+  viewNotice: '',           // why a view that was opened shows nothing
   rows: [],
   total: 0,                 // how many the filter matches, not how many are shown
   counts: { action: 0, advance: 0 },
@@ -22,6 +23,20 @@ const S = {
   templates: [],
   templateCode: 'DAILY_DIGEST'
 };
+
+/**
+ * The filters with nothing set.
+ *
+ * Applying a saved view replaces the whole object rather than merging into it:
+ * a filter the view does not mention has to come back empty, or opening a view
+ * would quietly keep whatever was on screen before it.
+ */
+function blankFilters() {
+  return {
+    search: '', statuses: [], warrantyTypes: [], customerId: '', customerName: '',
+    partId: '', principal: '', from: '', to: ''
+  };
+}
 
 const STATUS = {
   DRAFT: 'Draft', SUBMITTED: 'Submitted', RETURNED: 'Returned to Requester',
@@ -435,6 +450,12 @@ const CLAIM_PAGE = 50;
  */
 function loadClaims(append) {
   if (!append) el('view').innerHTML = skeleton(6);
+  // Once per visit, and never in the way: the list does not wait for it, and a
+  // toolbar without the control until it lands is better than a slower list.
+  if (S.views === null) {
+    S.views = [];
+    loadViews().then(function (views) { if (views.length) renderClaims(); });
+  }
   // Only the page's parts: the spare-part rows under a claim are drawn for
   // what is on screen, and shaping the other four hundred claims' parts to
   // throw them away is work nobody sees.
@@ -486,12 +507,15 @@ function renderClaims() {
       customerFilter(),
       principalFilter(),
       groupFilter(),
+      viewFilter(),
+      '<button class="btn" id="manageViews" type="button">Save view</button>',
       '<span class="spacer"></span>',
       s.role === ROLE.ADMIN ? '<button class="btn" id="digestNow" type="button">Send Digest Now</button>' : '',
       '<button class="btn" id="doExport" type="button">Export to Excel</button>',
       canCreate ? '<button class="btn pri" id="newClaim" type="button">New Claim</button>' : '',
     '</div>',
     activeChips(),
+    viewNotice(),
     S.rows.length
       ? claimTable() + moreBar()
       : '<div class="tablewrap"><div class="empty">Nothing here yet.</div></div>'
@@ -589,6 +613,174 @@ function customerFilter() {
       loadClaims();
     }
   }) + '</div>';
+}
+
+/* ======================================================== saved views */
+
+/*
+ * The same three filters, every morning. A view is that combination under a
+ * name: which tab, how the list is cut, and the filters — but never the search
+ * box, which is a question asked once rather than a way of working.
+ *
+ * Nothing remembers which view is "selected". Whether one is showing is worked
+ * out by comparing what is on screen with what was saved, so changing a filter
+ * lets go of the view by itself and no handler has to remember to say so.
+ */
+
+const VIEW_FIELDS = ['statuses', 'warrantyTypes', 'customerId', 'principal', 'from', 'to'];
+
+function sameFilterValue(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (a || []).slice().sort().join('\u0000') === (b || []).slice().sort().join('\u0000');
+  }
+  return String(a || '') === String(b || '');
+}
+
+/** Whether the screen is showing exactly what this view saved. */
+function viewIsShowing(view) {
+  if (!view) return false;
+  if (view.tab !== S.tab) return false;
+  if ((view.group || 'status') !== S.group) return false;
+  return VIEW_FIELDS.every(function (key) {
+    return sameFilterValue((view.filters || {})[key], S.filters[key]);
+  });
+}
+
+function activeViewName() {
+  const on = (S.views || []).filter(viewIsShowing)[0];
+  return on ? on.name : '';
+}
+
+/** What would be stored if the current screen were saved. */
+function currentView(name) {
+  const filters = {};
+  VIEW_FIELDS.forEach(function (key) { filters[key] = S.filters[key]; });
+  // Kept beside the id so a view can still name its hospital on screen without
+  // asking the server what the id means.
+  filters.customerName = S.filters.customerName;
+  return { name: name, tab: S.tab, group: S.group, filters: filters };
+}
+
+/**
+ * A view kept for months can name a hospital that has since been switched off.
+ * It still opens — it just has to say why it is empty, rather than looking like
+ * a portal with nothing in it.
+ */
+function viewCustomerGone(filters, option) {
+  return !!(filters && filters.customerId) && !option;
+}
+
+function loadViews() {
+  return api('views.list', {}, true).then(function (r) {
+    S.views = (r && r.views) || [];
+    return S.views;
+  }).catch(function () {
+    // A preset list that will not load is not a reason to lose the claim list.
+    S.views = [];
+    return S.views;
+  });
+}
+
+function viewFilter() {
+  if (!S.views || !S.views.length) return '';
+  const on = activeViewName();
+  return '<select id="savedView" style="width:auto;max-width:190px">' +
+    '<option value=""' + (on ? '' : ' selected') + '>' +
+      (on ? 'Saved views…' : 'Saved views') + '</option>' +
+    S.views.map(function (v) {
+      return '<option value="' + h(v.name) + '"' + (v.name === on ? ' selected' : '') + '>' +
+        h(v.name) + '</option>';
+    }).join('') +
+    '</select>';
+}
+
+function applyView(name) {
+  const view = (S.views || []).filter(function (v) { return v.name === name; })[0];
+  if (!view) return;
+
+  S.tab = view.tab || 'all';
+  S.group = view.group || 'status';
+  S.filters = Object.assign(blankFilters(), view.filters || {});
+  S.viewNotice = '';
+  S.collapsed = {};
+
+  if (!S.filters.customerId) { loadClaims(); return; }
+
+  api('master.customer', { customerId: S.filters.customerId }, true)
+    .then(function (r) {
+      const option = r && r.option;
+      if (viewCustomerGone(S.filters, option)) {
+        S.viewNotice = (S.filters.customerName || S.filters.customerId) +
+          ' is no longer on the customer list, so “' + view.name +
+          '” has nothing to show. The rest of the view is set; clear the customer ' +
+          'to see it.';
+      } else if (option) {
+        // The name may have been corrected since the view was saved.
+        S.filters.customerName = option.label;
+      }
+    })
+    .catch(function () {})
+    .then(function () { loadClaims(); });
+}
+
+function viewNotice() {
+  if (!S.viewNotice) return '';
+  return '<div class="toolbar"><div class="notice grow">' + h(S.viewNotice) +
+    '<button class="btn sm" id="dropViewCustomer" type="button" ' +
+    'style="margin-left:10px">Clear the customer</button></div></div>';
+}
+
+/** Saving and tidying, in one place: the list is short and so is the form. */
+function openViewManager() {
+  const current = activeViewName();
+  openModal({
+    title: 'Saved views',
+    size: 'narrow',
+    body: '<label class="field"><span>Name this view</span>' +
+        '<input type="text" id="viewName" maxlength="60" value="' + h(current) + '" ' +
+        'placeholder="Sansin, waiting on me"></label>' +
+      '<p class="tiny">Saves the tab, the grouping and the filters below it. ' +
+        'The search box is not saved — it is a question you ask once.</p>' +
+      '<div id="viewList"></div>',
+    actions: [
+      { label: 'Close', close: true },
+      { label: 'Save', primary: true, onClick: function (close) {
+        const name = el('viewName').value.trim();
+        if (!name) { toast('Give the view a name.', 'err'); return; }
+        api('views.save', currentView(name)).then(function (r) {
+          S.views = r.views;
+          close();
+          toast('Saved “' + name + '”.', 'ok');
+          renderClaims();
+        }).catch(fail);
+      } }
+    ],
+    onOpen: function () { renderViewList(); }
+  });
+}
+
+function renderViewList() {
+  const host = el('viewList');
+  if (!host) return;
+  const views = S.views || [];
+  host.innerHTML = views.length
+    ? '<p class="tiny" style="margin-bottom:4px">Saved already</p>' +
+      views.map(function (v) {
+        return '<div class="chip" style="margin:0 6px 6px 0">' + h(v.name) +
+          '<button type="button" data-drop="' + h(v.name) + '" ' +
+          'aria-label="Delete this view">✕</button></div>';
+      }).join('')
+    : '<p class="tiny">Nothing saved yet.</p>';
+
+  host.querySelectorAll('[data-drop]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      api('views.delete', { name: b.dataset.drop }).then(function (r) {
+        S.views = r.views;
+        renderViewList();
+        renderClaims();
+      }).catch(fail);
+    });
+  });
 }
 
 /** What the list is cut by. The blocks are the same shape either way. */
@@ -881,6 +1073,19 @@ function wireClaimsToolbar() {
   const gb = el('groupBy');
   if (gb) gb.addEventListener('change', function () {
     S.group = this.value; renderClaims();
+  });
+  const sv = el('savedView');
+  if (sv) sv.addEventListener('change', function () {
+    if (this.value) applyView(this.value);
+  });
+  const mv = el('manageViews');
+  if (mv) mv.addEventListener('click', openViewManager);
+  const dvc = el('dropViewCustomer');
+  if (dvc) dvc.addEventListener('click', function () {
+    S.filters.customerId = '';
+    S.filters.customerName = '';
+    S.viewNotice = '';
+    loadClaims();
   });
   const pf = el('principalFilter');
   if (pf) pf.addEventListener('change', function () {

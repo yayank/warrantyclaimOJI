@@ -195,6 +195,11 @@ function route_(session, action, payload) {
     case 'email.setEnabled': return setEmailEnabled_(session, payload.enabled);
     case 'email.digestNow': return sendDigestNow_(session);
 
+    /* saved filter combinations, per person */
+    case 'views.list': return listViews_(session);
+    case 'views.save': return saveView_(session, payload);
+    case 'views.delete': return deleteView_(session, payload);
+
     /* audit and test mode */
     case 'audit.list': return listAudit_(session, payload);
     case 'test.purge': return purgeTestClaims_(session);
