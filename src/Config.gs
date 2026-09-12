@@ -21,7 +21,10 @@ const SHEET = {
   PRINCIPALS: 'Principals',
   SETTINGS: 'Settings',
   WARRANTY: 'warranty',
-  POPULATION: 'Population'
+  POPULATION: 'Population',
+  PRODUCTS: 'Products',
+  RULES: 'WarrantyRules',
+  DISTRIBUTORS: 'Distributors'
 };
 
 const SCHEMA = {};
@@ -82,7 +85,7 @@ SCHEMA[SHEET.TEMPLATES] = [
   'TemplateCode', 'Name', 'Subject', 'Body', 'Version', 'Active', 'UpdatedBy', 'UpdatedAt'
 ];
 
-SCHEMA[SHEET.USERS] = ['Email', 'Name', 'Role', 'Principal', 'Active', 'CreatedAt'];
+SCHEMA[SHEET.USERS] = ['Email', 'Name', 'Role', 'Principal', 'Distributor', 'Active', 'CreatedAt'];
 SCHEMA[SHEET.CUSTOMER] = ['CustomerID', 'Name', 'Active'];
 SCHEMA[SHEET.PART] = ['PartID', 'Name', 'Active'];
 SCHEMA[SHEET.RECIPIENTS] = ['RecipientID', 'Name', 'Email', 'Company', 'Principal', 'Active', 'Notes'];
@@ -93,6 +96,31 @@ SCHEMA[SHEET.POPULATION] = [
   'Delivery', 'SellingInDate', 'Material', 'ItemDescription', 'Batch',
   'DeliveryQuantity', 'ShipToParty', 'Principal'
 ];
+
+/**
+ * One row per product model. Material is the key, and it is one value per
+ * model — confirmed with the owner before this was built, because the whole
+ * rule lookup hangs off it.
+ */
+SCHEMA[SHEET.PRODUCTS] = [
+  'Material', 'Name', 'Principal', 'Regulation', 'SerialPattern', 'Active', 'Notes'
+];
+
+/**
+ * The warranty terms themselves, as data rather than as a constant.
+ *
+ * One row is one side of one model on one sales channel. Scope separates the
+ * two tiers: what the principal still covers for us, and what we still cover
+ * for whoever bought it. EffectiveFrom/To are matched against the unit's own
+ * basis date, never against today — a policy changed this year must not
+ * shorten the warranty of a unit sold three years ago.
+ */
+SCHEMA[SHEET.RULES] = [
+  'RuleID', 'Material', 'Scope', 'Channel', 'Basis', 'Months',
+  'EffectiveFrom', 'EffectiveTo', 'Active', 'Notes'
+];
+
+SCHEMA[SHEET.DISTRIBUTORS] = ['DistributorID', 'Name', 'Email', 'Active', 'Notes'];
 
 /**
  * Sheets that arrive from the old workbook as a bare list with no header row.
@@ -155,6 +183,36 @@ const WARRANTY_TYPE = {
   OUT: 'Out of Principal Warranty',
   MANUAL: 'Manual Verification Required',
   INTERNAL: 'Internal Warranty'
+};
+
+/**
+ * The other tier: what we still owe whoever bought the unit, which is not the
+ * same question as what the principal still owes us and frequently has a
+ * different answer. Manual reads the same on both sides on purpose, so one
+ * filter finds everything waiting on a person.
+ */
+const CUSTOMER_WARRANTY_TYPE = {
+  IN: 'Under Our Warranty',
+  OUT: 'Out of Our Warranty',
+  MANUAL: WARRANTY_TYPE.MANUAL
+};
+
+/** Which of the two tiers a rule or a verdict is about. */
+const WARRANTY_SCOPE = { PRINCIPAL: 'principal', CUSTOMER: 'customer' };
+
+/** How the unit reached the hospital. '*' on a rule means either way. */
+const SALES_CHANNEL = { DIRECT: 'direct', DISTRIBUTOR: 'distributor', ANY: '*' };
+
+/**
+ * What the months are counted from. All four are in use across the portfolio
+ * because each principal writes its own policy; which one applies is decided
+ * by the product, not by who sold it.
+ */
+const WARRANTY_BASIS = {
+  ASSEMBLY: 'assembly',
+  SELLING_IN: 'selling-in',
+  RECEIVED: 'received',
+  INSTALLATION: 'installation'
 };
 
 /**

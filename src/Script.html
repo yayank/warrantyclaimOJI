@@ -2728,11 +2728,19 @@ function runLookup(serial) {
   });
 }
 
+// An expiry is a month when the months were counted from the assembly month,
+// which is all the serial number carries, and a full date when they were
+// counted from a date the sheet actually holds. Rendering the second as the
+// first would say a warranty runs to the end of a month it expires part way
+// through, so the day is kept when there is one.
 function monthLabel(key) {
   if (!key) return '—';
   const parts = String(key).split('-');
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return names[Number(parts[1]) - 1] + ' ' + parts[0];
+  const month = names[Number(parts[1]) - 1];
+  if (!month) return String(key);
+  if (parts.length > 2 && parts[2]) return Number(parts[2]) + ' ' + month + ' ' + parts[0];
+  return month + ' ' + parts[0];
 }
 
 /* ------------------------------------------------------ save & submit */

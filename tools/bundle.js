@@ -20,7 +20,7 @@ const DIST = path.join(__dirname, '..', 'dist');
 // Config first: it declares the constants the other files close over at load
 // time. The rest is alphabetical so the output is stable between runs.
 const ORDER = [
-  'Config.gs', 'Repo.gs', 'Auth.gs', 'Warranty.gs', 'Audit.gs', 'Files.gs',
+  'Config.gs', 'Repo.gs', 'Auth.gs', 'Warranty.gs', 'WarrantyRules.gs', 'Audit.gs', 'Files.gs',
   'Mailer.gs', 'Claims.gs', 'MasterData.gs', 'Views.gs', 'Visits.gs', 'Export.gs', 'Triggers.gs',
   'Setup.gs', 'Code.gs'
 ];

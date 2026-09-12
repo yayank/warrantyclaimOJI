@@ -1,6 +1,11 @@
 /**
  * Warranty.gs — principal warranty from the serial number.
  *
+ * This is now the fallback rather than the rule. WarrantyRules.gs answers from
+ * the terms recorded per model; what is below is what happens when no rule on
+ * file covers the unit, and it is kept because the whole XT population relies
+ * on it until the rules sheet is filled in.
+ *
  * The serial number carries the assembly month, and that is the only reliable
  * starting point: measured from the selling-in date the same units scatter
  * across 13-22 months, while assembly + 22 months matches 1,112 of the 1,113
@@ -61,10 +66,37 @@ function endOfMonth_(year, month) {
 /**
  * Determines the principal warranty for a serial number.
  * Returns {type, expiry, basis, assemblyMonth, daysRemaining, source}.
+ *
+ * The shape of that answer is fixed: every caller in the application reads
+ * those six fields, so the rules engine is folded in behind them rather than
+ * beside them.
+ *
+ * A rule that matches decides the answer, including when it decides the answer
+ * is "somebody has to look at this" — a rule counting from the installation
+ * date on a unit with no installation date must not quietly become 22 months
+ * from assembly. Only when no rule matches at all does the serial-number
+ * formula below get a say, which is what keeps every unit answered the way it
+ * is answered today until the rules sheet is filled in.
  */
 function determineWarranty_(serial, today) {
   const now = today || new Date();
   const parsed = parseSerial_(serial);
+  const assemblyOf = parsed ? monthKey_(parsed.year, parsed.month) : '';
+
+  const unit = unitOf_(serial);
+  if (unit && unit.Material) {
+    const ruled = resolveWarranty_(unit, WARRANTY_SCOPE.PRINCIPAL, now);
+    if (ruled.source === 'rule') {
+      return {
+        type: ruled.type,
+        expiry: ruled.expiry,
+        assemblyMonth: assemblyOf,
+        basis: ruled.basis,
+        daysRemaining: ruled.daysRemaining,
+        source: 'rule'
+      };
+    }
+  }
 
   if (!parsed) {
     return {
@@ -178,6 +210,11 @@ function warrantyIndex_() {
 function populationIndex_() {
   if (INDEX_MEMO.population) return INDEX_MEMO.population;
 
+  // The key is deliberately not versioned even though the shape changed. An
+  // entry cached by the previous revision has no material on it, so the units
+  // it holds are answered by the fallback below until it expires — which is
+  // what they were answered by before this deploy. Half an hour of unchanged
+  // behaviour, never a wrong date.
   const cached = cacheGetLarge_('populationIndex');
   if (cached) { INDEX_MEMO.population = cached; return cached; }
 
@@ -187,7 +224,17 @@ function populationIndex_() {
     if (!sn || index[sn]) return;
     index[sn] = {
       product: String(r.ItemDescription || ''),
-      principal: String(r.Principal || '').trim()
+      principal: String(r.Principal || '').trim(),
+      // What the warranty rules count from. The last five columns do not exist
+      // on the sheet yet and read as blank until the next backlog item adds
+      // them, which is why nothing here insists on them.
+      material: String(r.Material || '').trim().toUpperCase(),
+      sellingIn: String(r.SellingInDate || ''),
+      channel: String(r.Channel || '').trim().toLowerCase(),
+      received: String(r.ReceivedAtDistributor || ''),
+      installed: String(r.InstalledAt || ''),
+      extendedPrincipal: Number(r.ExtendedMonthsPrincipal) || 0,
+      extendedCustomer: Number(r.ExtendedMonthsCustomer) || 0
     };
   });
   cachePutLarge_('populationIndex', index, 1800);

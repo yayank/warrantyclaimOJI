@@ -30,7 +30,8 @@ membuat daftar berkas yang disentuh kecuali diminta.
 | `src/Repo.gs` | akses sheet: `readAll_`, `update_`, `setCell_`/`setCells_`, `withLock_`, cache berpotongan |
 | `src/Config.gs` | `SCHEMA`, `ROLE`, `STATUS`, `ITEM_STATUS`, semua konstanta |
 | `src/Claims.gs` | daftar klaim, aturan tab, transisi, aksi massal, kolom ringkasan — **berkas terbesar, 1.800 baris** |
-| `src/Warranty.gs` | mesin garansi 22 bulan, indeks unit |
+| `src/Warranty.gs` | jaring pengaman garansi 22 bulan dari serial, indeks unit |
+| `src/WarrantyRules.gs` | aturan garansi per model dari sheet, dua tingkat, `resolveWarranty_` |
 | `src/Audit.gs` | jejak audit + arsip per tahun |
 | `src/Visits.gs` | stempel kunjungan, penanda "baru sejak terakhir dilihat" |
 | `src/Views.gs` | saved views per orang |

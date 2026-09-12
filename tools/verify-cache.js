@@ -109,7 +109,7 @@ function load() {
   };
   vm.createContext(sandbox);
   vm.runInContext(
-    ['Config.gs', 'Repo.gs', 'Warranty.gs']
+    ['Config.gs', 'Repo.gs', 'Warranty.gs', 'WarrantyRules.gs']
       .map(function (f) { return fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'); })
       .concat(['globalThis.__api = { populationIndex_, warrantyIndex_, productName_, principalFor_, determineWarranty_, cachePutLarge_, cacheGetLarge_ };'])
       .join('\n'),

@@ -94,7 +94,7 @@ vm.createContext(sandbox);
 // pass or fail on nothing.
 const SandboxDate = vm.runInContext('Date', sandbox);
 
-const source = ['Config.gs', 'Repo.gs', 'Auth.gs', 'Warranty.gs', 'Visits.gs', 'Claims.gs', 'Code.gs']
+const source = ['Config.gs', 'Repo.gs', 'Auth.gs', 'Warranty.gs', 'WarrantyRules.gs', 'Visits.gs', 'Claims.gs', 'Code.gs']
   .map(function (f) { return fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'); })
   .concat(['globalThis.__api = { listClaims_, jsonSafe_, readAll_, formatDate_ };'])
   .join('\n');

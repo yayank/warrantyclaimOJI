@@ -88,7 +88,7 @@ function load() {
     Utilities: { formatDate: function () { return '2026-09-12T00:00:00'; } }
   };
   vm.createContext(sandbox);
-  ['Config.gs', 'Repo.gs', 'Warranty.gs', 'Auth.gs', 'MasterData.gs'].forEach(function (f) {
+  ['Config.gs', 'Repo.gs', 'Warranty.gs', 'WarrantyRules.gs', 'Auth.gs', 'MasterData.gs'].forEach(function (f) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'),
       sandbox, { filename: f });
   });

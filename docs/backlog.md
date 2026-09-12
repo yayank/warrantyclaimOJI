@@ -382,7 +382,30 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## H · Master produk dan aturan garansi — mesinnya saja
+## H · Master produk dan aturan garansi — mesinnya saja — ✅ SELESAI (12 Sep 2026)
+
+> Catatan koreksi, tiga hal yang salah di prompt di bawah:
+>
+> 1. **`pickRule_(material, scope, channel, basisDate)` tidak bisa dipanggil
+>    begitu.** Jendela efektif dicocokkan ke tanggal dasar, sedangkan tanggal
+>    dasar mana yang berlaku baru diketahui setelah aturannya terpilih — dua
+>    aturan pada model yang sama boleh menghitung dari dua tanggal berbeda.
+>    Parameter terakhirnya jadi **unit**-nya, bukan satu tanggal.
+> 2. **"Tanpa mengubah satu pun perilaku yang terlihat" tidak bisa dipenuhi
+>    sepenuhnya.** Aturan yang menghitung dari tanggal harian menghasilkan masa
+>    berlaku bertanggal, sementara `monthLabel` di klien hanya menggambar bulan
+>    — "valid until Sep 2027" untuk garansi yang habis 3 September adalah
+>    sebulan cover yang tidak ada. `monthLabel` diberi satu cabang untuk tanggal
+>    penuh; hasil untuk data lama tidak berubah sama sekali.
+> 3. **"Tanpa satu pun penguji disentuh" berlaku untuk pemeriksaannya, bukan
+>    untuk daftar muatnya.** Empat penguji perlu `'WarrantyRules.gs'`
+>    ditambahkan ke daftar berkas yang dimuat, seperti `Visits.gs` dulu. Tidak
+>    ada satu pun pemeriksaan yang diubah.
+>
+> Kunci cache `populationIndex` **sengaja tidak dinaikkan** walaupun bentuknya
+> berubah: entri lama tidak punya `material`, jadi unitnya dijawab jaring
+> pengaman sampai kedaluwarsa — persis jawaban sebelum deploy. Setengah jam
+> perilaku yang tidak berubah, bukan tanggal yang salah.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Baca
 > `docs/warranty-model.md` bagian 1–3, 6 dan 11 lebih dulu.
