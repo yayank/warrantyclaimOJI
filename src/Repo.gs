@@ -205,6 +205,15 @@ function readAll_(name) {
   return out;
 }
 
+/**
+ * readAll_ for a sheet that may legitimately not exist yet — the audit archives
+ * are created the first time a year rolls over, so asking for one before then
+ * is an empty answer, not a fault.
+ */
+function readSheetRows_(name) {
+  return ss_().getSheetByName(name) ? readAll_(name) : [];
+}
+
 /** Live rows only — anything flagged Deleted stays on the sheet but out of sight. */
 function readLive_(name) {
   return readAll_(name).filter(function (r) { return r.Deleted !== true && r.Deleted !== 'TRUE'; });
@@ -232,6 +241,28 @@ function insertMany_(name, objs) {
     return head.map(function (h) { return o[h] === undefined ? '' : o[h]; });
   });
   s.getRange(s.getLastRow() + 1, 1, rows.length, head.length).setValues(rows);
+}
+
+/**
+ * Removes rows by their sheet row number.
+ *
+ * Bottom up, because deleting a row pulls everything below it up by one and a
+ * top-down pass would take the wrong rows out. Consecutive numbers go in a
+ * single call: an audit year is thousands of rows, and one deleteRows apiece
+ * would not finish inside the execution limit.
+ */
+function deleteRows_(name, rowNumbers) {
+  if (!rowNumbers.length) return 0;
+  const s = sheet_(name);
+  const sorted = rowNumbers.slice().sort(function (a, b) { return b - a; });
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] - 1) j++;
+    s.deleteRows(sorted[j], j - i + 1);
+    i = j + 1;
+  }
+  return sorted.length;
 }
 
 /**

@@ -103,7 +103,24 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## C · Arsip audit dan batas lampiran
+## C · Arsip audit dan batas lampiran — ✅ SELESAI (12 Sep 2026)
+
+> Catatan koreksi: prompt di bawah menunjuk `src/Files.gs` untuk
+> `uploadAttachment_`. Fungsi itu ada di `src/Claims.gs`. Sheet auditnya juga
+> bernama `AuditLog`, bukan `Audit`, jadi arsipnya `AuditLog-YYYY`.
+>
+> Yang dikerjakan: `archiveAudit_()` di `src/Audit.gs`, dipanggil
+> `dailyMaintenance()` setelah backup harian. Urutannya menyalin dulu, menghapus
+> kemudian — mati di tengah meninggalkan baris ganda selama sehari, bukan baris
+> hilang, dan jalan berikutnya mengenali serta melewatinya. `listAudit_` dan
+> panel klaim membaca sheet berjalan maupun arsip, jadi jawabannya sama baik
+> sebelum maupun sesudah trigger jalan; layar Audit Log dapat pemilih tahun.
+> Batas lampiran 10MB (`MAX_UPLOAD_BYTES`) diperiksa di server dan di browser,
+> di browser **setelah** foto diperkecil — ukuran sebelum diperkecil bukan
+> ukuran yang dikirim. Impor workbook principal punya batasnya sendiri (25MB)
+> supaya tidak ikut tertolak. `tools/verify-audit.js`, 42 pemeriksaan, terbukti
+> menangkap tujuh bug yang dikembalikan satu per satu.
+
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 >

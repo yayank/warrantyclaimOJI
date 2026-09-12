@@ -152,6 +152,13 @@ const WARRANTY_TYPE = {
  * for. The screen loads more on request rather than drawing a thousand rows
  * nobody scrolls to.
  */
+/**
+ * The largest attachment the portal will store, applied to what is actually
+ * uploaded rather than to the file on disk: photographs are resized in the
+ * browser first, so a 12MB snapshot from a phone arrives well under this.
+ */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 const CLAIM_PAGE = 50;
 const CLAIM_PAGE_MAX = 200;
 

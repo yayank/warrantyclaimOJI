@@ -166,6 +166,13 @@ const WARRANTY_TYPE = {
  * for. The screen loads more on request rather than drawing a thousand rows
  * nobody scrolls to.
  */
+/**
+ * The largest attachment the portal will store, applied to what is actually
+ * uploaded rather than to the file on disk: photographs are resized in the
+ * browser first, so a 12MB snapshot from a phone arrives well under this.
+ */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 const CLAIM_PAGE = 50;
 const CLAIM_PAGE_MAX = 200;
 
@@ -423,6 +430,15 @@ function readAll_(name) {
   return out;
 }
 
+/**
+ * readAll_ for a sheet that may legitimately not exist yet — the audit archives
+ * are created the first time a year rolls over, so asking for one before then
+ * is an empty answer, not a fault.
+ */
+function readSheetRows_(name) {
+  return ss_().getSheetByName(name) ? readAll_(name) : [];
+}
+
 /** Live rows only — anything flagged Deleted stays on the sheet but out of sight. */
 function readLive_(name) {
   return readAll_(name).filter(function (r) { return r.Deleted !== true && r.Deleted !== 'TRUE'; });
@@ -450,6 +466,28 @@ function insertMany_(name, objs) {
     return head.map(function (h) { return o[h] === undefined ? '' : o[h]; });
   });
   s.getRange(s.getLastRow() + 1, 1, rows.length, head.length).setValues(rows);
+}
+
+/**
+ * Removes rows by their sheet row number.
+ *
+ * Bottom up, because deleting a row pulls everything below it up by one and a
+ * top-down pass would take the wrong rows out. Consecutive numbers go in a
+ * single call: an audit year is thousands of rows, and one deleteRows apiece
+ * would not finish inside the execution limit.
+ */
+function deleteRows_(name, rowNumbers) {
+  if (!rowNumbers.length) return 0;
+  const s = sheet_(name);
+  const sorted = rowNumbers.slice().sort(function (a, b) { return b - a; });
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] - 1) j++;
+    s.deleteRows(sorted[j], j - i + 1);
+    i = j + 1;
+  }
+  return sorted.length;
 }
 
 /**
@@ -1275,9 +1313,162 @@ function auditChanges_(session, action, claimId, changes, reason, isTest) {
   insertMany_(SHEET.AUDIT, rows);
 }
 
+/* --------------------------------------------------------------- archives */
+
+/*
+ * The trail is never pruned — it is the document the business falls back on
+ * when a claim is disputed — so it can only be moved aside. Rows from a year
+ * that has finished live on a sheet of their own, and the working sheet holds
+ * the current year alone, which is what keeps the Audit Log screen from
+ * re-reading a decade every time it opens.
+ *
+ * Archive sheets are deliberately absent from SCHEMA: they come into existence
+ * when a year rolls over, and listing them there would have setUp() report a
+ * healthy spreadsheet as incomplete.
+ */
+
+function auditSheetName_(year) {
+  return SHEET.AUDIT + '-' + year;
+}
+
+function auditYearOf_(row) {
+  const t = String(row.Timestamp || '');
+  return /^\d{4}/.test(t) ? t.substring(0, 4) : '';
+}
+
+function thisYear_() {
+  return Utilities.formatDate(new Date(), TZ, 'yyyy');
+}
+
+/**
+ * Every year the trail can be read for, newest first. Pass the working sheet's
+ * rows if you have already read them; it is the one read worth not repeating.
+ */
+function auditYears_(currentRows) {
+  const prefix = SHEET.AUDIT + '-';
+  const found = {};
+  found[thisYear_()] = true;
+  ss_().getSheets().forEach(function (s) {
+    const name = s.getName();
+    if (name.indexOf(prefix) !== 0) return;
+    const year = name.substring(prefix.length);
+    if (/^\d{4}$/.test(year)) found[year] = true;
+  });
+  // A row still waiting to be moved is a year the screen must offer, or the
+  // day before the trigger runs the old entries would be unreachable.
+  (currentRows || readAll_(SHEET.AUDIT)).forEach(function (r) {
+    const year = auditYearOf_(r);
+    if (year) found[year] = true;
+  });
+  return Object.keys(found).sort().reverse();
+}
+
+/**
+ * What identifies one entry when deciding whether it has already been archived.
+ * LogID normally, but a row written before that column was filled has to be
+ * recognised by its content or a re-run would copy it a second time.
+ */
+function auditKey_(row) {
+  if (row.LogID) return 'id:' + row.LogID;
+  return 'v:' + SCHEMA[SHEET.AUDIT].map(function (h) {
+    return String(row[h] === undefined ? '' : row[h]);
+  }).join('\u0000');
+}
+
+/** Drops entries the list already holds, counting duplicates rather than collapsing them. */
+function dedupeAudit_(rows) {
+  const seen = {};
+  return rows.filter(function (r) {
+    const k = auditKey_(r);
+    if (seen[k]) return false;
+    seen[k] = true;
+    return true;
+  });
+}
+
+function auditArchiveSheet_(year) {
+  const name = auditSheetName_(year);
+  const book = ss_();
+  let s = book.getSheetByName(name);
+  if (!s) {
+    s = book.insertSheet(name);
+    s.appendRow(SCHEMA[SHEET.AUDIT]);
+    s.setFrozenRows(1);
+  }
+  return s;
+}
+
+/**
+ * Moves finished years off the working sheet. Run daily; safe to run twice.
+ *
+ * The order is the whole point: every row is written to its archive first and
+ * only then removed from the working sheet. A run that dies in between leaves
+ * the row in both places, and the next run recognises it and skips the copy —
+ * so the failure mode is a duplicate for a day, never an entry that is gone.
+ */
+function archiveAudit_() {
+  return withLock_(function () {
+    const current = thisYear_();
+    const stale = readAll_(SHEET.AUDIT).filter(function (r) {
+      const year = auditYearOf_(r);
+      return year && year < current;
+    });
+    if (!stale.length) return { moved: 0, years: [] };
+
+    const byYear = {};
+    stale.forEach(function (r) {
+      const year = auditYearOf_(r);
+      (byYear[year] = byYear[year] || []).push(r);
+    });
+
+    const years = Object.keys(byYear).sort();
+    years.forEach(function (year) {
+      auditArchiveSheet_(year);
+      const held = {};
+      readSheetRows_(auditSheetName_(year)).forEach(function (r) {
+        const k = auditKey_(r);
+        held[k] = (held[k] || 0) + 1;
+      });
+      // Counted, not flagged: two entries that happen to read alike are two
+      // entries, and treating them as one would leave one behind.
+      const fresh = byYear[year].filter(function (r) {
+        const k = auditKey_(r);
+        if (held[k]) { held[k]--; return false; }
+        return true;
+      });
+      if (fresh.length) insertMany_(auditSheetName_(year), fresh);
+    });
+    SpreadsheetApp.flush();
+
+    deleteRows_(SHEET.AUDIT, stale.map(function (r) { return r.__row; }));
+    return { moved: stale.length, years: years };
+  });
+}
+
+/**
+ * The entries for one year, wherever they are sitting.
+ *
+ * Both places are read because the move happens once a day: on the second of
+ * January last year is still on the working sheet, and after the trigger runs
+ * it is on the archive. Reading both makes the answer the same either way.
+ */
+function auditRowsForYear_(year, currentRows) {
+  const current = currentRows || readAll_(SHEET.AUDIT);
+  return dedupeAudit_(
+    readSheetRows_(auditSheetName_(year)).concat(
+      current.filter(function (r) { return auditYearOf_(r) === year; })));
+}
+
 /** Audit trail for one claim, newest first. */
 function auditForClaim_(claimId) {
-  return readAll_(SHEET.AUDIT)
+  // Every year, not just the current one: a claim opened in December and
+  // disputed in February must still show what was done to it.
+  const current = readAll_(SHEET.AUDIT);
+  let all = [];
+  auditYears_(current).forEach(function (year) {
+    all = all.concat(readSheetRows_(auditSheetName_(year)));
+  });
+  return dedupeAudit_(all.concat(current))
     .filter(function (r) { return r.ClaimID === claimId; })
     .sort(function (a, b) { return String(b.Timestamp).localeCompare(String(a.Timestamp)); })
     .map(function (r) {
@@ -1298,7 +1489,10 @@ function auditForClaim_(claimId) {
 function listAudit_(session, filter) {
   requireRole_(session, [ROLE.ADMIN]);
   const f = filter || {};
-  let rows = readAll_(SHEET.AUDIT);
+  const current = readAll_(SHEET.AUDIT);
+  const years = auditYears_(current);
+  const year = f.year && years.indexOf(String(f.year)) !== -1 ? String(f.year) : years[0];
+  let rows = auditRowsForYear_(year, current);
 
   if (f.claimId) rows = rows.filter(function (r) { return r.ClaimID === f.claimId; });
   if (f.actor) {
@@ -1311,6 +1505,8 @@ function listAudit_(session, filter) {
   rows.sort(function (a, b) { return String(b.Timestamp).localeCompare(String(a.Timestamp)); });
   const limit = f.limit || 200;
   return {
+    years: years,
+    year: year,
     total: rows.length,
     rows: rows.slice(0, limit).map(function (r) {
       return {
@@ -2706,8 +2902,29 @@ function syncItems_(session, claim, wanted) {
   });
 }
 
+/**
+ * Base64 carries three bytes in every four characters, so the size is known
+ * before decoding — which is the point: a payload too large to keep should not
+ * be built into a blob first.
+ */
+function base64Bytes_(data) {
+  const s = String(data || '');
+  if (!s) return 0;
+  const pad = s.charAt(s.length - 1) === '=' ? (s.charAt(s.length - 2) === '=' ? 2 : 1) : 0;
+  return Math.max(0, Math.floor(s.length * 3 / 4) - pad);
+}
+
 /** Stores one uploaded file against a draft or returned claim. */
 function uploadAttachment_(session, payload) {
+  // Checked here as well as in the browser: the browser check is for speed, and
+  // this one is the one that binds.
+  const bytes = base64Bytes_(payload.data);
+  if (bytes > MAX_UPLOAD_BYTES) {
+    throw new Error(String(payload.fileName || 'That file') + ' is ' +
+      (bytes / 1048576).toFixed(1) + 'MB, over the ' +
+      Math.round(MAX_UPLOAD_BYTES / 1048576) + 'MB limit.');
+  }
+
   const claim = findBy_(SHEET.CLAIMS, 'ClaimID', payload.claimId);
   if (!claim) throw new Error('Claim not found.');
   guardTestScope_(session, claim);
@@ -4235,8 +4452,11 @@ function sendDigestNow_(session) {
 
 function dailyMaintenance() {
   const removed = cleanUpExports_();
+  // The copy is taken before the trail is moved, so the day's backup holds the
+  // state that existed before anything was shifted between sheets.
   const backup = backupSpreadsheet_();
-  return { exportsRemoved: removed, backup: backup };
+  const archived = archiveAudit_();
+  return { exportsRemoved: removed, backup: backup, auditArchived: archived };
 }
 
 /** A copy a day. Cheap, and there is no other way back once a sheet is damaged. */

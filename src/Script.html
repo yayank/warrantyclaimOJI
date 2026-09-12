@@ -2428,9 +2428,39 @@ function reportUploadFailures() {
  * Reads a file as base64. Photos are resized first: base64 inflates by a third,
  * and a modern phone photo would otherwise make every submission crawl.
  */
-function prepareFile(file, onProgress) {
+// Mirrors MAX_UPLOAD_BYTES on the server. The server's check is the one that
+// binds; this one saves reading a file that was never going to be accepted.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+// The principal's workbook comes through the same reader but is not an
+// attachment, and a year of population rows is legitimately bigger than a
+// photograph. Capping it at the attachment limit would break the import.
+const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
+
+// What the base64 in the payload will weigh once Drive has decoded it — the
+// same arithmetic the server does, so both sides refuse the same files.
+function base64Bytes(data) {
+  const str = String(data || '');
+  if (!str) return 0;
+  const pad = str.charAt(str.length - 1) === '=' ? (str.charAt(str.length - 2) === '=' ? 2 : 1) : 0;
+  return Math.max(0, Math.floor(str.length * 3 / 4) - pad);
+}
+
+function tooLarge(name, bytes, limit) {
+  return new Error(name + ' is ' + fileSize(bytes) + ', over the ' +
+    fileSize(limit) + ' limit.');
+}
+
+function prepareFile(file, onProgress, maxBytes) {
+  const limit = maxBytes || MAX_UPLOAD_BYTES;
   return new Promise(function (resolve, reject) {
     const isImage = /^image\//.test(file.type);
+    // A photograph is resized below and usually ends up far smaller, so only a
+    // file that will be sent as it stands is refused before being read.
+    if (!isImage && file.size > limit) {
+      reject(tooLarge(file.name, file.size, limit));
+      return;
+    }
     const reader = new FileReader();
     reader.onprogress = function (e) {
       if (e.lengthComputable && onProgress) onProgress((e.loaded / e.total) * 60);
@@ -2439,9 +2469,14 @@ function prepareFile(file, onProgress) {
 
     reader.onload = function () {
       if (!isImage) {
+        const data = String(reader.result).split(',')[1];
+        if (base64Bytes(data) > limit) {
+          reject(tooLarge(file.name, base64Bytes(data), limit));
+          return;
+        }
         if (onProgress) onProgress(100);
         resolve({
-          data: String(reader.result).split(',')[1],
+          data: data,
           name: file.name,
           mimeType: file.type || 'application/octet-stream'
         });
@@ -2455,10 +2490,16 @@ function prepareFile(file, onProgress) {
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+        // Resizing usually settles a phone photo well under the limit, but a
+        // very large scan can still land over it after the shrink.
+        if (base64Bytes(data) > limit) {
+          reject(tooLarge(file.name, base64Bytes(data), limit));
+          return;
+        }
         if (onProgress) onProgress(100);
         resolve({
-          data: dataUrl.split(',')[1],
+          data: data,
           name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
           mimeType: 'image/jpeg'
         });
@@ -3415,7 +3456,7 @@ function promptImportUnits() {
         const file = el('unitFile').files[0];
         if (!file) { toast('Choose a file first.', 'err'); return; }
         toast('Importing — this can take a minute.', 'info');
-        prepareFile(file).then(function (prepared) {
+        prepareFile(file, null, MAX_IMPORT_BYTES).then(function (prepared) {
           return api('master.import', {
             data: prepared.data, fileName: prepared.name, mimeType: file.type
           });
@@ -3693,13 +3734,24 @@ function showEmail(row) {
   });
 }
 
+// Which year the Audit Log screen is showing. Empty means the current one,
+// which is what the server picks when it is not told.
+let AUDIT_YEAR = '';
+
 function loadAudit() {
   el('view').innerHTML = skeleton(6);
-  api('audit.list', { limit: 200 }).then(function (data) {
+  api('audit.list', { limit: 200, year: AUDIT_YEAR }).then(function (data) {
+    AUDIT_YEAR = data.year;
     el('view').innerHTML =
       '<div class="toolbar"><h2 style="margin:0;font-size:16px">Audit Log</h2>' +
-        '<span class="tiny">' + data.total + ' entries · showing the most recent ' +
-        data.rows.length + '</span></div>' +
+        '<select id="auditYear" style="width:auto;min-width:100px">' +
+          data.years.map(function (y) {
+            return '<option value="' + h(y) + '"' +
+              (y === data.year ? ' selected' : '') + '>' + h(y) + '</option>';
+          }).join('') +
+        '</select>' +
+        '<span class="tiny">' + data.total + ' entries in ' + h(data.year) +
+        ' · showing the most recent ' + data.rows.length + '</span></div>' +
       '<div class="tablewrap"><table class="data"><thead><tr>' +
         '<th>When</th><th>Actor</th><th>Claim</th><th>Action</th><th>Field</th>' +
         '<th>Change</th><th>Reason</th></tr></thead><tbody>' +
@@ -3714,7 +3766,16 @@ function loadAudit() {
               ? h(r.oldValue || '(empty)') + ' → ' + h(r.newValue || '(empty)') : '') + '</td>' +
             '<td class="tiny">' + h(r.reason) + '</td></tr>';
         }).join('') +
-      '</tbody></table></div>';
+      '</tbody></table></div>' +
+      (data.years.length > 1
+        ? '<p class="tiny">Entries from a finished year are kept on their own sheet ' +
+          'so this screen only ever reads one year at a time. Nothing is deleted.</p>'
+        : '');
+
+    el('auditYear').addEventListener('change', function () {
+      AUDIT_YEAR = this.value;
+      loadAudit();
+    });
   }).catch(fail);
 }
 </script>

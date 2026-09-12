@@ -54,11 +54,18 @@ node tools/verify-access.js                 # 27 pemeriksaan
 node tools/verify-templates.js              # 18 pemeriksaan
 node tools/verify-sheets.js                 # 25 pemeriksaan
 node tools/verify-payload.js                # 13 pemeriksaan
-node tools/verify-tabs.js                   # 179 pemeriksaan
+node tools/verify-tabs.js                   # 364 pemeriksaan
 node tools/verify-cache.js                  # 11 pemeriksaan
 node tools/verify-fulfilment.js             # 18 pemeriksaan
 node tools/verify-closing.js                # 12 pemeriksaan
 node tools/verify-unit.js                   # 21 pemeriksaan
+node tools/verify-actions.js                # 17 pemeriksaan
+node tools/verify-advance.js                # 17 pemeriksaan
+node tools/verify-save.js                   # 15 pemeriksaan
+node tools/verify-search.js                 # 25 pemeriksaan
+node tools/verify-grouping.js               # 70 pemeriksaan
+node tools/verify-paging.js                 # 18 pemeriksaan
+node tools/verify-audit.js                  # 42 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.
@@ -66,6 +73,8 @@ Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit
 Penguji payload menjalankan `Repo.gs` dan `Claims.gs` di atas sheet `Claims` yang selnya berisi `Date` sungguhan — persis seperti yang Sheets lakukan pada stempel waktu ISO yang ditulis aplikasi ini. `google.script.run` menolak `Date` di mana pun dalam nilai kembalian: panggilannya gagal dan halaman menerima `null`, sehingga satu sel saja bisa mengosongkan seluruh layar klaim.
 
 Penguji sheet menjalankan `Repo.gs` terhadap spreadsheet tiruan dan membuktikan bahwa baris pertama yang berisi data tidak pernah dibaca sebagai baris judul — persoalan nyata pada sheet `Customer` dan `sparepart` yang datang dari workbook lama tanpa judul kolom, yang membuat dropdown terisi baris kosong.
+
+Penguji audit membuktikan bahwa pemindahan jejak tahun lama ke sheet arsipnya sendiri tidak pernah menghilangkan satu baris pun — termasuk ketika trigger berjalan dua kali dan ketika ia mati di tengah, setelah menyalin tetapi sebelum menghapus. Penguji yang sama memeriksa batas ukuran lampiran di kedua sisi, klien dan server, terhadap angka yang sama.
 
 Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah saling melihat klaim, klaim yang belum terpetakan tidak sampai ke siapa pun, dan klaim uji tersembunyi dari semua peran kecuali Tester.
 

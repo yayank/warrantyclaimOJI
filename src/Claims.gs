@@ -621,8 +621,29 @@ function syncItems_(session, claim, wanted) {
   });
 }
 
+/**
+ * Base64 carries three bytes in every four characters, so the size is known
+ * before decoding — which is the point: a payload too large to keep should not
+ * be built into a blob first.
+ */
+function base64Bytes_(data) {
+  const s = String(data || '');
+  if (!s) return 0;
+  const pad = s.charAt(s.length - 1) === '=' ? (s.charAt(s.length - 2) === '=' ? 2 : 1) : 0;
+  return Math.max(0, Math.floor(s.length * 3 / 4) - pad);
+}
+
 /** Stores one uploaded file against a draft or returned claim. */
 function uploadAttachment_(session, payload) {
+  // Checked here as well as in the browser: the browser check is for speed, and
+  // this one is the one that binds.
+  const bytes = base64Bytes_(payload.data);
+  if (bytes > MAX_UPLOAD_BYTES) {
+    throw new Error(String(payload.fileName || 'That file') + ' is ' +
+      (bytes / 1048576).toFixed(1) + 'MB, over the ' +
+      Math.round(MAX_UPLOAD_BYTES / 1048576) + 'MB limit.');
+  }
+
   const claim = findBy_(SHEET.CLAIMS, 'ClaimID', payload.claimId);
   if (!claim) throw new Error('Claim not found.');
   guardTestScope_(session, claim);
