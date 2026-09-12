@@ -619,6 +619,8 @@ function syncItems_(session, claim, wanted) {
       oldValue: i.PartName, isTest: isTrue_(claim.IsTest)
     });
   });
+
+  refreshClaimSummaries_([claim.ClaimID]);
 }
 
 /**
@@ -826,6 +828,9 @@ function mergeIntoClaim_(session, claim, target, items) {
     Deleted: true, DeletedBy: session.email, DeletedAt: nowIso_(),
     UpdatedAt: nowIso_(), UpdatedBy: session.email
   });
+
+  // Both of them: the parts left one claim and arrived on the other.
+  refreshClaimSummaries_([claim.ClaimID, target.ClaimID]);
 
   audit_(session, 'Submit', {
     claimId: target.ClaimID, field: 'MergedFrom',
@@ -1074,6 +1079,84 @@ function decideItems_(session, payload) {
   });
 }
 
+/* --------------------------------------------------- the summary columns */
+
+/*
+ * The tab rules ask how many of a claim's parts are still pending, how many
+ * are out awaiting return, and so on. Those are item questions, so answering
+ * them for a list of claims meant reading every item in the workbook — the one
+ * read that grows with the business no matter how few claims are on screen.
+ *
+ * So the counts are kept on the claim row as well. That is a copy of the
+ * truth, and a copy that drifts is worse than no copy: the tab would say a
+ * claim is finished when it is not. Two things keep it honest. Every path that
+ * writes an item ends by recounting from the items themselves — never by
+ * adjusting a number it thinks it knows — and tools/verify-summary.js walks
+ * every claim after every kind of change and compares the stored counts with
+ * the items.
+ */
+
+const SUMMARY_COLS = ['PendingCount', 'ApprovedCount', 'RejectedCount',
+  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount'];
+
+/**
+ * Counts one claim's items. The buckets are the ones shapeClaim_ reports, and
+ * they have to stay the same buckets: the screen reads one and the tab rules
+ * read the other.
+ */
+function summaryOf_(items) {
+  const n = { PendingCount: 0, ApprovedCount: 0, RejectedCount: 0,
+    ShippedCount: 0, AwaitingReturnCount: 0, AdvanceCount: 0 };
+
+  items.forEach(function (i) {
+    const status = i.ItemStatus;
+    if (status === ITEM_STATUS.PENDING) n.PendingCount++;
+    // Approved counts everything that has been approved and not yet rejected,
+    // wherever along the road it has got to.
+    if ([ITEM_STATUS.APPROVED, ITEM_STATUS.FORWARDED, ITEM_STATUS.AWAITING,
+      ITEM_STATUS.SHIPPED].indexOf(status) !== -1) n.ApprovedCount++;
+    if (status === ITEM_STATUS.REJECTED) n.RejectedCount++;
+    if (status === ITEM_STATUS.SHIPPED) n.ShippedCount++;
+    if (status === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim()) {
+      n.AwaitingReturnCount++;
+    }
+    if (isTrue_(i.AdvanceIssued)) n.AdvanceCount++;
+  });
+  return n;
+}
+
+/**
+ * Writes one claim's counts from the items given.
+ *
+ * Always from a recount, never from an increment: an increment is right only
+ * if every previous one was, and there is no way to notice when it was not.
+ * RowVersion is deliberately left alone — nobody edited this claim.
+ */
+function writeClaimSummary_(claimId, items) {
+  return setCells_(SHEET.CLAIMS, 'ClaimID', claimId, summaryOf_(items));
+}
+
+/**
+ * Brings the counts back in line for every claim an action touched.
+ *
+ * Called at the end of the paths that change items without going through
+ * recomputeClaimStatus_ — which does its own, from the items it has already
+ * read. One item read serves however many claims were touched.
+ */
+function refreshClaimSummaries_(claimIds) {
+  const ids = (claimIds || []).filter(function (id, i, all) {
+    return id && all.indexOf(id) === i;
+  });
+  if (!ids.length) return;
+
+  const byClaim = {};
+  ids.forEach(function (id) { byClaim[id] = []; });
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    if (byClaim[i.ClaimID]) byClaim[i.ClaimID].push(i);
+  });
+  ids.forEach(function (id) { writeClaimSummary_(id, byClaim[id]); });
+}
+
 /**
  * Re-derives the claim's workflow position from its items and reports whether
  * this call is the one that settled it.
@@ -1081,6 +1164,11 @@ function decideItems_(session, payload) {
 function recomputeClaimStatus_(session, claimId) {
   const claim = findBy_(SHEET.CLAIMS, 'ClaimID', claimId);
   const items = readLive_(SHEET.ITEMS).filter(function (i) { return i.ClaimID === claimId; });
+
+  // From the items already in hand, before the early return below: a claim
+  // whose last item was removed still has counts on it, and they are now zero.
+  writeClaimSummary_(claimId, items);
+
   if (!items.length) return { notify: false };
 
   const pending = items.filter(function (i) { return i.ItemStatus === ITEM_STATUS.PENDING; }).length;
@@ -1156,6 +1244,8 @@ function setAvailability_(session, payload) {
         isTest: isTrue_(claim.IsTest)
       });
     });
+
+    refreshClaimSummaries_(items.map(function (i) { return i.ClaimID; }));
     return { ok: true, count: items.length };
   });
 }
@@ -1232,6 +1322,7 @@ function forwardOrder_(session, payload) {
       });
     });
 
+    refreshClaimSummaries_(Object.keys(claims));
     return { ok: true, count: items.length, to: to };
   });
 }
@@ -1273,6 +1364,8 @@ function fulfilFromStock_(session, payload) {
         isTest: isTrue_(claim.IsTest)
       });
     });
+
+    refreshClaimSummaries_(items.map(function (i) { return i.ClaimID; }));
     return { ok: true, count: items.length };
   });
 }
@@ -1356,6 +1449,7 @@ function setAdvanceIssue_(session, payload) {
       });
     });
 
+    refreshClaimSummaries_(items.map(function (i) { return i.ClaimID; }));
     return { ok: true, count: items.length };
   });
 }

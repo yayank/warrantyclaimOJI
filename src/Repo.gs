@@ -314,21 +314,49 @@ function update_(name, keyField, keyValue, changes, expectedVersion) {
  * and then be told its claim had moved on.
  */
 function setCell_(name, keyField, keyValue, field, value) {
+  const changes = {};
+  changes[field] = value;
+  return setCells_(name, keyField, keyValue, changes);
+}
+
+/**
+ * Several cells on one row, likewise without touching RowVersion.
+ *
+ * The claim's summary columns are counted from its items rather than typed by
+ * anybody, so writing them is not an edit and must not make the copy an open
+ * browser is holding look stale.
+ */
+function setCells_(name, keyField, keyValue, changes) {
+  const fields = Object.keys(changes);
+  if (!fields.length) return false;
+
   const s = sheet_(name);
   const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
   const keyCol = head.indexOf(keyField);
-  const col = head.indexOf(field);
-  if (keyCol === -1 || col === -1) return false;
+  if (keyCol === -1) return false;
 
   const last = s.getLastRow();
   const keys = last > 1 ? s.getRange(2, keyCol + 1, last - 1, 1).getValues() : [];
+  let rowIndex = -1;
   for (let i = 0; i < keys.length; i++) {
-    if (String(keys[i][0]) === String(keyValue)) {
-      s.getRange(i + 2, col + 1).setValue(value);
-      return true;
-    }
+    if (String(keys[i][0]) === String(keyValue)) { rowIndex = i + 2; break; }
   }
-  return false;
+  if (rowIndex === -1) return false;
+
+  // Read and rewrite the row in one pair of calls rather than one per cell:
+  // six separate setValue calls on the same row is six round trips.
+  const row = s.getRange(rowIndex, 1, 1, head.length).getValues()[0];
+  let wrote = false;
+  fields.forEach(function (field) {
+    const col = head.indexOf(field);
+    if (col === -1) return;
+    row[col] = changes[field];
+    wrote = true;
+  });
+  if (!wrote) return false;
+
+  s.getRange(rowIndex, 1, 1, head.length).setValues([row]);
+  return true;
 }
 
 function rowToObject_(head, row) {

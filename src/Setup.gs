@@ -12,6 +12,7 @@ function setUp() {
   seedProductionCustomer_();
   seedPrincipal_();
   assignMasterIds_();
+  const summaries = backfillClaimSummaries_();
   const folder = rootFolder_();
   return [
     'Sheets ready.',
@@ -19,11 +20,85 @@ function setUp() {
       ? 'Gave a header row to sheets that had none: ' + repaired.join(', ') +
         ' — the values moved into their proper columns.'
       : 'Every sheet already had its header row.',
+    'Claim summary columns: ' + summaries.claims + ' claims counted, ' +
+      summaries.corrected + ' corrected.',
     'Drive root: ' + folder.getName() + ' (' + folder.getId() + ')',
     'Next: put your OAuth Client ID in Settings!GoogleClientId, add yourself to the users sheet',
     'as Administrator, deploy the web app, paste its URL into Settings!AppUrl, then run',
     'installTriggers().'
   ].join('\n');
+}
+
+/**
+ * Fills in the claim summary columns from the items, for every claim.
+ *
+ * Claims written before the columns existed have nothing in them, and an empty
+ * cell counts as zero — which would read as "no parts pending" and put a claim
+ * in the wrong tab. So this has to run once after the columns are added, and
+ * it is safe to run again at any time: it recounts from the items rather than
+ * adjusting what is there.
+ *
+ * Whole columns at a time rather than a row at a time: a few hundred claims,
+ * one write each, would not finish inside the execution limit.
+ */
+function backfillClaimSummaries_() {
+  const s = sheet_(SHEET.CLAIMS);
+  const last = s.getLastRow();
+  if (last < 2) return { claims: 0, corrected: 0 };
+
+  const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const idCol = head.indexOf('ClaimID');
+  const cols = SUMMARY_COLS.map(function (name) { return head.indexOf(name); });
+  if (idCol === -1 || cols.indexOf(-1) !== -1) {
+    throw new Error('The Claims sheet has no summary columns yet. Run setUp() first.');
+  }
+
+  const byClaim = {};
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i);
+  });
+
+  const rows = s.getRange(2, 1, last - 1, head.length).getValues();
+  const columns = SUMMARY_COLS.map(function () { return []; });
+  let corrected = 0;
+  let counted = 0;
+
+  rows.forEach(function (row) {
+    const id = row[idCol];
+    if (!id) {
+      // A blank row between claims stays blank; writing zeros into it would
+      // turn spacing into data.
+      cols.forEach(function (col, n) { columns[n].push([row[col]]); });
+      return;
+    }
+    counted++;
+    const want = summaryOf_(byClaim[id] || []);
+    let differs = false;
+    SUMMARY_COLS.forEach(function (name, n) {
+      if (Number(row[cols[n]] || 0) !== want[name]) differs = true;
+      columns[n].push([want[name]]);
+    });
+    if (differs) corrected++;
+  });
+
+  SUMMARY_COLS.forEach(function (name, n) {
+    s.getRange(2, cols[n] + 1, columns[n].length, 1).setValues(columns[n]);
+  });
+  return { claims: counted, corrected: corrected };
+}
+
+/**
+ * Run from the editor to repair the summary columns.
+ *
+ * Nothing should ever need this — every path that touches an item recounts —
+ * but a count that has drifted is invisible from the screens, so there has to
+ * be a way to put it right without opening the sheet by hand.
+ */
+function backfillSummaries() {
+  const r = backfillClaimSummaries_();
+  return r.corrected
+    ? 'Recounted ' + r.claims + ' claims; ' + r.corrected + ' had the wrong numbers and were corrected.'
+    : 'Recounted ' + r.claims + ' claims; every one already agreed with its items.';
 }
 
 /**

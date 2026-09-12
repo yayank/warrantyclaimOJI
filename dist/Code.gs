@@ -50,6 +50,15 @@ SCHEMA[SHEET.CLAIMS] = [
   'RequesterEmail', 'RequesterName',
   'CreatedAt', 'SubmittedAt', 'ForwardedAt', 'PrincipalNotifiedAt', 'ClosedAt',
   'ReturnReason', 'DriveFolderId',
+
+  // Counted from ClaimItems and written back here whenever an item changes.
+  // The claim list reads these instead of the items, which is what lets it
+  // answer without reading the item sheet at all. Nothing else may write them:
+  // they are a copy of the truth, and the only safe copy is one with a single
+  // author. See summaryOf_ and refreshClaimSummaries_ in Claims.gs.
+  'PendingCount', 'ApprovedCount', 'RejectedCount',
+  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount',
+
   'Deleted', 'DeletedBy', 'DeletedAt',
   'UpdatedAt', 'UpdatedBy', 'RowVersion'
 ];
@@ -539,21 +548,49 @@ function update_(name, keyField, keyValue, changes, expectedVersion) {
  * and then be told its claim had moved on.
  */
 function setCell_(name, keyField, keyValue, field, value) {
+  const changes = {};
+  changes[field] = value;
+  return setCells_(name, keyField, keyValue, changes);
+}
+
+/**
+ * Several cells on one row, likewise without touching RowVersion.
+ *
+ * The claim's summary columns are counted from its items rather than typed by
+ * anybody, so writing them is not an edit and must not make the copy an open
+ * browser is holding look stale.
+ */
+function setCells_(name, keyField, keyValue, changes) {
+  const fields = Object.keys(changes);
+  if (!fields.length) return false;
+
   const s = sheet_(name);
   const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
   const keyCol = head.indexOf(keyField);
-  const col = head.indexOf(field);
-  if (keyCol === -1 || col === -1) return false;
+  if (keyCol === -1) return false;
 
   const last = s.getLastRow();
   const keys = last > 1 ? s.getRange(2, keyCol + 1, last - 1, 1).getValues() : [];
+  let rowIndex = -1;
   for (let i = 0; i < keys.length; i++) {
-    if (String(keys[i][0]) === String(keyValue)) {
-      s.getRange(i + 2, col + 1).setValue(value);
-      return true;
-    }
+    if (String(keys[i][0]) === String(keyValue)) { rowIndex = i + 2; break; }
   }
-  return false;
+  if (rowIndex === -1) return false;
+
+  // Read and rewrite the row in one pair of calls rather than one per cell:
+  // six separate setValue calls on the same row is six round trips.
+  const row = s.getRange(rowIndex, 1, 1, head.length).getValues()[0];
+  let wrote = false;
+  fields.forEach(function (field) {
+    const col = head.indexOf(field);
+    if (col === -1) return;
+    row[col] = changes[field];
+    wrote = true;
+  });
+  if (!wrote) return false;
+
+  s.getRange(rowIndex, 1, 1, head.length).setValues([row]);
+  return true;
 }
 
 function rowToObject_(head, row) {
@@ -2900,6 +2937,8 @@ function syncItems_(session, claim, wanted) {
       oldValue: i.PartName, isTest: isTrue_(claim.IsTest)
     });
   });
+
+  refreshClaimSummaries_([claim.ClaimID]);
 }
 
 /**
@@ -3107,6 +3146,9 @@ function mergeIntoClaim_(session, claim, target, items) {
     Deleted: true, DeletedBy: session.email, DeletedAt: nowIso_(),
     UpdatedAt: nowIso_(), UpdatedBy: session.email
   });
+
+  // Both of them: the parts left one claim and arrived on the other.
+  refreshClaimSummaries_([claim.ClaimID, target.ClaimID]);
 
   audit_(session, 'Submit', {
     claimId: target.ClaimID, field: 'MergedFrom',
@@ -3355,6 +3397,84 @@ function decideItems_(session, payload) {
   });
 }
 
+/* --------------------------------------------------- the summary columns */
+
+/*
+ * The tab rules ask how many of a claim's parts are still pending, how many
+ * are out awaiting return, and so on. Those are item questions, so answering
+ * them for a list of claims meant reading every item in the workbook — the one
+ * read that grows with the business no matter how few claims are on screen.
+ *
+ * So the counts are kept on the claim row as well. That is a copy of the
+ * truth, and a copy that drifts is worse than no copy: the tab would say a
+ * claim is finished when it is not. Two things keep it honest. Every path that
+ * writes an item ends by recounting from the items themselves — never by
+ * adjusting a number it thinks it knows — and tools/verify-summary.js walks
+ * every claim after every kind of change and compares the stored counts with
+ * the items.
+ */
+
+const SUMMARY_COLS = ['PendingCount', 'ApprovedCount', 'RejectedCount',
+  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount'];
+
+/**
+ * Counts one claim's items. The buckets are the ones shapeClaim_ reports, and
+ * they have to stay the same buckets: the screen reads one and the tab rules
+ * read the other.
+ */
+function summaryOf_(items) {
+  const n = { PendingCount: 0, ApprovedCount: 0, RejectedCount: 0,
+    ShippedCount: 0, AwaitingReturnCount: 0, AdvanceCount: 0 };
+
+  items.forEach(function (i) {
+    const status = i.ItemStatus;
+    if (status === ITEM_STATUS.PENDING) n.PendingCount++;
+    // Approved counts everything that has been approved and not yet rejected,
+    // wherever along the road it has got to.
+    if ([ITEM_STATUS.APPROVED, ITEM_STATUS.FORWARDED, ITEM_STATUS.AWAITING,
+      ITEM_STATUS.SHIPPED].indexOf(status) !== -1) n.ApprovedCount++;
+    if (status === ITEM_STATUS.REJECTED) n.RejectedCount++;
+    if (status === ITEM_STATUS.SHIPPED) n.ShippedCount++;
+    if (status === ITEM_STATUS.SHIPPED && !String(i.PartReturnAt || '').trim()) {
+      n.AwaitingReturnCount++;
+    }
+    if (isTrue_(i.AdvanceIssued)) n.AdvanceCount++;
+  });
+  return n;
+}
+
+/**
+ * Writes one claim's counts from the items given.
+ *
+ * Always from a recount, never from an increment: an increment is right only
+ * if every previous one was, and there is no way to notice when it was not.
+ * RowVersion is deliberately left alone — nobody edited this claim.
+ */
+function writeClaimSummary_(claimId, items) {
+  return setCells_(SHEET.CLAIMS, 'ClaimID', claimId, summaryOf_(items));
+}
+
+/**
+ * Brings the counts back in line for every claim an action touched.
+ *
+ * Called at the end of the paths that change items without going through
+ * recomputeClaimStatus_ — which does its own, from the items it has already
+ * read. One item read serves however many claims were touched.
+ */
+function refreshClaimSummaries_(claimIds) {
+  const ids = (claimIds || []).filter(function (id, i, all) {
+    return id && all.indexOf(id) === i;
+  });
+  if (!ids.length) return;
+
+  const byClaim = {};
+  ids.forEach(function (id) { byClaim[id] = []; });
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    if (byClaim[i.ClaimID]) byClaim[i.ClaimID].push(i);
+  });
+  ids.forEach(function (id) { writeClaimSummary_(id, byClaim[id]); });
+}
+
 /**
  * Re-derives the claim's workflow position from its items and reports whether
  * this call is the one that settled it.
@@ -3362,6 +3482,11 @@ function decideItems_(session, payload) {
 function recomputeClaimStatus_(session, claimId) {
   const claim = findBy_(SHEET.CLAIMS, 'ClaimID', claimId);
   const items = readLive_(SHEET.ITEMS).filter(function (i) { return i.ClaimID === claimId; });
+
+  // From the items already in hand, before the early return below: a claim
+  // whose last item was removed still has counts on it, and they are now zero.
+  writeClaimSummary_(claimId, items);
+
   if (!items.length) return { notify: false };
 
   const pending = items.filter(function (i) { return i.ItemStatus === ITEM_STATUS.PENDING; }).length;
@@ -3437,6 +3562,8 @@ function setAvailability_(session, payload) {
         isTest: isTrue_(claim.IsTest)
       });
     });
+
+    refreshClaimSummaries_(items.map(function (i) { return i.ClaimID; }));
     return { ok: true, count: items.length };
   });
 }
@@ -3513,6 +3640,7 @@ function forwardOrder_(session, payload) {
       });
     });
 
+    refreshClaimSummaries_(Object.keys(claims));
     return { ok: true, count: items.length, to: to };
   });
 }
@@ -3554,6 +3682,8 @@ function fulfilFromStock_(session, payload) {
         isTest: isTrue_(claim.IsTest)
       });
     });
+
+    refreshClaimSummaries_(items.map(function (i) { return i.ClaimID; }));
     return { ok: true, count: items.length };
   });
 }
@@ -3637,6 +3767,7 @@ function setAdvanceIssue_(session, payload) {
       });
     });
 
+    refreshClaimSummaries_(items.map(function (i) { return i.ClaimID; }));
     return { ok: true, count: items.length };
   });
 }
@@ -4498,6 +4629,7 @@ function setUp() {
   seedProductionCustomer_();
   seedPrincipal_();
   assignMasterIds_();
+  const summaries = backfillClaimSummaries_();
   const folder = rootFolder_();
   return [
     'Sheets ready.',
@@ -4505,11 +4637,85 @@ function setUp() {
       ? 'Gave a header row to sheets that had none: ' + repaired.join(', ') +
         ' — the values moved into their proper columns.'
       : 'Every sheet already had its header row.',
+    'Claim summary columns: ' + summaries.claims + ' claims counted, ' +
+      summaries.corrected + ' corrected.',
     'Drive root: ' + folder.getName() + ' (' + folder.getId() + ')',
     'Next: put your OAuth Client ID in Settings!GoogleClientId, add yourself to the users sheet',
     'as Administrator, deploy the web app, paste its URL into Settings!AppUrl, then run',
     'installTriggers().'
   ].join('\n');
+}
+
+/**
+ * Fills in the claim summary columns from the items, for every claim.
+ *
+ * Claims written before the columns existed have nothing in them, and an empty
+ * cell counts as zero — which would read as "no parts pending" and put a claim
+ * in the wrong tab. So this has to run once after the columns are added, and
+ * it is safe to run again at any time: it recounts from the items rather than
+ * adjusting what is there.
+ *
+ * Whole columns at a time rather than a row at a time: a few hundred claims,
+ * one write each, would not finish inside the execution limit.
+ */
+function backfillClaimSummaries_() {
+  const s = sheet_(SHEET.CLAIMS);
+  const last = s.getLastRow();
+  if (last < 2) return { claims: 0, corrected: 0 };
+
+  const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const idCol = head.indexOf('ClaimID');
+  const cols = SUMMARY_COLS.map(function (name) { return head.indexOf(name); });
+  if (idCol === -1 || cols.indexOf(-1) !== -1) {
+    throw new Error('The Claims sheet has no summary columns yet. Run setUp() first.');
+  }
+
+  const byClaim = {};
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i);
+  });
+
+  const rows = s.getRange(2, 1, last - 1, head.length).getValues();
+  const columns = SUMMARY_COLS.map(function () { return []; });
+  let corrected = 0;
+  let counted = 0;
+
+  rows.forEach(function (row) {
+    const id = row[idCol];
+    if (!id) {
+      // A blank row between claims stays blank; writing zeros into it would
+      // turn spacing into data.
+      cols.forEach(function (col, n) { columns[n].push([row[col]]); });
+      return;
+    }
+    counted++;
+    const want = summaryOf_(byClaim[id] || []);
+    let differs = false;
+    SUMMARY_COLS.forEach(function (name, n) {
+      if (Number(row[cols[n]] || 0) !== want[name]) differs = true;
+      columns[n].push([want[name]]);
+    });
+    if (differs) corrected++;
+  });
+
+  SUMMARY_COLS.forEach(function (name, n) {
+    s.getRange(2, cols[n] + 1, columns[n].length, 1).setValues(columns[n]);
+  });
+  return { claims: counted, corrected: corrected };
+}
+
+/**
+ * Run from the editor to repair the summary columns.
+ *
+ * Nothing should ever need this — every path that touches an item recounts —
+ * but a count that has drifted is invisible from the screens, so there has to
+ * be a way to put it right without opening the sheet by hand.
+ */
+function backfillSummaries() {
+  const r = backfillClaimSummaries_();
+  return r.corrected
+    ? 'Recounted ' + r.claims + ' claims; ' + r.corrected + ' had the wrong numbers and were corrected.'
+    : 'Recounted ' + r.claims + ' claims; every one already agreed with its items.';
 }
 
 /**

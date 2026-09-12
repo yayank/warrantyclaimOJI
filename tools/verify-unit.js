@@ -71,6 +71,14 @@ const sandbox = {
       return String(r[field]) === String(value);
     })[0] || null;
   },
+  // The summary columns are written without touching RowVersion; here that
+  // is the same row object, so the counts land where the claim can see them.
+  setCells_: function (name, field, value, changes) {
+    const row = sandbox.findBy_(name, field, value);
+    if (!row) return false;
+    Object.keys(changes).forEach(function (k) { row[k] = changes[k]; });
+    return true;
+  },
   update_: function (name, field, value, patch) {
     const row = sandbox.findBy_(name, field, value);
     Object.keys(patch).forEach(function (k) { row[k] = patch[k]; });

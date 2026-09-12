@@ -94,6 +94,14 @@ const sandbox = {
     })[0] || null;
   },
   insert_: function (name, obj) { (SHEETS[name] = SHEETS[name] || []).push(obj); return obj; },
+  // The summary columns are written without touching RowVersion; here that
+  // is the same row object, so the counts land where the claim can see them.
+  setCells_: function (name, field, value, changes) {
+    const row = sandbox.findBy_(name, field, value);
+    if (!row) return false;
+    Object.keys(changes).forEach(function (k) { row[k] = changes[k]; });
+    return true;
+  },
   update_: function (name, field, value, patch) {
     const row = sandbox.findBy_(name, field, value);
     if (!row) throw new Error(name + ' ' + value + ' not found');

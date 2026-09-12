@@ -36,6 +36,15 @@ SCHEMA[SHEET.CLAIMS] = [
   'RequesterEmail', 'RequesterName',
   'CreatedAt', 'SubmittedAt', 'ForwardedAt', 'PrincipalNotifiedAt', 'ClosedAt',
   'ReturnReason', 'DriveFolderId',
+
+  // Counted from ClaimItems and written back here whenever an item changes.
+  // The claim list reads these instead of the items, which is what lets it
+  // answer without reading the item sheet at all. Nothing else may write them:
+  // they are a copy of the truth, and the only safe copy is one with a single
+  // author. See summaryOf_ and refreshClaimSummaries_ in Claims.gs.
+  'PendingCount', 'ApprovedCount', 'RejectedCount',
+  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount',
+
   'Deleted', 'DeletedBy', 'DeletedAt',
   'UpdatedAt', 'UpdatedBy', 'RowVersion'
 ];
