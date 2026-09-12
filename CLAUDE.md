@@ -8,8 +8,9 @@ sudah diputuskan. **Baca ini dulu, jangan jelajahi repo dari nol.**
 
 ## Bahasa
 
-Jawab dalam **Bahasa Indonesia**. Komentar kode, pesan commit, dan isi PR dalam
-**Bahasa Inggris** — itu konvensi yang sudah berjalan, jangan diubah.
+Jawab dalam **Bahasa Indonesia**, dan tulis deskripsi PR dalam Bahasa Indonesia
+juga — seluruh isi PR #1 memang berbahasa Indonesia. Komentar kode dan pesan
+commit dalam **Bahasa Inggris**. Itu konvensi yang sudah berjalan; jangan diubah.
 
 Ringkas. Laporkan yang berubah dan kenapa; jangan mengulang isi diff, jangan
 membuat daftar berkas yang disentuh kecuali diminta.
