@@ -486,13 +486,8 @@ check('an unknown cut falls back to status rather than emptying the screen',
 
 /* ------------------------------- 1.386 hospitals is not a list you scroll */
 
-S.reference = {
-  customers: [
-    { id: 'C1', name: 'RSUD Koja' },
-    { id: 'C2', name: 'Mitra Kasih Cimahi' }
-  ]
-};
-S.filters = { customerId: '' };
+S.reference = {};
+S.filters = { customerId: '', customerName: '' };
 const blank = customerFilter();
 
 check('the customer filter is a searchable box, not a dropdown',
@@ -501,11 +496,17 @@ check('the customer filter is a searchable box, not a dropdown',
 check('with All customers offered as a real choice, which is how it is cleared',
   blank.indexOf('All customers') !== -1);
 
-S.filters = { customerId: 'C2' };
+// The page no longer holds the list, so the name of the chosen hospital is
+// carried in the filter itself — otherwise the box could not say what it holds.
+S.filters = { customerId: 'C2', customerName: 'Mitra Kasih Cimahi' };
 const chosen = customerFilter();
 check('and it reads back the hospital being filtered on',
   chosen.indexOf('value="Mitra Kasih Cimahi"') !== -1 &&
-  chosen.indexOf('value="C2"') !== -1);
+  chosen.indexOf('value="C2"') !== -1,
+  chosen);
+
+check('the filter never carries a list of its own any more',
+  chosen.indexOf('RSUD') === -1 && !/options/.test(chosen));
 
 /* -------------------------------------------------------------------- report */
 

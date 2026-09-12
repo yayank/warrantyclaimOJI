@@ -7,14 +7,15 @@ const S = {
   reference: null,
   page: 'claims',
   tab: 'all',
-  filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', partId: '',
-    principal: '', from: '', to: '' },
+  filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', customerName: '',
+    partId: '', principal: '', from: '', to: '' },
   rows: [],
   counts: { action: 0, advance: 0 },
   collapsed: {},            // claims whose parts the reader has folded away
   group: 'status',          // 'status' | 'customer' — what the list is cut by
   selection: {},
   advance: null,            // the stock-issue queue, once fetched
+  unitTotal: 0,             // learnt from the first unit search, not from sign-in
   advanceView: 'awaiting',  // 'awaiting' | 'issued'
   deepLink: window.APP_DEEP_LINK || {},
   master: { kind: 'users', rows: [] },
@@ -195,12 +196,18 @@ function netEnd() {
   document.body.removeAttribute('aria-busy');
 }
 
-function api(action, payload) {
-  netStart();
+/**
+ * `quiet` keeps a call out of the page-wide activity bar. Only the typeahead
+ * uses it: a search fires every few keystrokes, and a bar blinking at the top
+ * of the screen while somebody types reports nothing they cannot already see.
+ * The box says "Searching…" in its own list instead.
+ */
+function api(action, payload, quiet) {
+  if (!quiet) netStart();
   return new Promise(function (resolve, reject) {
     google.script.run
       .withSuccessHandler(function (res) {
-        netEnd();
+        if (!quiet) netEnd();
         if (!res || res.ok) {
           if (res && res.session) S.session = res.session;
           resolve(res ? res.data : null);
@@ -216,7 +223,7 @@ function api(action, payload) {
         reject(err);
       })
       .withFailureHandler(function (e) {
-        netEnd();
+        if (!quiet) netEnd();
         reject(new Error(e && e.message ? e.message : String(e)));
       })
       .api({
@@ -505,23 +512,54 @@ function selectFilter(id, blank, options, value, label) {
  * a real option rather than a blank one — picking it is how the filter is
  * cleared, and it is what the box reads when nothing is filtered.
  */
+/** Asks the server for the customers matching what is being typed. */
+function searchCustomers(query, extra) {
+  return api('master.searchCustomers', { query: query, limit: COMBO_SHOWN }, true)
+    .then(function (res) {
+      const options = (res && res.options) || [];
+      return {
+        options: (extra || []).concat(options),
+        total: ((res && res.total) || 0) + (extra || []).length
+      };
+    });
+}
+
+function searchUnits(query) {
+  return api('claims.searchUnits', { query: query, limit: COMBO_SHOWN }, true)
+    .then(function (res) {
+      const total = (res && res.total) || 0;
+      // An empty query matched everything, so that answer is also the count of
+      // registered units. Sign-in used to carry this number, which meant reading
+      // the Population sheet to greet somebody who might never open the form.
+      if (!String(query || '').trim()) { S.unitTotal = total; setSerialHint(); }
+      return { options: (res && res.options) || [], total: total };
+    });
+}
+
+/**
+ * The customer filter. "All customers" is prepended to every answer rather than
+ * living on the server's list: it is not a customer, and picking it is how the
+ * filter is cleared.
+ */
 function customerFilter() {
   const all = { value: '', label: 'All customers' };
-  const chosen = S.reference.customers.filter(function (c) {
-    return c.id === S.filters.customerId;
-  })[0];
   return '<div style="width:220px;flex:none">' + comboField({
     id: 'customerFilter',
     value: S.filters.customerId || '',
-    text: chosen ? chosen.name : all.label,
+    text: S.filters.customerName || all.label,
     placeholder: all.label,
-    options: [all].concat(S.reference.customers.map(function (c) {
-      return { value: c.id, label: c.name };
-    })),
+    known: S.filters.customerId
+      ? (function (m) { m[S.filters.customerId] = S.filters.customerName; return m; })({})
+      : {},
+    remote: function (q) { return searchCustomers(q, [all]); },
     emptyHtml: function (query) {
       return 'No customer matches “' + h(query) + '”.';
     },
-    onPick: function (v) { S.filters.customerId = v; loadClaims(); }
+    onPick: function (v, option) {
+      S.filters.customerId = v;
+      S.filters.customerName = v ? option.label : '';
+      loadClaims();
+    }
   }) + '</div>';
 }
 
@@ -555,8 +593,7 @@ function activeChips() {
     chips.push(chip('Warranty', S.filters.warrantyTypes.join(', '), 'warrantyTypes'));
   }
   if (S.filters.customerId) {
-    const c = S.reference.customers.filter(function (x) { return x.id === S.filters.customerId; })[0];
-    chips.push(chip('Customer', c ? c.name : S.filters.customerId, 'customerId'));
+    chips.push(chip('Customer', S.filters.customerName || S.filters.customerId, 'customerId'));
   }
   if (S.filters.principal) chips.push(chip('Principal', S.filters.principal, 'principal'));
   if (!chips.length) return '';
@@ -755,6 +792,9 @@ function wireClaimsToolbar() {
     b.addEventListener('click', function () {
       const key = b.dataset.clear;
       S.filters[key] = Array.isArray(S.filters[key]) ? [] : '';
+      // The id is what filters; the name is only what the chip and the box read
+      // back, and it has to go with it.
+      if (key === 'customerId') S.filters.customerName = '';
       loadClaims();
     });
   });
@@ -1488,6 +1528,9 @@ function closeModal() { el('modalHost').innerHTML = ''; }
  */
 const COMBO = {};
 const COMBO_SHOWN = 40;
+// Long enough that a run of keystrokes is one search, short enough that a
+// pause feels answered.
+const COMBO_WAIT = 250;
 
 function comboField(spec) {
   COMBO[spec.id] = spec;
@@ -1510,6 +1553,13 @@ function wireCombo(id) {
 
   spec.shown = [];
   spec.active = -1;
+  spec.seq = 0;
+  spec.cache = {};
+  // A list-only box resets to the label of whatever it holds. With the list on
+  // the server that label may not be in the page it last fetched, so every
+  // label the box has ever shown for a value is remembered here.
+  spec.known = spec.known || {};
+  if (spec.value && spec.text) spec.known[spec.value] = spec.text;
   // Until something is typed the whole list is offered, even when the box
   // already holds a choice: a field you cannot reopen to change your mind is
   // worse than no dropdown at all.
@@ -1517,7 +1567,44 @@ function wireCombo(id) {
 
   function labelFor(v) {
     const hit = (spec.options || []).filter(function (o) { return o.value === v; })[0];
-    return hit ? hit.label : '';
+    return hit ? hit.label : (spec.known[v] || '');
+  }
+
+  /**
+   * Ask the server for the matches, newest question wins.
+   *
+   * Answers can come back in any order — "RS A" may be slower than the "RS Ad"
+   * typed after it — so each request takes a number and a late answer to an old
+   * question is dropped rather than overwriting a newer one.
+   */
+  function fetchRemote(query) {
+    const key = String(query || '').toLowerCase();
+    const hit = spec.cache[key];
+    if (hit) {
+      spec.options = hit.options;
+      spec.total = hit.total;
+      spec.loading = false;
+      render(true);
+      return;
+    }
+    spec.loading = true;
+    render(true);
+    const mine = ++spec.seq;
+    spec.remote(query).then(function (res) {
+      if (mine !== spec.seq) return;
+      spec.cache[key] = res;
+      spec.options = res.options || [];
+      spec.total = res.total === undefined ? spec.options.length : res.total;
+      spec.loading = false;
+      render(true);
+    }).catch(function () {
+      if (mine !== spec.seq) return;
+      spec.loading = false;
+      spec.options = [];
+      spec.total = 0;
+      spec.failed = true;
+      render(true);
+    });
   }
 
   function show() {
@@ -1536,12 +1623,19 @@ function wireCombo(id) {
     const all = spec.options || [];
     const shown = [];
     let total = 0;
-    for (let i = 0; i < all.length; i++) {
-      const o = all[i];
-      if (q && o.label.toLowerCase().indexOf(q) === -1 &&
-        !(o.hint && o.hint.toLowerCase().indexOf(q) !== -1)) continue;
-      total += 1;
-      if (shown.length < COMBO_SHOWN) shown.push(o);
+    if (spec.remote) {
+      // The server has already matched and trimmed; filtering again here would
+      // hide rows it deliberately sent.
+      for (let i = 0; i < all.length; i++) shown.push(all[i]);
+      total = spec.total === undefined ? shown.length : spec.total;
+    } else {
+      for (let i = 0; i < all.length; i++) {
+        const o = all[i];
+        if (q && o.label.toLowerCase().indexOf(q) === -1 &&
+          !(o.hint && o.hint.toLowerCase().indexOf(q) !== -1)) continue;
+        total += 1;
+        if (shown.length < COMBO_SHOWN) shown.push(o);
+      }
     }
     spec.shown = shown;
     if (spec.active >= shown.length) spec.active = shown.length - 1;
@@ -1558,7 +1652,10 @@ function wireCombo(id) {
             ' more — keep typing to narrow the list</div>'
           : '')
       : '<div class="combo-none">' +
-        (spec.emptyHtml ? spec.emptyHtml(box.value.trim()) : 'Nothing matches.') + '</div>';
+        (spec.loading ? 'Searching…'
+          : spec.failed ? 'The search could not be reached. Try again.'
+          : (spec.emptyHtml ? spec.emptyHtml(box.value.trim()) : 'Nothing matches.')) +
+        '</div>';
 
     if (open) show();
   }
@@ -1567,12 +1664,24 @@ function wireCombo(id) {
     if (!option) return;
     box.value = option.label;
     value.value = option.value;
+    spec.known[option.value] = option.label;
     spec.typed = false;
     hide();
     if (spec.onPick) spec.onPick(option.value, option);
   }
 
-  box.addEventListener('focus', function () { spec.typed = false; render(true); });
+  box.addEventListener('focus', function () {
+    spec.typed = false;
+    // What a list-only box displays is the name of the choice it holds, not
+    // text to be edited. Leaving it there means a click and a keystroke append
+    // to it — "All customers" + "ridwan" — and searches for something nobody
+    // asked for. The box empties to search; blur puts the name back if nothing
+    // was picked. A free-text box keeps what it has, because there the text is
+    // the value.
+    if (!spec.allowFree) box.value = '';
+    if (spec.remote) { fetchRemote(''); return; }
+    render(true);
+  });
 
   box.addEventListener('input', function () {
     spec.active = -1;
@@ -1580,6 +1689,14 @@ function wireCombo(id) {
     if (spec.allowFree) {
       value.value = box.value.trim();
       if (spec.onType) spec.onType(value.value);
+    }
+    if (spec.remote) {
+      spec.failed = false;
+      clearTimeout(spec.timer);
+      const typed = box.value.trim();
+      spec.timer = setTimeout(function () { fetchRemote(typed); }, COMBO_WAIT);
+      render(true);
+      return;
     }
     render(true);
   });
@@ -1634,40 +1751,6 @@ function wireCombo(id) {
 
   spec.render = render;
   render(false);
-}
-
-/** Swaps a combobox's list in once it has arrived, redrawing it if it is open. */
-function comboSetOptions(id, options) {
-  const spec = COMBO[id];
-  const pop = el(id + 'List');
-  if (!spec) return;
-  spec.options = options;
-  if (spec.render) spec.render(pop ? !pop.hidden : false);
-}
-
-/* ------------------------------------------------------- unit register */
-
-let unitsRequest = null;
-
-/**
- * The registered units, fetched once and kept for the session. They are not
- * part of the sign-in payload because only the claim form needs them.
- */
-function loadUnits() {
-  if (S.units) return Promise.resolve(S.units);
-  if (!unitsRequest) {
-    unitsRequest = api('claims.units').then(function (data) {
-      S.units = (data && data.units) || [];
-      return S.units;
-    }).catch(function (err) { unitsRequest = null; throw err; });
-  }
-  return unitsRequest;
-}
-
-function unitOptions() {
-  return (S.units || []).map(function (u) {
-    return { value: u.serial, label: u.serial, hint: u.product || '' };
-  });
 }
 
 /** Who to ask when a customer or a unit is not on the list. */
@@ -1750,9 +1833,10 @@ function claimFormBody() {
             value: c ? c.customerId : '',
             text: c ? c.customerName : '',
             placeholder: 'Type to search customers…',
-            options: S.reference.customers.map(function (x) {
-              return { value: x.id, label: x.name };
-            }),
+            known: c && c.customerId
+              ? (function (m) { m[c.customerId] = c.customerName; return m; })({})
+              : {},
+            remote: searchCustomers,
             emptyHtml: function (query) {
               return 'No customer matches “' + h(query) + '”. ' + adminContactHtml();
             }
@@ -1766,13 +1850,11 @@ function claimFormBody() {
           value: c ? c.serialNumber : '',
           text: c ? c.serialNumber : '',
           placeholder: 'XT2410090',
-          options: unitOptions(),
+          remote: searchUnits,
           emptyHtml: function (query) {
-            return !S.units
-              ? 'Still loading the unit list…'
-              : 'No unit matches “' + h(query) + '” in the Population sheet. You can still ' +
-                'claim on it, but nothing will say which principal it belongs to. ' +
-                adminContactHtml();
+            return 'No unit matches “' + h(query) + '” in the Population sheet. You can still ' +
+              'claim on it, but nothing will say which principal it belongs to. ' +
+              adminContactHtml();
           },
           onType: function (v) { scheduleLookup(v); },
           onPick: function (v) { runLookup(v); }
@@ -1859,12 +1941,7 @@ function wireClaimForm() {
   wireCombo('fCustomer');
   wireCombo('fSerial');
   setSerialHint();
-  loadUnits().then(function () {
-    comboSetOptions('fSerial', unitOptions());
-    setSerialHint();
-  }).catch(function () {
-    setSerialHint('The unit list could not be loaded — type the serial number in full.');
-  });
+  setSerialHint();
 
   const add = el('addPart');
   if (add) add.addEventListener('click', function () {
@@ -1928,9 +2005,9 @@ function setSerialHint(message) {
   const node = el('serialHint');
   if (!node) return;
   node.textContent = message !== undefined ? message
-    : S.units
-      ? S.units.length.toLocaleString() + ' registered units — type a serial number to search'
-      : 'Loading the unit list…';
+    : S.unitTotal
+      ? S.unitTotal.toLocaleString() + ' registered units — type a serial number to search'
+      : 'Type a serial number to search';
 }
 
 let lookupTimer = null;

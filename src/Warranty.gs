@@ -225,11 +225,44 @@ function isRegisteredUnit_(serial) {
 }
 
 /** Every registered unit, serial number first, for the claim form's unit list. */
-function populationUnits_() {
+
+/** How many units are registered, without building the list to find out. */
+function populationUnitCount_() {
+  return Object.keys(populationIndex_()).length;
+}
+
+/**
+ * A page of registered units matching what has been typed.
+ *
+ * The whole list is a few thousand serial numbers and used to cross to the
+ * browser once per session whether the claim form was opened or not. Matching
+ * runs over the cached index here instead, and only what is shown crosses.
+ *
+ * A serial number is matched from the start rather than anywhere inside it:
+ * typing "XT24" means units of that batch, and a substring match would bury
+ * them under every serial that happens to contain those characters. The product
+ * name still matches anywhere, since that is a phrase, not a code.
+ */
+function searchUnits_(session, payload) {
+  requireRole_(session, [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN]);
+  const p = payload || {};
+  const q = String(p.query || '').trim().toUpperCase();
+  const limit = Math.min(Number(p.limit) || 40, 100);
   const index = populationIndex_();
-  return Object.keys(index).sort().map(function (sn) {
-    return { serial: sn, product: index[sn].product, principal: index[sn].principal };
-  });
+  const serials = Object.keys(index).sort();
+
+  const options = [];
+  let total = 0;
+  for (let i = 0; i < serials.length; i++) {
+    const sn = serials[i];
+    if (q && sn.indexOf(q) !== 0 &&
+      String(index[sn].product || '').toUpperCase().indexOf(q) === -1) continue;
+    total += 1;
+    if (options.length < limit) {
+      options.push({ value: sn, label: sn, hint: index[sn].product || '' });
+    }
+  }
+  return { options: options, total: total };
 }
 
 /**

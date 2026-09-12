@@ -141,11 +141,11 @@ vm.createContext(sandbox);
 
 const source = ['Config.gs', 'Repo.gs', 'MasterData.gs']
   .map(function (f) { return fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'); })
-  .concat(['globalThis.__api = { ensureSheets_, readAll_, referenceData_, isTrue_ };'])
+  .concat(['globalThis.__api = { ensureSheets_, readAll_, referenceData_, searchCustomers_, isTrue_ };'])
   .join('\n');
 vm.runInContext(source, sandbox, { filename: 'sheets' });
 
-const { ensureSheets_, readAll_, referenceData_ } = sandbox.__api;
+const { ensureSheets_, readAll_, referenceData_, searchCustomers_ } = sandbox.__api;
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -302,21 +302,24 @@ check('and the users sheet is not rewritten',
 
 state = run(HEADERLESS, { Principals: [['PrincipalID', 'Name', 'Active'], ['PRN-001', 'Sansin', true]] });
 sandbox.__book = state.book;
-const reference = referenceData_({ role: 'Requester' });
+referenceData_({ role: 'Requester' });
+
+// The customer list is searched rather than shipped, so what the claim form is
+// offered is whatever a search hands back.
+const offered = searchCustomers_({ role: 'Requester' }, { query: '' }).options;
 
 check('the customer dropdown is offered real names',
-  reference.customers.length === 3 &&
-  reference.customers.every(function (c) { return !!c.name; }),
-  JSON.stringify(reference.customers));
+  offered.length === 3 && offered.every(function (c) { return !!c.label; }),
+  JSON.stringify(offered));
 
 check('and they arrive sorted',
-  reference.customers.map(function (c) { return c.name; }).join(',') ===
+  offered.map(function (c) { return c.label; }).join(',') ===
     'PT. Asri Trisna Mandiri,PT. Bunda Medika,RS Cipto Mangunkusumo',
-  reference.customers.map(function (c) { return c.name; }).join(','));
+  offered.map(function (c) { return c.label; }).join(','));
 
 check('an entry with no name would have been visible as a blank option',
   // Guards the check above: prove the assertion can fail.
-  [{ id: 'x', name: '' }].every(function (c) { return !!c.name; }) === false);
+  [{ value: 'x', label: '' }].every(function (c) { return !!c.label; }) === false);
 
 /* ------------------------------ an unrecognised leading column is not guessed */
 

@@ -54,16 +54,51 @@ function administratorContact_() {
 }
 
 /** Lists master data every screen needs, cached because it barely changes. */
-function referenceData_(session) {
-  const customers = readAll_(SHEET.CUSTOMER)
+/**
+ * The active customers a role may pick from, in name order.
+ *
+ * Not sent on sign-in any more — there are 1.386 of them, and every screen paid
+ * for that list whether it named a customer or not. searchCustomers_ hands back
+ * the few that match what is being typed instead.
+ */
+function customerOptions_(session) {
+  return readAll_(SHEET.CUSTOMER)
     .filter(function (c) { return isTrue_(c.Active); })
     .filter(function (c) {
       // The internal entry is meaningless to a hospital-facing requester.
       return session.role === ROLE.PRODUCTION || c.Name !== PRODUCTION_CUSTOMER;
     })
-    .map(function (c) { return { id: c.CustomerID, name: c.Name }; })
-    .sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+    .map(function (c) { return { value: c.CustomerID, label: c.Name }; })
+    .sort(function (a, b) { return String(a.label).localeCompare(String(b.label)); });
+}
 
+/**
+ * A page of customers matching what has been typed.
+ *
+ * `total` is how many matched, not how many are returned: the box says how many
+ * more there are so a search that is still too broad admits it rather than
+ * looking like the whole answer.
+ */
+function searchCustomers_(session, payload) {
+  const p = payload || {};
+  const q = String(p.query || '').trim().toLowerCase();
+  const limit = Math.min(Number(p.limit) || 40, 100);
+  const all = customerOptions_(session);
+  const hits = q
+    ? all.filter(function (o) { return o.label.toLowerCase().indexOf(q) !== -1; })
+    : all;
+  return { options: hits.slice(0, limit), total: hits.length };
+}
+
+/** One customer by id, so a stored choice can still be named on screen. */
+function customerById_(session, customerId) {
+  const id = String(customerId || '');
+  if (!id) return { option: null };
+  const hit = customerOptions_(session).filter(function (o) { return o.value === id; })[0];
+  return { option: hit || null };
+}
+
+function referenceData_(session) {
   const parts = readAll_(SHEET.PART)
     .filter(function (p) { return isTrue_(p.Active); })
     .map(function (p) { return { id: p.PartID, name: p.Name }; })
@@ -80,7 +115,6 @@ function referenceData_(session) {
     : [];
 
   return {
-    customers: customers,
     parts: parts,
     recipients: recipients,
     statuses: [STATUS.DRAFT, STATUS.SUBMITTED, STATUS.RETURNED, STATUS.IN_REVIEW,
@@ -235,17 +269,6 @@ function clearReferenceCache_() {
 
 /* ------------------------------------------------------------- unit data */
 
-/**
- * The registered units the claim form offers as its serial number list.
- *
- * Fetched on demand rather than at sign-in: every screen needs the customer
- * list, only the claim form needs several thousand serial numbers, and the
- * browser holds them for the rest of the session once it has them.
- */
-function unitOptions_(session) {
-  requireRole_(session, [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN]);
-  return { units: populationUnits_() };
-}
 
 function listUnits_(session, filter) {
   requireRole_(session, [ROLE.ADMIN]);

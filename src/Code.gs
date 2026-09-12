@@ -171,7 +171,7 @@ function route_(session, action, payload) {
     case 'claims.advanceQueue': return advanceQueue_(session);
     case 'claims.delete': return deleteClaim_(session, payload);
     case 'claims.lookup': return lookupSerial_(session, payload.serialNumber);
-    case 'claims.units': return unitOptions_(session);
+    case 'claims.searchUnits': return searchUnits_(session, payload);
     case 'claims.unitHistory': return unitHistory_(session, payload.serialNumber);
     case 'claims.attachment': return attachmentData_(session, payload.attachmentId);
     case 'claims.export': return exportClaims_(session, payload);
@@ -183,6 +183,8 @@ function route_(session, action, payload) {
     case 'master.importPreview': return previewUnitImport_(session, payload);
     case 'master.import': return importUnits_(session, payload);
     case 'master.unknownPrincipals': return unknownPrincipals_(session);
+    case 'master.searchCustomers': return searchCustomers_(session, payload);
+    case 'master.customer': return customerById_(session, payload.customerId);
 
     /* email templates and archive */
     case 'templates.list': return listTemplates_(session);
