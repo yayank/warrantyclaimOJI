@@ -6,6 +6,12 @@ satu web app, tanpa framework dan tanpa build step selain `tools/bundle.js`.
 Berkas ini ada supaya sesi berikutnya tidak perlu menemukan ulang hal-hal yang
 sudah diputuskan. **Baca ini dulu, jangan jelajahi repo dari nol.**
 
+Lalu baca **`docs/business-context.md`** sebelum mengusulkan perubahan apa pun
+pada model data atau alur kerja: siapa pemakainya, dua tingkat garansi, aturan
+akses, dan skalanya. Itu hasil wawancara dengan pemilik repo, bukan tebakan.
+Rancangan yang menyusul ada di **`docs/warranty-model.md`** (usulan, belum
+dikerjakan).
+
 ## Bahasa
 
 Jawab dalam **Bahasa Indonesia**, dan tulis deskripsi PR dalam Bahasa Indonesia
@@ -96,6 +102,14 @@ Aturan yang sudah berlaku:
   daftar tetap membaca `ClaimItems` (−46% sel tersedia kalau tidak). Pemilik repo
   memilih begitu, 12 Sep 2026.
 - **Tahap 3 butir D (`gviz/tq`) ditolak.** Alasannya di `docs/backlog.md`.
+- **Unit di luar `Population` sekarang DITOLAK saat submit** — membatalkan
+  bagian 2 deskripsi PR #1, yang menerimanya dan menandainya untuk pemeriksaan
+  manual. Diputuskan 12 Sep 2026: ada sistem pencatatan instalasi di luar portal
+  yang harus diperbarui lebih dulu. Klaimnya tetap tersimpan sebagai draft dan
+  memicu permintaan pendaftaran unit ke Administrator — pekerjaan lapangan tidak
+  boleh hilang.
+- **`WarrantyType` berarti sisi principal**, bukan sisi pembeli. Garansi kita ke
+  pembeli adalah kolom terpisah. Jangan tumpangkan artinya.
 - Dashboard, grafik, notifikasi realtime, aplikasi mobile terpisah: sudah
   ditimbang dan tidak disarankan.
 
@@ -108,6 +122,8 @@ bila menemukan promptnya salah.
 
 ## Dokumentasi
 
-`README.md` (ikhtisar + daftar penguji), `docs/specification.md` (aturan bisnis),
+`README.md` (ikhtisar + daftar penguji), `docs/business-context.md` (latar
+belakang bisnis — baca lebih dulu), `docs/warranty-model.md` (rancangan model
+garansi dua tingkat, usulan), `docs/specification.md` (aturan bisnis),
 `docs/deployment.md`, `docs/architecture.md`, `docs/ui-mockups.html`. Perbarui
 daftar penguji di README saat menambah penguji.
