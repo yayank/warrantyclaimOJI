@@ -45,11 +45,11 @@ const script = fs.readFileSync(path.join(__dirname, '..', 'src', 'Script.html'),
   .replace(/<\/script>\s*$/, '');
 vm.runInContext(script +
   '\nglobalThis.__api = { claimTable, groupClaims_, customerFilter, applyDeepLink, ' +
-  'STATUS, ITEM, ROLE, WARRANTY, S };',
+  'COMBO, STATUS, ITEM, ROLE, WARRANTY, S };',
   sandbox, { filename: 'client' });
 
 const { claimTable, groupClaims_, customerFilter, applyDeepLink,
-  STATUS, ITEM, ROLE, WARRANTY, S } = sandbox.__api;
+  COMBO, STATUS, ITEM, ROLE, WARRANTY, S } = sandbox.__api;
 
 /* --------------------------------------------------------------- fixtures */
 
@@ -507,6 +507,22 @@ check('and it reads back the hospital being filtered on',
 
 check('the filter never carries a list of its own any more',
   chosen.indexOf('RSUD') === -1 && !/options/.test(chosen));
+
+// Nothing is fetched until something is typed, so anything the box must offer
+// before then has to be its own rather than the server's.
+const spec = COMBO.customerFilter;
+check('the filter searches the server rather than holding options',
+  typeof spec.remote === 'function' && !spec.options);
+
+check('but carries All customers itself, or the filter could not be cleared without a search',
+  (spec.always || []).length === 1 && spec.always[0].value === '' &&
+  spec.always[0].label === 'All customers', JSON.stringify(spec.always));
+
+check('and says what to do before anything is typed',
+  !!spec.idleText, JSON.stringify(spec.idleText));
+
+check('the prompt quotes no count — quoting one would mean reading the sheet to get it',
+  !/\d/.test(spec.idleText || ''), spec.idleText);
 
 /* -------------------------------------------------------------------- report */
 
