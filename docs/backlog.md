@@ -330,7 +330,37 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## G · Penanda "baru sejak terakhir dilihat" *(opsional)*
+## G · Penanda "baru sejak terakhir dilihat" — ✅ SELESAI (12 Sep 2026)
+
+> `src/Visits.gs`, disimpan pada properti skrip dengan alamat sebagai kunci —
+> alasannya sama dengan butir E, dan dirujuk dari sana.
+>
+> **Dua stempel, bukan satu.** `seen` adalah kapan orangnya terakhir di sini;
+> `boundary` adalah apa yang penandanya diukur terhadapnya, dan sengaja bukan
+> hal yang sama. Muat ulang halaman adalah sign-in baru, jadi memindahkan batas
+> pada tiap sign-in akan menghapus penandanya sebelum sempat dibaca — persis
+> kegagalan yang prompt ini peringatkan, hanya lebih pelan. Kunjungan yang
+> berjarak kurang dari 30 menit dihitung satu kunjungan dan batasnya diam;
+> absen lebih lama memindahkannya ke tempat orangnya berhenti.
+>
+> Batasnya **hanya** bergerak saat halaman dibuka (`session.bootstrap`) dan saat
+> orangnya bilang sudah melihat. Tidak pernah saat daftar digambar — `listClaims_`
+> membaca, tidak pernah menulis.
+>
+> Kunjungan pertama menandai **nol**. Portal yang menyambut orang dengan empat
+> ratus klaim bertanda baru tidak memberi tahu apa pun.
+>
+> Perubahan oleh diri sendiri tidak ditandai — `UpdatedBy` dibandingkan dengan
+> alamat penandatangan. Kolom ringkasan ditulis lewat `setCells_` yang tidak
+> menyentuh `UpdatedAt`/`UpdatedBy`, jadi menghitung ulang sparepart tidak pernah
+> membuat klaim tampak baru; pengujinya membuktikan itu.
+>
+> Tampilannya: satu penanda kecil di dalam sel Claim (jadi tata letak kartu tidak
+> perlu tempat baru untuknya), dan satu baris di bawah filter yang menyebut
+> jumlahnya — termasuk yang tidak muat di halaman ini, yang justru tidak bisa
+> diberitahukan oleh penanda per baris. Satu tombol "Mark as seen" di sebelahnya.
+> `tools/verify-visits.js`, 39 pemeriksaan, terbukti menangkap sembilan bug.
+
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 >

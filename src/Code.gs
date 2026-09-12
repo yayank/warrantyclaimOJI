@@ -147,7 +147,10 @@ function route_(session, action, payload) {
       return {
         session: publicSession_(session),
         reference: referenceData_(session),
-        appUrl: setting_(SETTING_KEY.APP_URL, '')
+        appUrl: setting_(SETTING_KEY.APP_URL, ''),
+        // A page opening is a visit. Nothing else moves the marker boundary,
+        // so drawing a list never clears what it is drawing.
+        since: openVisit_(session)
       };
 
     /* claims */
@@ -199,6 +202,8 @@ function route_(session, action, payload) {
     case 'claims.bulkReturn': return returnClaims_(session, payload);
     case 'claims.bulkForward': return forwardClaims_(session, payload);
     case 'claims.bulkInternal': return startInternalVerifications_(session, payload);
+
+    case 'visits.seen': return markVisitSeen_(session);
 
     /* saved filter combinations, per person */
     case 'views.list': return listViews_(session);

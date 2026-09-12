@@ -144,7 +144,7 @@ const sandbox = {
   }
 };
 vm.createContext(sandbox);
-['Config.gs', 'Repo.gs', 'Auth.gs', 'Audit.gs', 'Claims.gs'].forEach(function (f) {
+['Config.gs', 'Repo.gs', 'Auth.gs', 'Audit.gs', 'Visits.gs', 'Claims.gs'].forEach(function (f) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'),
     sandbox, { filename: f });
 });

@@ -194,6 +194,10 @@ label.field>span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
 .p-ok{background:var(--ok-soft);color:var(--ok)}
 .p-no{background:var(--crit-soft);color:var(--crit)}
 .p-wait{background:var(--accent-soft);color:var(--accent-ink)}
+/* Moved since you were last here. Quieter than a status: it says where to
+   look, not what the claim is. */
+.p-new{background:var(--info-soft);color:var(--info);font-size:10.5px;
+  letter-spacing:.04em;text-transform:uppercase}
 
 /* -------------------------------------------------------------- tables */
 .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
@@ -539,11 +543,13 @@ const S = {
   tab: 'all',
   filters: blankFilters(),
   pick: {},                 // claims ticked on the claim list, by claim id
+  since: '',                // what the "moved" markers are measured against
+
   views: null,              // saved filter combinations; null until fetched once
   viewNotice: '',           // why a view that was opened shows nothing
   rows: [],
   total: 0,                 // how many the filter matches, not how many are shown
-  counts: { action: 0, advance: 0 },
+  counts: { action: 0, advance: 0, fresh: 0 },
   collapsed: {},            // claims whose parts the reader has folded away
   group: 'status',          // 'status' | 'customer' — what the list is cut by
   selection: {},
@@ -804,6 +810,9 @@ function startWithBuiltInIdentity() {
   api('session.bootstrap', {}).then(function (data) {
     S.session = data.session;
     S.reference = data.reference;
+    // What the "new" markers are measured against, decided by the server when
+    // this page opened. Kept only to say so on screen.
+    S.since = data.since || '';
     el('boot').hidden = true;
     el('app').hidden = false;
     applyDeepLink();
@@ -846,6 +855,9 @@ function signIn(credential) {
   api('session.bootstrap', {}).then(function (data) {
     S.session = data.session;
     S.reference = data.reference;
+    // What the "new" markers are measured against, decided by the server when
+    // this page opened. Kept only to say so on screen.
+    S.since = data.since || '';
     el('boot').hidden = true;
     el('app').hidden = false;
     applyDeepLink();
@@ -1051,6 +1063,7 @@ function renderClaims() {
     '</div>',
     activeChips(),
     viewNotice(),
+    freshLine(),
     claimBar(),
     S.rows.length
       ? claimTable() + moreBar()
@@ -1150,6 +1163,36 @@ function customerFilter() {
       loadClaims();
     }
   }) + '</div>';
+}
+
+/* ================================================ what moved while away */
+
+/*
+ * The question every morning is what happened overnight, and answering it used
+ * to mean reading the whole list and remembering yesterday's. A claim the
+ * reader has not seen since it last changed carries a marker, and the line
+ * below the filters says how many there are — including the ones that did not
+ * fit on this page, which is the half a per-row marker cannot tell you.
+ *
+ * Two rules make it useful rather than noise, and both live on the server:
+ * the boundary moves when a page opens, not when a list is drawn, and your own
+ * changes are never marked. See Visits.gs.
+ */
+
+function freshLine() {
+  const n = S.counts.fresh;
+  if (!n) return '';
+  return '<div class="toolbar"><span class="tiny">' +
+    '<b>' + n + '</b> claim' + (n === 1 ? '' : 's') + ' moved since you were last here' +
+    (S.since ? ', ' + h(fmtDateTime(S.since)) : '') + '.</span>' +
+    '<button class="btn sm" id="seenAll" type="button">Mark as seen</button></div>';
+}
+
+function markAllSeen() {
+  api('visits.seen', {}).then(function (r) {
+    S.since = (r && r.since) || S.since;
+    loadClaims();
+  }).catch(fail);
 }
 
 /* ============================================ acting on several at once */
@@ -1740,7 +1783,11 @@ function claimTable() {
           ? '<span class="mono">' + h(c.refNo) + '</span>' +
             '<span class="mono tiny">' + h(c.claimId) + '</span>'
           : '<span class="mono">' + h(c.claimId) + '</span>' +
-            '<span class="mono tiny">not submitted</span>')) + '</td>',
+            '<span class="mono tiny">not submitted</span>')) +
+        // Inside the Claim cell rather than a column of its own: it belongs to
+        // the claim's name, and a column would be empty on most rows and would
+        // need a place of its own in the card layout as well.
+        (c.isNew ? '<span class="pill flat p-new tiny">moved</span>' : '') + '</td>',
       '<td class="c-date">' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
     );
     if (showPrincipal) {
@@ -1905,6 +1952,8 @@ function wireClaimsToolbar() {
   });
   const mv = el('manageViews');
   if (mv) mv.addEventListener('click', openViewManager);
+  const seen = el('seenAll');
+  if (seen) seen.addEventListener('click', markAllSeen);
   const dvc = el('dropViewCustomer');
   if (dvc) dvc.addEventListener('click', function () {
     S.filters.customerId = '';

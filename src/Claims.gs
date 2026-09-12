@@ -38,8 +38,14 @@ function listClaims_(session, filter) {
   // everything the reader can see rather than what is left after filtering, so
   // the unfiltered set is kept — tabCounts_ used to shape all of them a second
   // time to get it back.
+  // What moved while the reader was away. Read, never written, here: a list is
+  // drawn many times in a visit and the marker has to outlast all of them.
+  const since = visitSince_(session);
+
   const shaped = claims.map(function (c) {
-    return shapeClaim_(c, byClaim ? (byClaim[c.ClaimID] || []) : null, !ready);
+    const row = shapeClaim_(c, byClaim ? (byClaim[c.ClaimID] || []) : null, !ready);
+    row.isNew = isNewToViewer_(c, session, since);
+    return row;
   });
   let rows = shaped;
 
@@ -213,7 +219,9 @@ function needsAction_(session, row) {
 function tabCounts_(session, rows) {
   let action = 0;
   let advance = 0;
+  let fresh = 0;
   rows.forEach(function (row) {
+    if (row.isNew) fresh++;
     if (needsAction_(session, row)) action++;
     // The claim-level half of awaitingAdvanceIssue_; the part-level half was
     // counted into AdvanceQueueCount when the items last changed.
@@ -222,7 +230,7 @@ function tabCounts_(session, rows) {
       advance += row.summary.advanceQueue;
     }
   });
-  return { action: action, advance: advance };
+  return { action: action, advance: advance, fresh: fresh };
 }
 
 /**

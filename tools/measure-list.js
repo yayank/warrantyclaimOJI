@@ -68,7 +68,7 @@ const sandbox = {
   Utilities: { formatDate: function () { return '2026-09-12T00:00:00'; } }
 };
 vm.createContext(sandbox);
-['Config.gs', 'Repo.gs', 'Auth.gs', 'Claims.gs'].forEach(function (f) {
+['Config.gs', 'Repo.gs', 'Auth.gs', 'Visits.gs', 'Claims.gs'].forEach(function (f) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'),
     sandbox, { filename: f });
 });

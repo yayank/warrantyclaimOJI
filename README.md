@@ -69,6 +69,7 @@ node tools/verify-audit.js                  # 42 pemeriksaan
 node tools/verify-summary.js                # 75 pemeriksaan
 node tools/verify-views.js                  # 51 pemeriksaan
 node tools/verify-bulk.js                   # 69 pemeriksaan
+node tools/verify-visits.js                 # 39 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.
@@ -86,6 +87,8 @@ Penguji ringkasan menjaga kolom hitungan pada baris `Claims` — salinan dari `C
 Penguji saved views menjaga satu jebakan yang tidak kelihatan dari layar: aplikasi web ini dijalankan sebagai orang yang men-deploy-nya, jadi `PropertiesService.getUserProperties()` — tempat yang paling wajar untuk preset per pengguna — sebenarnya milik satu orang itu untuk semua pengunjung. Preset karenanya disimpan pada properti skrip dengan alamat si penandatangan sebagai kuncinya, dan pemeriksaan pertama di penguji itu adalah dua orang yang menyimpan di pagi yang sama tetap punya presetnya masing-masing.
 
 Penguji aksi massal menjaga dua hal yang sama-sama tidak terlihat saat rusak: batch yang berhenti separuh jalan tanpa ada yang menyebut separuh mana, dan bilah pilihan yang menawarkan langkah untuk pilihan yang mencakup dua status. Ia juga mengukur bahwa jalur batch tidak membangun panel klaim penuh per klaim — 39 pembacaan versus 54 bila dijalankan satu per satu.
+
+Penguji kunjungan menjaga dua aturan yang membedakan penanda "baru" yang berguna dari yang mengganggu: batasnya bergerak saat halaman dibuka setelah benar-benar pergi — **tidak pernah saat daftar digambar**, berapa kali pun itu terjadi — dan perubahan oleh diri sendiri tidak pernah ditandai. Jamnya digerakkan dengan tangan, karena pengujian yang menunggu menit sungguhan adalah pengujian yang tidak pernah dijalankan.
 
 Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah saling melihat klaim, klaim yang belum terpetakan tidak sampai ke siapa pun, dan klaim uji tersembunyi dari semua peran kecuali Tester.
 

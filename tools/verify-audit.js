@@ -171,9 +171,12 @@ const sandbox = {
   }
 };
 // Everything that asks what year it is gets the pinned one.
-sandbox.Date = function (a, b, c, d, e, f, g) {
+sandbox.Date = function () {
   if (!(this instanceof sandbox.Date)) return new Date(NOW).toString();
-  return arguments.length ? new Date(a, b, c, d, e, f, g) : new Date(NOW);
+  // Only the arguments actually given: passing seven of them, most undefined,
+  // makes Date read a string as a year and hand back NaN.
+  const args = Array.prototype.slice.call(arguments);
+  return args.length ? new Date(...args) : new Date(NOW);
 };
 sandbox.Date.now = function () { return NOW.getTime(); };
 sandbox.Date.prototype = Date.prototype;
