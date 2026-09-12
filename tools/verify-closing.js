@@ -79,12 +79,12 @@ vm.createContext(sandbox);
 vm.runInContext(
   ['Config.gs', 'Claims.gs']
     .map(function (f) { return fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'); })
-    .concat(['globalThis.__api = { recomputeClaimStatus_, recordPartReturn_, shapeClaim_ };'])
+    .concat(['globalThis.__api = { recomputeClaimStatus_, recordPartReturn_, shapeClaim_, summaryOf_ };'])
     .join('\n'),
   sandbox, { filename: 'closing' }
 );
 
-const { recomputeClaimStatus_, recordPartReturn_, shapeClaim_ } = sandbox.__api;
+const { recomputeClaimStatus_, recordPartReturn_, shapeClaim_, summaryOf_ } = sandbox.__api;
 const admin = { email: 'admin@oneject.co.id', role: 'Administrator', isTester: false };
 
 let pass = 0;
@@ -155,6 +155,8 @@ reset();
 CLAIMS.push(claim('C6'));
 ITEMS.push(item('I1', 'C6'));
 ITEMS.push(item('I2', 'C6', { PartID: 'P2', PartName: 'Cell', PartReturnAt: '2026-08-20T09:00:00' }));
+// The counts live on the claim row, put there whenever its items change.
+Object.assign(CLAIMS[0], summaryOf_(ITEMS));
 const shaped = shapeClaim_(CLAIMS[0], ITEMS);
 check('the item that is owed says so', shaped.items[0].awaitingReturn === true);
 check('the one already back does not', shaped.items[1].awaitingReturn === false);

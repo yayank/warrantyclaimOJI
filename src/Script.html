@@ -435,7 +435,10 @@ const CLAIM_PAGE = 50;
  */
 function loadClaims(append) {
   if (!append) el('view').innerHTML = skeleton(6);
-  const filter = Object.assign({ tab: S.tab, limit: CLAIM_PAGE }, S.filters);
+  // Only the page's parts: the spare-part rows under a claim are drawn for
+  // what is on screen, and shaping the other four hundred claims' parts to
+  // throw them away is work nobody sees.
+  const filter = Object.assign({ tab: S.tab, limit: CLAIM_PAGE, items: 'page' }, S.filters);
   // The name is what the box and the chip read back; only the id filters.
   delete filter.customerName;
   filter.offset = append ? S.rows.length : 0;

@@ -9,20 +9,38 @@
 
 /* ------------------------------------------------------------------ read */
 
+/**
+ * The claim list.
+ *
+ * Every tab rule, filter and badge here is answered from the claim rows alone:
+ * the counts they need live on the claim, put there whenever its items change.
+ * The item sheet is read only when a caller actually wants the parts —
+ * `items` says whether that is for the page, for everything, or not at all.
+ *
+ * Defaults to everything, because the callers that want parts for every row
+ * (the orders screen, the Excel export) would otherwise silently get none.
+ */
 function listClaims_(session, filter) {
   const f = filter || {};
   const claims = visibleClaims_(session);
-  const items = readLive_(SHEET.ITEMS);
-  const byClaim = {};
-  items.forEach(function (i) {
-    (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i);
-  });
+
+  // The part filter is the one question the columns cannot answer, so asking it
+  // pays for the read. Nothing on screen sets it; the export can.
+  const want = f.partId ? 'all' : (f.items === undefined ? 'all' : String(f.items));
+
+  // A claim written before the summary columns existed has empty cells, and an
+  // empty cell reads as zero — every tab would be wrong and nothing would say
+  // so. Until setUp() has backfilled them, fall back to counting the items.
+  const ready = summariesReady_(claims);
+  const byClaim = (want === 'all' || !ready) ? itemsByClaim_() : null;
 
   // Shaped once. The filters below narrow `rows`, but the tab badges count
   // everything the reader can see rather than what is left after filtering, so
   // the unfiltered set is kept — tabCounts_ used to shape all of them a second
   // time to get it back.
-  const shaped = claims.map(function (c) { return shapeClaim_(c, byClaim[c.ClaimID] || []); });
+  const shaped = claims.map(function (c) {
+    return shapeClaim_(c, byClaim ? (byClaim[c.ClaimID] || []) : null, !ready);
+  });
   let rows = shaped;
 
   if (f.search) {
@@ -70,7 +88,46 @@ function listClaims_(session, filter) {
     page = rows.slice(offset, offset + limit);
   }
 
+  // Asked for after the page is cut, so the parts of four hundred claims are
+  // not shaped to show fifty.
+  if (want === 'page' && !byClaim) attachItems_(page);
+
   return { rows: page, total: total, counts: tabCounts_(session, shaped) };
+}
+
+/** Every live item, grouped by the claim it belongs to. */
+function itemsByClaim_() {
+  const byClaim = {};
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i);
+  });
+  return byClaim;
+}
+
+/** Fills in the parts for rows that were shaped without them. */
+function attachItems_(rows) {
+  if (!rows.length) return rows;
+  const wanted = {};
+  rows.forEach(function (r) { wanted[r.claimId] = []; });
+  readLive_(SHEET.ITEMS).forEach(function (i) {
+    if (wanted[i.ClaimID]) wanted[i.ClaimID].push(i);
+  });
+  rows.forEach(function (r) {
+    r.items = wanted[r.claimId].map(shapeItem_);
+    r.itemsLoaded = true;
+  });
+  return rows;
+}
+
+/**
+ * Whether the claim rows carry counts at all.
+ *
+ * An empty cell and a genuine zero both read as zero, so the raw value is what
+ * is asked: a claim that has never been counted has nothing in the column.
+ * One such claim is enough to distrust the lot.
+ */
+function summariesReady_(claims) {
+  return !claims.some(function (c) { return c.ItemCount === '' || c.ItemCount === undefined; });
 }
 
 function matchesTab_(session, row, tab) {
@@ -137,17 +194,15 @@ function needsAction_(session, row) {
     case ROLE.ADMIN:
       if (row.status === STATUS.SUBMITTED) return true;
       if (row.status === STATUS.INTERNAL) return true;
+      // Approved counts everything approved and not yet rejected, shipped
+      // included; what is left to do is the part of it that has not gone out.
       if (row.status === STATUS.FULFILMENT) {
-        return row.items.some(function (i) {
-          return [ITEM_STATUS.APPROVED, ITEM_STATUS.FORWARDED, ITEM_STATUS.AWAITING]
-            .indexOf(i.itemStatus) !== -1;
-        });
+        return row.summary.approved - row.summary.shipped > 0;
       }
       return false;
 
     case ROLE.PRINCIPAL:
-      return row.status === STATUS.IN_REVIEW &&
-        row.items.some(function (i) { return i.itemStatus === ITEM_STATUS.PENDING; });
+      return row.status === STATUS.IN_REVIEW && row.summary.pending > 0;
 
     default:
       return false;
@@ -160,8 +215,11 @@ function tabCounts_(session, rows) {
   let advance = 0;
   rows.forEach(function (row) {
     if (needsAction_(session, row)) action++;
-    if (session.role === ROLE.ADMIN) {
-      row.items.forEach(function (i) { if (awaitingAdvanceIssue_(row, i)) advance++; });
+    // The claim-level half of awaitingAdvanceIssue_; the part-level half was
+    // counted into AdvanceQueueCount when the items last changed.
+    if (session.role === ROLE.ADMIN &&
+      row.status !== STATUS.DRAFT && row.status !== STATUS.CLOSED) {
+      advance += row.summary.advanceQueue;
     }
   });
   return { action: action, advance: advance };
@@ -243,18 +301,18 @@ function advanceQueue_(session) {
   return { awaiting: awaiting, issued: issued };
 }
 
-function shapeClaim_(c, items) {
-  const shaped = items.map(shapeItem_);
-  const approved = shaped.filter(function (i) {
-    return [ITEM_STATUS.APPROVED, ITEM_STATUS.FORWARDED, ITEM_STATUS.AWAITING,
-      ITEM_STATUS.SHIPPED].indexOf(i.itemStatus) !== -1;
-  }).length;
-  const rejected = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.REJECTED; }).length;
-  const pending = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.PENDING; }).length;
-  const shipped = shaped.filter(function (i) { return i.itemStatus === ITEM_STATUS.SHIPPED; }).length;
-  const advance = shaped.filter(function (i) { return i.advanceIssued; }).length;
-  const awaitingReturn = shaped.filter(function (i) { return i.awaitingReturn; }).length;
-
+/**
+ * One claim as the screens read it.
+ *
+ * `items` may be left out. The counts come from the claim's own columns either
+ * way, so a caller that only needs to know where a claim stands — which tab it
+ * falls in, how much is pending — never makes anybody read the item sheet.
+ */
+function shapeClaim_(c, items, countItems) {
+  const shaped = items ? items.map(shapeItem_) : [];
+  // Normally the columns; from the items themselves only while the columns are
+  // still empty on an old sheet, so nothing reads zero until setUp() has run.
+  const n = (countItems && items) ? summaryOf_(items) : c;
   const stamp = c.SubmittedAt || c.CreatedAt || '';
   return {
     claimId: c.ClaimID,
@@ -286,9 +344,19 @@ function shapeClaim_(c, items) {
     sortDate: String(stamp),
     ageDays: ageDays_(c),
     summary: {
-      approved: approved, rejected: rejected, pending: pending,
-      shipped: shipped, advance: advance, awaitingReturn: awaitingReturn
+      itemCount: Number(n.ItemCount || 0),
+      approved: Number(n.ApprovedCount || 0),
+      rejected: Number(n.RejectedCount || 0),
+      pending: Number(n.PendingCount || 0),
+      shipped: Number(n.ShippedCount || 0),
+      advance: Number(n.AdvanceCount || 0),
+      advanceQueue: Number(n.AdvanceQueueCount || 0),
+      awaitingReturn: Number(n.AwaitingReturnCount || 0)
     },
+    // Empty when they were not asked for. itemsLoaded says which of the two it
+    // is, so a screen never reads "no parts" off a list that simply did not
+    // fetch them.
+    itemsLoaded: !!items,
     items: shaped
   };
 }
@@ -1096,8 +1164,8 @@ function decideItems_(session, payload) {
  * the items.
  */
 
-const SUMMARY_COLS = ['PendingCount', 'ApprovedCount', 'RejectedCount',
-  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount'];
+const SUMMARY_COLS = ['ItemCount', 'PendingCount', 'ApprovedCount', 'RejectedCount',
+  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount', 'AdvanceQueueCount'];
 
 /**
  * Counts one claim's items. The buckets are the ones shapeClaim_ reports, and
@@ -1105,11 +1173,12 @@ const SUMMARY_COLS = ['PendingCount', 'ApprovedCount', 'RejectedCount',
  * read the other.
  */
 function summaryOf_(items) {
-  const n = { PendingCount: 0, ApprovedCount: 0, RejectedCount: 0,
-    ShippedCount: 0, AwaitingReturnCount: 0, AdvanceCount: 0 };
+  const n = { ItemCount: 0, PendingCount: 0, ApprovedCount: 0, RejectedCount: 0,
+    ShippedCount: 0, AwaitingReturnCount: 0, AdvanceCount: 0, AdvanceQueueCount: 0 };
 
   items.forEach(function (i) {
     const status = i.ItemStatus;
+    n.ItemCount++;
     if (status === ITEM_STATUS.PENDING) n.PendingCount++;
     // Approved counts everything that has been approved and not yet rejected,
     // wherever along the road it has got to.
@@ -1121,6 +1190,13 @@ function summaryOf_(items) {
       n.AwaitingReturnCount++;
     }
     if (isTrue_(i.AdvanceIssued)) n.AdvanceCount++;
+    // The part-level half of awaitingAdvanceIssue_: has it left the building,
+    // and has anybody written down that it did. The claim-level half — not a
+    // draft, not closed — is applied when the badge is counted.
+    if (!isTrue_(i.AdvanceIssued) &&
+      [ITEM_STATUS.SHIPPED, ITEM_STATUS.REJECTED].indexOf(status) === -1) {
+      n.AdvanceQueueCount++;
+    }
   });
   return n;
 }

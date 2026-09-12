@@ -42,8 +42,9 @@ SCHEMA[SHEET.CLAIMS] = [
   // answer without reading the item sheet at all. Nothing else may write them:
   // they are a copy of the truth, and the only safe copy is one with a single
   // author. See summaryOf_ and refreshClaimSummaries_ in Claims.gs.
+  'ItemCount',
   'PendingCount', 'ApprovedCount', 'RejectedCount',
-  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount',
+  'ShippedCount', 'AwaitingReturnCount', 'AdvanceCount', 'AdvanceQueueCount',
 
   'Deleted', 'DeletedBy', 'DeletedAt',
   'UpdatedAt', 'UpdatedBy', 'RowVersion'

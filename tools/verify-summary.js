@@ -56,6 +56,7 @@ function Sheet(name, rows) {
     getRange: function (r, c, nr, nc) {
       return {
         getValues: function () {
+          READS[name] = (READS[name] || 0) + 1;
           const out = [];
           for (let i = 0; i < nr; i++) {
             const row = s.rows[r - 1 + i] || [];
@@ -80,6 +81,13 @@ function Sheet(name, rows) {
     }
   };
   return s;
+}
+
+const READS = {};
+function readsDuring(fn) {
+  Object.keys(READS).forEach(function (k) { delete READS[k]; });
+  const out = fn();
+  return { reads: Object.assign({}, READS), out: out };
 }
 
 let SHEETS = {};
@@ -450,6 +458,137 @@ check('nor touch the claim status, dates or anybody else',
 check('and the other claims are left where they were',
   stored('CLM-A').PendingCount === 3 && stored('CLM-C').PendingCount === 1,
   JSON.stringify(stored('CLM-A')));
+
+/* ---------------------------- the list answers without reading the items */
+
+/*
+ * The point of the columns: a tab rule, a filter or a badge is a question
+ * about a claim, and the claim now carries its own answer. Asking for a list
+ * without the parts must therefore not touch the item sheet at all — and must
+ * give exactly the answer it gave when it did.
+ */
+
+fresh();
+// Enough of a spread that the tabs and badges have something to disagree over.
+api.decideItems_(SANSIN, { itemIds: ['ITM-A-01'], decision: 'approve' });
+api.decideItems_(SANSIN, { itemIds: ['ITM-A-02'], decision: 'reject', reason: 'wear' });
+api.markShipped_(ADMIN, { itemIds: ['ITM-A-01'] });
+api.setAdvanceIssue_(ADMIN, { itemIds: ['ITM-B-01'], issued: true, note: 'down' });
+
+const withParts = readsDuring(function () { return api.listClaims_(ADMIN, { tab: 'all' }); });
+const without = readsDuring(function () {
+  return api.listClaims_(ADMIN, { tab: 'all', items: 'none' });
+});
+
+check('asking for the parts reads the item sheet',
+  withParts.reads.ClaimItems > 0, 'read it ' + (withParts.reads.ClaimItems || 0) + ' times');
+check('not asking for them does not',
+  !without.reads.ClaimItems, 'read it ' + (without.reads.ClaimItems || 0) + ' times');
+check('and the claim sheet is still read once either way',
+  withParts.reads.Claims === without.reads.Claims,
+  withParts.reads.Claims + ' against ' + without.reads.Claims);
+
+check('the same claims come back in the same order',
+  without.out.rows.map(function (r) { return r.claimId; }).join() ===
+  withParts.out.rows.map(function (r) { return r.claimId; }).join());
+check('and the same total',
+  without.out.total === withParts.out.total,
+  without.out.total + ' against ' + withParts.out.total);
+// Counted here from the items, by the rule itself, rather than trusting either
+// call: AdvanceCount and AdvanceQueueCount are easy to mistake for each other,
+// and a claim already sent in advance is exactly the one not in the queue.
+const owedNow = (function () {
+  const byClaim = truth();
+  let n = 0;
+  api.readAll_(SHEET.CLAIMS).forEach(function (c) {
+    if (c.Status === 'Draft' || c.Status === 'Closed') return;
+    (byClaim[c.ClaimID] || []).forEach(function (i) {
+      if (i.AdvanceIssued === true) return;
+      if (['Shipped', 'Rejected'].indexOf(i.ItemStatus) !== -1) return;
+      n++;
+    });
+  });
+  return n;
+})();
+check('the fixture has parts both waiting to go out and already sent in advance',
+  owedNow > 0 && stored('CLM-B').AdvanceCount > 0,
+  owedNow + ' waiting, ' + stored('CLM-B').AdvanceCount + ' already sent');
+check('the Advance Issue badge counts what is still to go out, not what went',
+  withParts.out.counts.advance === owedNow,
+  withParts.out.counts.advance + ' against ' + owedNow);
+
+check('and the same badges, which are the numbers a tab is chosen by',
+  JSON.stringify(without.out.counts) === JSON.stringify(withParts.out.counts),
+  JSON.stringify(without.out.counts) + ' against ' + JSON.stringify(withParts.out.counts));
+
+check('and the same summary on every row',
+  without.out.rows.every(function (r, i) {
+    return JSON.stringify(r.summary) === JSON.stringify(withParts.out.rows[i].summary);
+  }));
+
+['all', 'action', 'progress', 'completed', 'closed', 'principal', 'internal'].forEach(function (tab) {
+  const a = api.listClaims_(ADMIN, { tab: tab }).rows.map(function (r) { return r.claimId; });
+  const b = api.listClaims_(ADMIN, { tab: tab, items: 'none' })
+    .rows.map(function (r) { return r.claimId; });
+  check('the ' + tab + ' tab holds the same claims without the parts',
+    a.join() === b.join(), a.join() + ' against ' + b.join());
+});
+
+check('a row that was not given its parts says so, rather than reading as none',
+  without.out.rows.every(function (r) { return r.itemsLoaded === false && !r.items.length; }));
+
+/* the page only ---------------------------------------------------------- */
+
+const paged = api.listClaims_(ADMIN, { tab: 'all', limit: 2, items: 'page' });
+check('a page carries its own parts', paged.rows.length === 2 &&
+  paged.rows.every(function (r) { return r.itemsLoaded; }));
+check('and the parts it carries are the claim\'s own',
+  paged.rows.every(function (r) {
+    return r.items.every(function (i) { return i.claimId === r.claimId; }) &&
+      r.items.length === r.summary.itemCount;
+  }));
+
+/* the one question the columns cannot answer ------------------------------ */
+
+const byPart = readsDuring(function () {
+  return api.listClaims_(ADMIN, { tab: 'all', items: 'none', partId: 'P2' });
+});
+check('filtering by spare part reads the items even when asked not to',
+  byPart.reads.ClaimItems > 0, 'read it ' + (byPart.reads.ClaimItems || 0) + ' times');
+check('and answers with the claims that carry that part',
+  byPart.out.rows.length > 0 &&
+  byPart.out.rows.every(function (r) {
+    return r.items.some(function (i) { return i.partId === 'P2'; });
+  }), byPart.out.rows.length + ' claims');
+
+/* a sheet where the columns were never filled ----------------------------- */
+
+// Deploying without running setUp() would leave every summary cell empty, and
+// an empty cell reads as zero: every claim would look finished. The list must
+// notice and count the items instead, not quietly answer nought.
+reset();
+const unmigrated = readsDuring(function () {
+  return api.listClaims_(ADMIN, { tab: 'all', items: 'none' });
+});
+check('an unmigrated sheet is counted from the items rather than read as zero',
+  unmigrated.out.rows.every(function (r) {
+    return r.summary.pending === truth()[r.claimId].filter(function (i) {
+      return i.ItemStatus === 'Pending';
+    }).length;
+  }),
+  JSON.stringify(unmigrated.out.rows.map(function (r) { return r.summary.pending; })));
+check('which does cost the read it was trying to avoid, until setUp() has run',
+  unmigrated.reads.ClaimItems > 0);
+
+api.backfillClaimSummaries_();
+const migrated = readsDuring(function () {
+  return api.listClaims_(ADMIN, { tab: 'all', items: 'none' });
+});
+check('and stops costing it once the columns are filled',
+  !migrated.reads.ClaimItems, 'read it ' + (migrated.reads.ClaimItems || 0) + ' times');
+check('with the same answer as the fall-back gave',
+  JSON.stringify(migrated.out.rows.map(function (r) { return r.summary; })) ===
+  JSON.stringify(unmigrated.out.rows.map(function (r) { return r.summary; })));
 
 /* ------------------------- every path that writes an item, not only these */
 

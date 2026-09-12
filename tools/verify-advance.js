@@ -70,13 +70,13 @@ vm.runInContext(
   ['Config.gs', 'Claims.gs']
     .map(function (f) { return fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'); })
     .concat(['globalThis.__api = { advanceQueue_, awaitingAdvanceIssue_, tabCounts_, ' +
-      'shapeClaim_, STATUS, ITEM_STATUS, WARRANTY_TYPE, ROLE };'])
+      'shapeClaim_, summaryOf_, STATUS, ITEM_STATUS, WARRANTY_TYPE, ROLE };'])
     .join('\n'),
   sandbox, { filename: 'advance' }
 );
 
-const { advanceQueue_, tabCounts_, shapeClaim_, STATUS, ITEM_STATUS, WARRANTY_TYPE, ROLE } =
-  sandbox.__api;
+const { advanceQueue_, tabCounts_, shapeClaim_, summaryOf_,
+  STATUS, ITEM_STATUS, WARRANTY_TYPE, ROLE } = sandbox.__api;
 const admin = { email: 'admin@oneject.co.id', role: ROLE.ADMIN, isTester: false };
 
 let pass = 0;
@@ -184,6 +184,9 @@ check('and which claim it belongs to, to open it',
 // shaping every claim a second time to count them.
 const byClaim = {};
 ITEMS.forEach(function (i) { (byClaim[i.ClaimID] = byClaim[i.ClaimID] || []).push(i); });
+// The badge is counted from the claim's own columns now, so the fixture puts
+// them there first — which is what every path that touches an item does.
+CLAIMS.forEach(function (c) { Object.assign(c, summaryOf_(byClaim[c.ClaimID] || [])); });
 const shaped = CLAIMS.map(function (c) { return shapeClaim_(c, byClaim[c.ClaimID] || []); });
 
 check('the menu badge counts exactly what the queue lists',

@@ -41,13 +41,25 @@ function session(role) {
  */
 function row(status, itemStatus, owed, warrantyType) {
   const item = { itemId: 'I1', itemStatus: itemStatus || ITEM_STATUS.PENDING };
+  const st = item.itemStatus;
+  // The counts a claim row would be carrying for this one part. The tab rules
+  // read them rather than the item, so a fixture that hand-wrote zeros here
+  // would be testing the rules against a claim that cannot exist.
+  const approvedLike = [ITEM_STATUS.APPROVED, ITEM_STATUS.FORWARDED,
+    ITEM_STATUS.AWAITING, ITEM_STATUS.SHIPPED].indexOf(st) !== -1;
   return {
     claimId: 'C1', status: status, principal: 'Sansin',
     warrantyType: warrantyType || 'Principal Warranty', requesterEmail: OWNER,
     items: [item],
+    itemsLoaded: true,
     summary: {
-      approved: 0, rejected: 0, shipped: 0, advance: 0,
-      pending: item.itemStatus === ITEM_STATUS.PENDING ? 1 : 0,
+      itemCount: 1,
+      approved: approvedLike ? 1 : 0,
+      rejected: st === ITEM_STATUS.REJECTED ? 1 : 0,
+      pending: st === ITEM_STATUS.PENDING ? 1 : 0,
+      shipped: st === ITEM_STATUS.SHIPPED ? 1 : 0,
+      advance: 0,
+      advanceQueue: [ITEM_STATUS.SHIPPED, ITEM_STATUS.REJECTED].indexOf(st) === -1 ? 1 : 0,
       awaitingReturn: owed || 0
     }
   };
