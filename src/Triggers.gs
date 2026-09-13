@@ -126,8 +126,11 @@ function sendDigestNow_(session) {
 
 function dailyMaintenance() {
   const removed = cleanUpExports_();
+  // The copy is taken before the trail is moved, so the day's backup holds the
+  // state that existed before anything was shifted between sheets.
   const backup = backupSpreadsheet_();
-  return { exportsRemoved: removed, backup: backup };
+  const archived = archiveAudit_();
+  return { exportsRemoved: removed, backup: backup, auditArchived: archived };
 }
 
 /** A copy a day. Cheap, and there is no other way back once a sheet is damaged. */

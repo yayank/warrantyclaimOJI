@@ -93,7 +93,11 @@ function api(request) {
   try {
     const session = resolveSession_(req.token, req.simulatedRole);
     const data = route_(session, req.action, req.payload || {});
-    return { ok: true, data: data, session: publicSession_(session) };
+    return {
+      ok: true,
+      data: jsonSafe_(redactForRole_(session, data)),
+      session: publicSession_(session)
+    };
   } catch (err) {
     return {
       ok: false,
@@ -103,6 +107,51 @@ function api(request) {
       current: err && err.stale ? err.current : undefined
     };
   }
+}
+
+/**
+ * The customer side of a warranty, taken back out of whatever is being sent.
+ *
+ * listClaims_ and getClaim_ already strip it, and they have to — the Excel
+ * export is written on the server and never passes this way. This is the second
+ * fence: a screen added next year that returns a claim through some new
+ * endpoint gets the same treatment without anybody having to remember.
+ */
+function redactForRole_(session, value) {
+  if (!session || session.role !== ROLE.PRINCIPAL) return value;
+  if (Array.isArray(value)) return value.map(function (v) { return redactForRole_(session, v); });
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    const out = {};
+    Object.keys(value).forEach(function (k) {
+      if (CUSTOMER_SIDE_FIELDS.indexOf(k) !== -1) return;
+      out[k] = redactForRole_(session, value[k]);
+    });
+    return out;
+  }
+  return value;
+}
+
+/**
+ * The last check before a value crosses to the browser.
+ *
+ * google.script.run accepts primitives, arrays and plain objects and nothing
+ * else: a Date anywhere inside a return value fails the whole call, and the
+ * page is handed null with no error to show. cellValue_ already keeps Dates out
+ * of everything read from a sheet; this covers whatever a future caller builds
+ * in code. NaN and Infinity are not JSON either, and leave as null.
+ */
+function jsonSafe_(value) {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? '' : Utilities.formatDate(value, TZ, "yyyy-MM-dd'T'HH:mm:ss");
+  }
+  if (typeof value === 'number') return isFinite(value) ? value : null;
+  if (Array.isArray(value)) return value.map(jsonSafe_);
+  if (value && typeof value === 'object') {
+    const out = {};
+    Object.keys(value).forEach(function (k) { out[k] = jsonSafe_(value[k]); });
+    return out;
+  }
+  return value;
 }
 
 function publicSession_(session) {
@@ -124,7 +173,10 @@ function route_(session, action, payload) {
       return {
         session: publicSession_(session),
         reference: referenceData_(session),
-        appUrl: setting_(SETTING_KEY.APP_URL, '')
+        appUrl: setting_(SETTING_KEY.APP_URL, ''),
+        // A page opening is a visit. Nothing else moves the marker boundary,
+        // so drawing a list never clears what it is drawing.
+        since: openVisit_(session)
       };
 
     /* claims */
@@ -141,13 +193,19 @@ function route_(session, action, payload) {
     case 'claims.decide': return decideItems_(session, payload);
     case 'claims.availability': return setAvailability_(session, payload);
     case 'claims.forwardOrder': return forwardOrder_(session, payload);
+    case 'claims.fulfilStock': return fulfilFromStock_(session, payload);
     case 'claims.shipped': return markShipped_(session, payload);
     case 'claims.partReturn': return recordPartReturn_(session, payload);
     case 'claims.advanceIssue': return setAdvanceIssue_(session, payload);
+    case 'claims.advanceQueue': return advanceQueue_(session);
     case 'claims.delete': return deleteClaim_(session, payload);
     case 'claims.lookup': return lookupSerial_(session, payload.serialNumber);
+    case 'claims.searchUnits': return searchUnits_(session, payload);
+    case 'claims.unitHistory': return unitHistory_(session, payload.serialNumber);
     case 'claims.attachment': return attachmentData_(session, payload.attachmentId);
     case 'claims.export': return exportClaims_(session, payload);
+    case 'reports.cost': return costReport_(session, payload);
+    case 'reports.costExport': return exportCostReport_(session, payload);
 
     /* master data */
     case 'master.list': return listMaster_(session, payload.kind);
@@ -155,7 +213,14 @@ function route_(session, action, payload) {
     case 'master.units': return listUnits_(session, payload);
     case 'master.importPreview': return previewUnitImport_(session, payload);
     case 'master.import': return importUnits_(session, payload);
+    case 'master.saveUnit': return saveUnit_(session, payload);
+    case 'master.previewUnits': return previewUnitUpdate_(session, payload);
+    case 'master.applyUnits': return applyUnitUpdate_(session, payload);
+    case 'master.unitRequests': return listUnitRequests_(session, payload);
+    case 'master.rejectUnitRequest': return rejectUnitRequest_(session, payload);
     case 'master.unknownPrincipals': return unknownPrincipals_(session);
+    case 'master.searchCustomers': return searchCustomers_(session, payload);
+    case 'master.customer': return customerById_(session, payload.customerId);
 
     /* email templates and archive */
     case 'templates.list': return listTemplates_(session);
@@ -163,7 +228,20 @@ function route_(session, action, payload) {
     case 'templates.restore': return restoreTemplate_(session, payload.code);
     case 'templates.test': return sendTestTemplate_(session, payload.code);
     case 'email.log': return listEmailLog_(session, payload);
+    case 'email.setEnabled': return setEmailEnabled_(session, payload.enabled);
     case 'email.digestNow': return sendDigestNow_(session);
+
+    /* the same move over everything ticked on the claim list */
+    case 'claims.bulkReturn': return returnClaims_(session, payload);
+    case 'claims.bulkForward': return forwardClaims_(session, payload);
+    case 'claims.bulkInternal': return startInternalVerifications_(session, payload);
+
+    case 'visits.seen': return markVisitSeen_(session);
+
+    /* saved filter combinations, per person */
+    case 'views.list': return listViews_(session);
+    case 'views.save': return saveView_(session, payload);
+    case 'views.delete': return deleteView_(session, payload);
 
     /* audit and test mode */
     case 'audit.list': return listAudit_(session, payload);

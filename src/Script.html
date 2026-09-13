@@ -6,19 +6,40 @@ const S = {
   session: null,
   reference: null,
   page: 'claims',
-  tab: 'action',
-  view: 'claim',            // 'claim' | 'item'
-  filters: { search: '', statuses: [], warrantyTypes: [], customerId: '', partId: '',
-    principal: '', from: '', to: '' },
+  tab: 'all',
+  filters: blankFilters(),
+  pick: {},                 // claims ticked on the claim list, by claim id
+  since: '',                // what the "moved" markers are measured against
+
+  views: null,              // saved filter combinations; null until fetched once
+  viewNotice: '',           // why a view that was opened shows nothing
   rows: [],
-  counts: { action: 0 },
-  expanded: {},
+  total: 0,                 // how many the filter matches, not how many are shown
+  counts: { action: 0, advance: 0, fresh: 0 },
+  collapsed: {},            // claims whose parts the reader has folded away
+  group: 'status',          // 'status' | 'customer' — what the list is cut by
   selection: {},
+  advance: null,            // the stock-issue queue, once fetched
+  advanceView: 'awaiting',  // 'awaiting' | 'issued'
   deepLink: window.APP_DEEP_LINK || {},
-  master: { kind: 'users', rows: [] },
+  master: { kind: 'users', rows: [], units: null, unitFilters: null },
   templates: [],
   templateCode: 'DAILY_DIGEST'
 };
+
+/**
+ * The filters with nothing set.
+ *
+ * Applying a saved view replaces the whole object rather than merging into it:
+ * a filter the view does not mention has to come back empty, or opening a view
+ * would quietly keep whatever was on screen before it.
+ */
+function blankFilters() {
+  return {
+    search: '', statuses: [], warrantyTypes: [], customerId: '', customerName: '',
+    partId: '', principal: '', distributorId: '', costBorne: false, from: '', to: ''
+  };
+}
 
 const STATUS = {
   DRAFT: 'Draft', SUBMITTED: 'Submitted', RETURNED: 'Returned to Requester',
@@ -32,6 +53,12 @@ const ITEM = {
 const WARRANTY = {
   PRINCIPAL: 'Principal Warranty', OUT: 'Out of Principal Warranty',
   MANUAL: 'Manual Verification Required', INTERNAL: 'Internal Warranty'
+};
+// The other tier: what we still owe whoever bought the unit. A different
+// question from the one above, and frequently a different answer.
+const OUR_WARRANTY = {
+  IN: 'Under Our Warranty', OUT: 'Out of Our Warranty',
+  MANUAL: 'Manual Verification Required'
 };
 const ROLE = {
   REQUESTER: 'Requester', PRODUCTION: 'Production',
@@ -82,13 +109,91 @@ ITEM_CLASS[ITEM.FORWARDED] = 'p-rev';
 ITEM_CLASS[ITEM.AWAITING] = 'p-wait';
 ITEM_CLASS[ITEM.SHIPPED] = 'p-ok';
 
+/**
+ * "Returned to Requester" is how the workflow describes the move. To the
+ * requester holding it, the useful word is what has become of their claim.
+ * The stored status is untouched — this is only what the screen says.
+ */
+function statusLabel(status) {
+  if (status === STATUS.RETURNED && !seesInternals()) return 'Revised!';
+  return status;
+}
+
 function statusPill(status) {
-  return '<span class="pill ' + (STATUS_CLASS[status] || 'p-draft') + '">' + h(status) + '</span>';
+  return '<span class="pill ' + (STATUS_CLASS[status] || 'p-draft') + '">' +
+    h(statusLabel(status)) + '</span>';
 }
 function itemPill(status) {
   return '<span class="pill ' + (ITEM_CLASS[status] || 'p-draft') + '">' + h(status) + '</span>';
 }
+/**
+ * Who is shown how the portal works.
+ *
+ * Which kind of warranty a unit carries, who overrode it and why, who was
+ * notified and when — all of that is the administrator's business, and the
+ * principal's where it concerns their own units. A requester in a hospital
+ * asked for a part: to them the machine is under warranty or it is not, and
+ * the rest is noise they cannot act on.
+ */
+function seesInternals() {
+  return S.session.role !== ROLE.REQUESTER && S.session.role !== ROLE.PRODUCTION;
+}
+
+/**
+ * Our side of the business, which a principal is not part of.
+ *
+ * seesInternals() is the wrong test for this: a principal is very much an
+ * internal reader of their own claims — the warranty working, the history, the
+ * decisions — but our warranty to the buyer and who sold the machine are our
+ * position in a negotiation they are the other party to. The server does not
+ * send them those fields at all; this keeps the page from drawing a space for
+ * something that will never arrive.
+ */
+function seesOurSide() {
+  return seesInternals() && S.session.role !== ROLE.PRINCIPAL;
+}
+
+/** The advance-issue markers belong to whoever owns the stock. */
+function seesAdvanceIssue() {
+  return S.session.role === ROLE.ADMIN;
+}
+
+/**
+ * What we still owe the buyer, and whether that is costing us.
+ *
+ * Only for the people inside the company: to a principal it is none of their
+ * business, and the server does not send it to them at all; to a field
+ * engineer it is an accounting question they cannot act on at the machine.
+ */
+function ourWarrantyPill(c) {
+  if (!seesOurSide()) return '';
+  const out = [];
+  if (c.customerWarrantyType === OUR_WARRANTY.IN) {
+    out.push('<span class="pill flat p-ok">Ours to ' +
+      (c.customerWarrantyExpiry ? monthLabel(c.customerWarrantyExpiry) : 'cover') + '</span>');
+  } else if (c.customerWarrantyType === OUR_WARRANTY.OUT) {
+    out.push('<span class="pill flat p-no">Our cover ended</span>');
+  } else if (c.customerWarrantyType) {
+    out.push('<span class="pill flat p-wait">Our cover unchecked</span>');
+  }
+  // The quadrant nobody could see before: the principal has stopped and we
+  // have not, so this part is ours to pay for.
+  if (c.costBorne) out.push('<span class="pill flat p-cost">We absorb</span>');
+  return out.join('');
+}
+
 function warrantyPill(type) {
+  // The field roles do not act on the difference between principal and
+  // internal cover, but they do need to know when there is no cover at all.
+  if (!seesInternals()) {
+    if (type === WARRANTY.OUT) {
+      return '<span class="pill flat p-no">Out of warranty</span>';
+    }
+    if (type === WARRANTY.MANUAL) {
+      return '<span class="pill flat p-wait">Being checked</span>';
+    }
+    return '<span class="pill flat p-ok">Warranty</span>';
+  }
   const cls = type === WARRANTY.PRINCIPAL ? 'p-ok'
     : type === WARRANTY.OUT ? 'p-no'
       : type === WARRANTY.INTERNAL ? 'p-rev' : 'p-wait';
@@ -104,8 +209,15 @@ function summaryText(s) {
   if (s.approved) bits.push(s.approved + ' approved');
   if (s.rejected) bits.push(s.rejected + ' rejected');
   if (s.pending) bits.push(s.pending + ' pending');
-  if (s.advance) bits.push(s.advance + ' issued in advance');
+  if (s.advance && seesAdvanceIssue()) bits.push(s.advance + ' issued in advance');
   return bits.join(' · ');
+}
+
+/** A replacement went out; the faulty part has not come back yet. */
+function returnBadge(awaiting) {
+  if (!awaiting) return '';
+  return '<span class="pill p-sub" title="The faulty part has not been returned">' +
+    '\u21a9 to return</span>';
 }
 
 function toast(message, kind) {
@@ -118,10 +230,46 @@ function toast(message, kind) {
 
 /* ================================================================= api */
 
-function api(action, payload) {
+/**
+ * Whether the portal is talking to the spreadsheet.
+ *
+ * Every read and every write in the application goes through api(), so this is
+ * the one place that knows. A round trip to Apps Script takes seconds — long
+ * enough that without something moving on screen the page looks stuck, and the
+ * second click that follows is a duplicate request nobody wanted.
+ *
+ * It counts rather than flags: uploads and lookups overlap, and the bar has to
+ * stay up until the last of them is done.
+ */
+let NET_BUSY = 0;
+
+function netStart() {
+  NET_BUSY++;
+  const bar = el('netbar');
+  if (bar) bar.hidden = false;
+  document.body.setAttribute('aria-busy', 'true');
+}
+
+function netEnd() {
+  NET_BUSY = Math.max(0, NET_BUSY - 1);
+  if (NET_BUSY) return;
+  const bar = el('netbar');
+  if (bar) bar.hidden = true;
+  document.body.removeAttribute('aria-busy');
+}
+
+/**
+ * `quiet` keeps a call out of the page-wide activity bar. Only the typeahead
+ * uses it: a search fires every few keystrokes, and a bar blinking at the top
+ * of the screen while somebody types reports nothing they cannot already see.
+ * The box says "Searching…" in its own list instead.
+ */
+function api(action, payload, quiet) {
+  if (!quiet) netStart();
   return new Promise(function (resolve, reject) {
     google.script.run
       .withSuccessHandler(function (res) {
+        if (!quiet) netEnd();
         if (!res || res.ok) {
           if (res && res.session) S.session = res.session;
           resolve(res ? res.data : null);
@@ -136,7 +284,10 @@ function api(action, payload) {
         err.current = res.current;
         reject(err);
       })
-      .withFailureHandler(function (e) { reject(new Error(e && e.message ? e.message : String(e))); })
+      .withFailureHandler(function (e) {
+        if (!quiet) netEnd();
+        reject(new Error(e && e.message ? e.message : String(e)));
+      })
       .api({
         token: S.token,
         simulatedRole: S.session && S.session.isTester ? S.session.simulatedRole : null,
@@ -169,6 +320,9 @@ function startWithBuiltInIdentity() {
   api('session.bootstrap', {}).then(function (data) {
     S.session = data.session;
     S.reference = data.reference;
+    // What the "new" markers are measured against, decided by the server when
+    // this page opened. Kept only to say so on screen.
+    S.since = data.since || '';
     el('boot').hidden = true;
     el('app').hidden = false;
     applyDeepLink();
@@ -211,6 +365,9 @@ function signIn(credential) {
   api('session.bootstrap', {}).then(function (data) {
     S.session = data.session;
     S.reference = data.reference;
+    // What the "new" markers are measured against, decided by the server when
+    // this page opened. Kept only to say so on screen.
+    S.since = data.since || '';
     el('boot').hidden = true;
     el('app').hidden = false;
     applyDeepLink();
@@ -242,7 +399,6 @@ function applyDeepLink() {
   else if (link.page === 'orders') { S.page = 'orders'; }
   else if (link.page === 'claims') { S.page = 'claims'; }
   if (S.session.role === ROLE.PRINCIPAL && S.page === 'claims') S.page = 'batch';
-  if (S.session.role === ROLE.ADMIN) S.view = 'item';
 }
 
 /* ============================================================== chrome */
@@ -258,15 +414,22 @@ function renderChrome() {
   }
   if (s.role === ROLE.PRINCIPAL) pages.unshift({ id: 'batch', label: 'Batches' });
   if (s.role === ROLE.ADMIN) {
+    // The count is the point of the menu item: the parts waiting to go out are
+    // not visible from anywhere else, and a queue nobody is reminded of is a
+    // queue that grows.
+    pages.push({ id: 'advance', label: 'Advance Issue', count: S.counts.advance });
     pages.push({ id: 'orders', label: 'Orders' });
+    pages.push({ id: 'cost', label: 'Cost Borne' });
     pages.push({ id: 'master', label: 'Master Data' });
     pages.push({ id: 'templates', label: 'Email Templates' });
+    pages.push({ id: 'email', label: 'Email Log' });
     pages.push({ id: 'audit', label: 'Audit Log' });
   }
 
   el('nav').innerHTML = pages.map(function (p) {
     return '<button type="button" data-page="' + p.id + '"' +
-      (S.page === p.id ? ' class="on"' : '') + '>' + h(p.label) + '</button>';
+      (S.page === p.id ? ' class="on"' : '') + '>' + h(p.label) +
+      (p.count ? ' <span class="count">' + p.count + '</span>' : '') + '</button>';
   }).join('');
   el('nav').querySelectorAll('button').forEach(function (b) {
     b.addEventListener('click', function () { navigate(b.dataset.page); });
@@ -297,7 +460,6 @@ function renderTesterBar() {
   el('simRole').addEventListener('change', function () {
     S.session.simulatedRole = this.value;
     S.session.role = this.value;
-    S.view = this.value === ROLE.ADMIN ? 'item' : 'claim';
     S.page = this.value === ROLE.PRINCIPAL ? 'batch' : 'claims';
     renderChrome();
     navigate(S.page);
@@ -318,8 +480,11 @@ function navigate(page) {
   if (page === 'claims') return loadClaims();
   if (page === 'batch') return loadBatches();
   if (page === 'orders') return loadOrders();
+  if (page === 'advance') return loadAdvance();
+  if (page === 'cost') return loadCostReport();
   if (page === 'master') return loadMaster(S.master.kind);
   if (page === 'templates') return loadTemplates();
+  if (page === 'email') return loadEmailLog();
   if (page === 'audit') return loadAudit();
 }
 
@@ -331,12 +496,37 @@ function skeleton(rows) {
 
 /* ============================================================== claims */
 
-function loadClaims() {
-  el('view').innerHTML = skeleton(6);
-  const filter = Object.assign({ tab: S.tab }, S.filters);
+const CLAIM_PAGE = 50;
+
+/**
+ * `append` asks for the next page and keeps what is already on screen. Anything
+ * that changes what is being looked at — a tab, a filter, the search — calls
+ * this without it and starts again from the top.
+ */
+function loadClaims(append) {
+  if (!append) el('view').innerHTML = skeleton(6);
+  // Once per visit, and never in the way: the list does not wait for it, and a
+  // toolbar without the control until it lands is better than a slower list.
+  if (S.views === null) {
+    S.views = [];
+    loadViews().then(function (views) { if (views.length) renderClaims(); });
+  }
+  // Only the page's parts: the spare-part rows under a claim are drawn for
+  // what is on screen, and shaping the other four hundred claims' parts to
+  // throw them away is work nobody sees.
+  const filter = Object.assign({ tab: S.tab, limit: CLAIM_PAGE, items: 'page' }, S.filters);
+  // The name is what the box and the chip read back; only the id filters.
+  delete filter.customerName;
+  filter.offset = append ? S.rows.length : 0;
+  // A tick belongs to the list it was made on. Changing tab, filter or search
+  // draws a different list, and carrying the ticks across would act on claims
+  // that are no longer on screen.
+  if (!append) S.pick = {};
   api('claims.list', filter).then(function (data) {
-    S.rows = data.rows;
+    S.rows = append ? S.rows.concat(data.rows) : data.rows;
+    S.total = data.total;
     S.counts = data.counts;
+    renderChrome();            // the Advance Issue badge follows this count
     renderClaims();
     const link = S.deepLink;
     if (link && link.page === 'claim' && link.id) {
@@ -354,32 +544,70 @@ function renderClaims() {
     '<div class="tabs">',
     tabButton('action', 'Needs Action', S.counts.action),
     tabButton('progress', 'In Progress'),
+    // The two tracks a claim can be on, each a queue of its own. They are cuts
+    // through In Progress rather than pieces taken out of it: everything under
+    // way is still in one list, and these say which road it is on. Once there
+    // are a few hundred claims, that is the difference between a queue and a
+    // pile.
+    s.role === ROLE.ADMIN ? tabButton('principal', 'Warranty Principal') : '',
+    s.role === ROLE.ADMIN ? tabButton('internal', 'Internal Verification') : '',
     tabButton('completed', 'Completed'),
+    tabButton('closed', 'Closed'),
     tabButton('all', 'All'),
     '</div>',
     '<div class="toolbar">',
-      '<div class="seg">',
-        '<button type="button" data-view="claim"' + (S.view === 'claim' ? ' class="on"' : '') + '>By claim</button>',
-        '<button type="button" data-view="item"' + (S.view === 'item' ? ' class="on"' : '') + '>By spare part</button>',
-      '</div>',
       '<input type="text" id="q" class="grow" placeholder="Search claim ID, reference, serial number, customer…" value="' + h(S.filters.search) + '">',
-      selectFilter('statusFilter', 'All statuses', S.reference.statuses, S.filters.statuses[0] || ''),
-      selectFilter('warrantyFilter', 'All warranties', S.reference.warrantyTypes, S.filters.warrantyTypes[0] || ''),
+      selectFilter('statusFilter', 'All statuses', S.reference.statuses,
+        S.filters.statuses[0] || '', statusLabel),
+      S.session.role === ROLE.ADMIN
+        ? selectFilter('warrantyFilter', 'All warranties', S.reference.warrantyTypes,
+          S.filters.warrantyTypes[0] || '')
+        : '',
       customerFilter(),
       principalFilter(),
+      distributorFilter(),
+      costBorneToggle(),
+      groupFilter(),
+      viewFilter(),
+      '<button class="btn" id="manageViews" type="button">Save view</button>',
       '<span class="spacer"></span>',
       s.role === ROLE.ADMIN ? '<button class="btn" id="digestNow" type="button">Send Digest Now</button>' : '',
       '<button class="btn" id="doExport" type="button">Export to Excel</button>',
       canCreate ? '<button class="btn pri" id="newClaim" type="button">New Claim</button>' : '',
     '</div>',
     activeChips(),
+    viewNotice(),
+    freshLine(),
+    claimBar(),
     S.rows.length
-      ? (S.view === 'claim' ? claimTable() : itemTable())
+      ? claimTable() + moreBar()
       : '<div class="tablewrap"><div class="empty">Nothing here yet.</div></div>'
   ].join('');
 
   el('view').innerHTML = html;
   wireClaimsToolbar();
+  renderClaimBar();
+}
+
+/**
+ * How much of the filtered set is on screen, and the way to more of it.
+ *
+ * The block headings count the rows below them, which is what is shown rather
+ * than what exists — so the total is stated plainly here, or a heading reading
+ * "Closed 50" out of four hundred would pass for the whole story.
+ */
+function moreBar() {
+  const shown = S.rows.length;
+  const total = S.total || shown;
+  const n = total.toLocaleString();
+  if (shown >= total) {
+    return '<div class="morebar"><span class="dim">' + n + ' claim' +
+      (total === 1 ? '' : 's') + '</span></div>';
+  }
+  return '<div class="morebar"><span class="dim">Showing ' + shown.toLocaleString() +
+    ' of ' + n + ' claims</span>' +
+    '<button class="btn" id="loadMore" type="button">Load ' +
+    Math.min(CLAIM_PAGE, total - shown) + ' more</button></div>';
 }
 
 function tabButton(id, label, count) {
@@ -387,21 +615,523 @@ function tabButton(id, label, count) {
     h(label) + (count ? ' <span class="count">' + count + '</span>' : '') + '</button>';
 }
 
-function selectFilter(id, blank, options, value) {
+/**
+ * The value sent to the server is always the stored one; `label` only changes
+ * what the reader sees, so a filter never stops matching what it filters.
+ */
+function selectFilter(id, blank, options, value, label) {
+  const shown = label || function (o) { return o; };
   return '<select id="' + id + '" style="width:auto;min-width:150px">' +
     '<option value="">' + h(blank) + '</option>' +
     options.map(function (o) {
-      return '<option value="' + h(o) + '"' + (o === value ? ' selected' : '') + '>' + h(o) + '</option>';
+      return '<option value="' + h(o) + '"' + (o === value ? ' selected' : '') + '>' +
+        h(shown(o)) + '</option>';
     }).join('') + '</select>';
 }
 
+/**
+ * There are 1.386 customers. A <select> at that size can only be scrolled, so
+ * this is the same searchable box the claim form uses, with "All customers" as
+ * a real option rather than a blank one — picking it is how the filter is
+ * cleared, and it is what the box reads when nothing is filtered.
+ */
+/** Asks the server for the customers matching what is being typed. */
+function searchCustomers(query) {
+  return api('master.searchCustomers', { query: query, limit: COMBO_SHOWN }, true)
+    .then(function (res) {
+      return { options: (res && res.options) || [], total: (res && res.total) || 0 };
+    });
+}
+
+function searchUnits(query) {
+  return api('claims.searchUnits', { query: query, limit: COMBO_SHOWN }, true)
+    .then(function (res) {
+      return { options: (res && res.options) || [], total: (res && res.total) || 0 };
+    });
+}
+
+/**
+ * The customer filter. "All customers" is prepended to every answer rather than
+ * living on the server's list: it is not a customer, and picking it is how the
+ * filter is cleared.
+ */
 function customerFilter() {
-  return '<select id="customerFilter" style="width:auto;max-width:220px">' +
-    '<option value="">All customers</option>' +
-    S.reference.customers.map(function (c) {
-      return '<option value="' + h(c.id) + '"' +
-        (S.filters.customerId === c.id ? ' selected' : '') + '>' + h(c.name) + '</option>';
-    }).join('') + '</select>';
+  const all = { value: '', label: 'All customers' };
+  return '<div style="width:220px;flex:none">' + comboField({
+    id: 'customerFilter',
+    value: S.filters.customerId || '',
+    text: S.filters.customerName || all.label,
+    placeholder: all.label,
+    known: S.filters.customerId
+      ? (function (m) { m[S.filters.customerId] = S.filters.customerName; return m; })({})
+      : {},
+    always: [all],
+    idleText: 'Type to search customers',
+    remote: searchCustomers,
+    emptyHtml: function (query) {
+      return 'No customer matches “' + h(query) + '”.';
+    },
+    onPick: function (v, option) {
+      S.filters.customerId = v;
+      S.filters.customerName = v ? option.label : '';
+      loadClaims();
+    }
+  }) + '</div>';
+}
+
+/* ================================================ what moved while away */
+
+/*
+ * The question every morning is what happened overnight, and answering it used
+ * to mean reading the whole list and remembering yesterday's. A claim the
+ * reader has not seen since it last changed carries a marker, and the line
+ * below the filters says how many there are — including the ones that did not
+ * fit on this page, which is the half a per-row marker cannot tell you.
+ *
+ * Two rules make it useful rather than noise, and both live on the server:
+ * the boundary moves when a page opens, not when a list is drawn, and your own
+ * changes are never marked. See Visits.gs.
+ */
+
+function freshLine() {
+  const n = S.counts.fresh;
+  if (!n) return '';
+  return '<div class="toolbar"><span class="tiny">' +
+    '<b>' + n + '</b> claim' + (n === 1 ? '' : 's') + ' moved since you were last here' +
+    (S.since ? ', ' + h(fmtDateTime(S.since)) : '') + '.</span>' +
+    '<button class="btn sm" id="seenAll" type="button">Mark as seen</button></div>';
+}
+
+function markAllSeen() {
+  api('visits.seen', {}).then(function (r) {
+    S.since = (r && r.since) || S.since;
+    loadClaims();
+  }).catch(fail);
+}
+
+/* ============================================ acting on several at once */
+
+/*
+ * The Orders and Advance Issue screens have had a selection bar for a while;
+ * the claim list — the one screen where somebody actually looks at many claims
+ * at once — had none, so a morning's forwarding was done one panel at a time.
+ *
+ * What the bar offers follows the rule the panel already follows: **one status,
+ * one step**. A selection spanning two statuses has no single right answer, so
+ * it offers nothing and says why, exactly as Orders does when a selection
+ * spans the principal and internal lists.
+ */
+
+/** Only the roles that have a step to take see a tick box at all. */
+function canPickClaims() {
+  return S.session.role === ROLE.ADMIN || S.session.role === ROLE.PRINCIPAL;
+}
+
+function pickedClaims() {
+  return S.rows.filter(function (c) { return S.pick[c.claimId]; });
+}
+
+/** Parts still open to a decision, across the claims given. */
+function openPartsOf(claims) {
+  const ids = [];
+  claims.forEach(function (c) {
+    (c.items || []).forEach(function (i) {
+      if ([ITEM.FORWARDED, ITEM.AWAITING, ITEM.SHIPPED].indexOf(i.itemStatus) === -1) {
+        ids.push(i.itemId);
+      }
+    });
+  });
+  return ids;
+}
+
+function distinct(list) {
+  return list.filter(function (v, i, all) { return all.indexOf(v) === i; });
+}
+
+/**
+ * What may be done to these claims, for this role.
+ *
+ * Returns the actions to offer and, when there are none, the reason in words —
+ * a bar that simply goes blank on a mixed selection reads as a broken screen.
+ */
+function claimBulkOffer(role, claims) {
+  if (!claims.length) return { actions: [], note: '' };
+
+  const statuses = distinct(claims.map(function (c) { return c.status; }));
+  if (statuses.length > 1) {
+    return { actions: [], note: 'Those claims are at ' + statuses.length +
+      ' different statuses, and each status has its own next step. Pick one status at a time.' };
+  }
+  const status = statuses[0];
+  const parts = openPartsOf(claims);
+
+  if (role === ROLE.ADMIN) {
+    if (status === STATUS.SUBMITTED) {
+      // Returning is the same move whichever warranty the unit is under, so it
+      // is offered either way; only the road onwards depends on the track.
+      const actions = ['return'];
+      const tracks = distinct(claims.map(function (c) {
+        return c.warrantyType === WARRANTY.PRINCIPAL ? 'principal' : 'internal';
+      }));
+      if (tracks.length > 1) {
+        return { actions: actions, note: 'Some of these are under principal warranty and some ' +
+          'are not, so there is no one road onwards. Returning them is the same move either way.' };
+      }
+      actions.push(tracks[0] === 'principal' ? 'forward' : 'internal');
+      return { actions: actions, note: '' };
+    }
+    if (status === STATUS.INTERNAL) {
+      if (!parts.length) {
+        return { actions: [], note: 'Every part on those claims has already been ordered.' };
+      }
+      return { actions: ['approve', 'reject'], note: '' };
+    }
+    return { actions: [], note: 'Nothing here moves a claim at ' + statusLabel(status) +
+      ' — that step is taken elsewhere, or is the requester\'s to take.' };
+  }
+
+  if (role === ROLE.PRINCIPAL) {
+    if (!parts.length) {
+      return { actions: [], note: 'Every part on those claims has already been decided and ordered.' };
+    }
+    return { actions: ['approve', 'reject'], note: '' };
+  }
+
+  return { actions: [], note: '' };
+}
+
+function claimBar() {
+  if (!canPickClaims()) return '';
+  return '<div id="claimbar"></div>';
+}
+
+function renderClaimBar() {
+  const host = el('claimbar');
+  if (!host) return;
+  const claims = pickedClaims();
+  if (!claims.length) { host.innerHTML = ''; return; }
+
+  const offer = claimBulkOffer(S.session.role, claims);
+  const label = {
+    return: '<button class="btn sm no" data-bulk="return" type="button">Return to Requester…</button>',
+    forward: '<button class="btn sm pri" data-bulk="forward" type="button">Forward to Principal…</button>',
+    internal: '<button class="btn sm pri" data-bulk="internal" type="button">Process Internal Warranty</button>',
+    approve: '<button class="btn sm ok" data-bulk="approve" type="button">Approve parts…</button>',
+    reject: '<button class="btn sm no" data-bulk="reject" type="button">Reject parts…</button>'
+  };
+
+  host.innerHTML = '<div class="selbar"><b>' + claims.length + ' claim' +
+    (claims.length === 1 ? '' : 's') + ' selected</b>' +
+    '<button class="btn sm" data-bulk="clear" type="button">Clear</button>' +
+    '<span class="spacer"></span>' +
+    (offer.note ? '<span class="tiny">' + h(offer.note) + '</span>' : '') +
+    offer.actions.map(function (a) { return label[a]; }).join('') + '</div>';
+
+  host.querySelectorAll('[data-bulk]').forEach(function (b) {
+    b.addEventListener('click', function () { runClaimBulk(b.dataset.bulk, claims); });
+  });
+}
+
+function runClaimBulk(action, claims) {
+  if (action === 'clear') { S.pick = {}; renderClaims(); return; }
+  if (action === 'approve' || action === 'reject') {
+    decideModal(openPartsOf(claims), action, function () { S.pick = {}; loadClaims(); });
+    return;
+  }
+  if (action === 'return') { promptBulkReturn(claims); return; }
+  if (action === 'forward') { promptBulkForward(claims); return; }
+  if (action === 'internal') { promptBulkInternal(claims); return; }
+}
+
+/** What a claim needs to be sent back to the server as part of a batch. */
+function bulkTarget(c) {
+  return { claimId: c.claimId, rowVersion: c.rowVersion };
+}
+
+/**
+ * Says what happened when only part of a batch went through.
+ *
+ * The ones that worked stay worked, so the message has to name the ones that
+ * did not — a toast reading "12 claims returned" over a batch of fifteen is
+ * how three claims go missing.
+ */
+function reportBulk(result, verb) {
+  const done = (result && result.done) || [];
+  const failed = (result && result.failed) || [];
+  if (!failed.length) {
+    toast(done.length + ' claim' + (done.length === 1 ? '' : 's') + ' ' + verb + '.', 'ok');
+    return;
+  }
+  toast(done.length + ' of ' + (done.length + failed.length) + ' ' + verb + '. ' +
+    failed.map(function (f) { return f.claimId + ' — ' + f.error; }).join('; '),
+    done.length ? 'err' : 'err');
+}
+
+function promptBulkReturn(claims) {
+  openModal({
+    title: 'Return ' + claims.length + ' claim' + (claims.length === 1 ? '' : 's'),
+    size: 'narrow',
+    body: '<p class="tiny">' + claims.map(function (c) {
+        return '<span class="mono">' + h(c.claimId) + '</span>';
+      }).join(' · ') + '</p>' +
+      '<label class="field"><span>Reason <b class="req">*</b></span>' +
+      '<textarea id="reason" placeholder="What do the requesters need to correct?"></textarea></label>' +
+      '<p class="tiny">The same reason goes to every one of them, each with a link back ' +
+        'to its own claim.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Return claims', primary: true, onClick: function (close) {
+        const reason = el('reason').value.trim();
+        if (!reason) { toast('Please give a reason.', 'err'); return; }
+        api('claims.bulkReturn', { claims: claims.map(bulkTarget), reason: reason })
+          .then(function (r) {
+            close(); S.pick = {}; reportBulk(r, 'returned'); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/**
+ * A work order number belongs to one claim, so a batch asks for one apiece
+ * rather than putting the same reference on all of them. The ones already
+ * carrying a number arrive filled in.
+ */
+function promptBulkForward(claims) {
+  openModal({
+    title: 'Forward ' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') +
+      ' to the principal',
+    body: claims.map(function (c) {
+        return '<label class="field"><span><span class="mono">' + h(c.claimId) + '</span> · ' +
+          h(c.customerName) + ' · <span class="mono">' + h(c.serialNumber) + '</span></span>' +
+          '<input type="text" data-wo="' + h(c.claimId) + '" value="' + h(c.workOrderNo || '') +
+          '" placeholder="Work order number"></label>';
+      }).join('') +
+      '<p class="tiny">The principals see these immediately. The notification goes out with the ' +
+        'daily digest at 17:00 WIB, or straight away using “Send Digest Now”.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Forward', primary: true, onClick: function (close) {
+        const targets = [];
+        let missing = 0;
+        claims.forEach(function (c) {
+          const box = el('modalHost').querySelector('[data-wo="' + c.claimId + '"]');
+          const wo = box ? box.value.trim() : '';
+          if (!wo) { missing++; return; }
+          targets.push({ claimId: c.claimId, rowVersion: c.rowVersion, workOrderNo: wo });
+        });
+        if (missing) {
+          toast(missing + ' claim' + (missing === 1 ? ' has' : 's have') +
+            ' no work order number yet.', 'err');
+          return;
+        }
+        api('claims.bulkForward', { claims: targets })
+          .then(function (r) {
+            close(); S.pick = {}; reportBulk(r, 'forwarded'); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+function promptBulkInternal(claims) {
+  openModal({
+    title: 'Process ' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') +
+      ' as internal warranty',
+    size: 'narrow',
+    body: '<p class="tiny">' + claims.map(function (c) {
+        return '<span class="mono">' + h(c.claimId) + '</span>';
+      }).join(' · ') + '</p>' +
+      '<p>These units are outside principal warranty, so the principal supplies nothing. ' +
+        'They move to internal verification, where the parts are decided here.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Move to internal verification', primary: true, onClick: function (close) {
+        api('claims.bulkInternal', { claims: claims.map(bulkTarget) })
+          .then(function (r) {
+            close(); S.pick = {}; reportBulk(r, 'moved to internal verification'); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/* ======================================================== saved views */
+
+/*
+ * The same three filters, every morning. A view is that combination under a
+ * name: which tab, how the list is cut, and the filters — but never the search
+ * box, which is a question asked once rather than a way of working.
+ *
+ * Nothing remembers which view is "selected". Whether one is showing is worked
+ * out by comparing what is on screen with what was saved, so changing a filter
+ * lets go of the view by itself and no handler has to remember to say so.
+ */
+
+const VIEW_FIELDS = ['statuses', 'warrantyTypes', 'customerId', 'principal',
+  'distributorId', 'costBorne', 'from', 'to'];
+
+function sameFilterValue(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (a || []).slice().sort().join('\u0000') === (b || []).slice().sort().join('\u0000');
+  }
+  return String(a || '') === String(b || '');
+}
+
+/** Whether the screen is showing exactly what this view saved. */
+function viewIsShowing(view) {
+  if (!view) return false;
+  if (view.tab !== S.tab) return false;
+  if ((view.group || 'status') !== S.group) return false;
+  return VIEW_FIELDS.every(function (key) {
+    return sameFilterValue((view.filters || {})[key], S.filters[key]);
+  });
+}
+
+function activeViewName() {
+  const on = (S.views || []).filter(viewIsShowing)[0];
+  return on ? on.name : '';
+}
+
+/** What would be stored if the current screen were saved. */
+function currentView(name) {
+  const filters = {};
+  VIEW_FIELDS.forEach(function (key) { filters[key] = S.filters[key]; });
+  // Kept beside the id so a view can still name its hospital on screen without
+  // asking the server what the id means.
+  filters.customerName = S.filters.customerName;
+  return { name: name, tab: S.tab, group: S.group, filters: filters };
+}
+
+/**
+ * A view kept for months can name a hospital that has since been switched off.
+ * It still opens — it just has to say why it is empty, rather than looking like
+ * a portal with nothing in it.
+ */
+function viewCustomerGone(filters, option) {
+  return !!(filters && filters.customerId) && !option;
+}
+
+function loadViews() {
+  return api('views.list', {}, true).then(function (r) {
+    S.views = (r && r.views) || [];
+    return S.views;
+  }).catch(function () {
+    // A preset list that will not load is not a reason to lose the claim list.
+    S.views = [];
+    return S.views;
+  });
+}
+
+function viewFilter() {
+  if (!S.views || !S.views.length) return '';
+  const on = activeViewName();
+  return '<select id="savedView" style="width:auto;max-width:190px">' +
+    '<option value=""' + (on ? '' : ' selected') + '>' +
+      (on ? 'Saved views…' : 'Saved views') + '</option>' +
+    S.views.map(function (v) {
+      return '<option value="' + h(v.name) + '"' + (v.name === on ? ' selected' : '') + '>' +
+        h(v.name) + '</option>';
+    }).join('') +
+    '</select>';
+}
+
+function applyView(name) {
+  const view = (S.views || []).filter(function (v) { return v.name === name; })[0];
+  if (!view) return;
+
+  S.tab = view.tab || 'all';
+  S.group = view.group || 'status';
+  S.filters = Object.assign(blankFilters(), view.filters || {});
+  S.viewNotice = '';
+  S.collapsed = {};
+
+  if (!S.filters.customerId) { loadClaims(); return; }
+
+  api('master.customer', { customerId: S.filters.customerId }, true)
+    .then(function (r) {
+      const option = r && r.option;
+      if (viewCustomerGone(S.filters, option)) {
+        S.viewNotice = (S.filters.customerName || S.filters.customerId) +
+          ' is no longer on the customer list, so “' + view.name +
+          '” has nothing to show. The rest of the view is set; clear the customer ' +
+          'to see it.';
+      } else if (option) {
+        // The name may have been corrected since the view was saved.
+        S.filters.customerName = option.label;
+      }
+    })
+    .catch(function () {})
+    .then(function () { loadClaims(); });
+}
+
+function viewNotice() {
+  if (!S.viewNotice) return '';
+  return '<div class="toolbar"><div class="notice grow">' + h(S.viewNotice) +
+    '<button class="btn sm" id="dropViewCustomer" type="button" ' +
+    'style="margin-left:10px">Clear the customer</button></div></div>';
+}
+
+/** Saving and tidying, in one place: the list is short and so is the form. */
+function openViewManager() {
+  const current = activeViewName();
+  openModal({
+    title: 'Saved views',
+    size: 'narrow',
+    body: '<label class="field"><span>Name this view</span>' +
+        '<input type="text" id="viewName" maxlength="60" value="' + h(current) + '" ' +
+        'placeholder="Sansin, waiting on me"></label>' +
+      '<p class="tiny">Saves the tab, the grouping and the filters below it. ' +
+        'The search box is not saved — it is a question you ask once.</p>' +
+      '<div id="viewList"></div>',
+    actions: [
+      { label: 'Close', close: true },
+      { label: 'Save', primary: true, onClick: function (close) {
+        const name = el('viewName').value.trim();
+        if (!name) { toast('Give the view a name.', 'err'); return; }
+        api('views.save', currentView(name)).then(function (r) {
+          S.views = r.views;
+          close();
+          toast('Saved “' + name + '”.', 'ok');
+          renderClaims();
+        }).catch(fail);
+      } }
+    ],
+    onOpen: function () { renderViewList(); }
+  });
+}
+
+function renderViewList() {
+  const host = el('viewList');
+  if (!host) return;
+  const views = S.views || [];
+  host.innerHTML = views.length
+    ? '<p class="tiny" style="margin-bottom:4px">Saved already</p>' +
+      views.map(function (v) {
+        return '<div class="chip" style="margin:0 6px 6px 0">' + h(v.name) +
+          '<button type="button" data-drop="' + h(v.name) + '" ' +
+          'aria-label="Delete this view">✕</button></div>';
+      }).join('')
+    : '<p class="tiny">Nothing saved yet.</p>';
+
+  host.querySelectorAll('[data-drop]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      api('views.delete', { name: b.dataset.drop }).then(function (r) {
+        S.views = r.views;
+        renderViewList();
+        renderClaims();
+      }).catch(fail);
+    });
+  });
+}
+
+/** What the list is cut by. The blocks are the same shape either way. */
+function groupFilter() {
+  return '<select id="groupBy" style="width:auto;min-width:150px">' +
+    '<option value="status"' + (S.group === 'status' ? ' selected' : '') + '>Group by status</option>' +
+    '<option value="customer"' + (S.group === 'customer' ? ' selected' : '') + '>Group by customer</option>' +
+    '<option value="none"' + (S.group === 'none' ? ' selected' : '') + '>No grouping</option>' +
+    '</select>';
 }
 
 /** Only an administrator sees more than one principal, so only they can filter. */
@@ -417,19 +1147,49 @@ function principalFilter() {
     }).join('') + '</select>';
 }
 
+/** Which distributor sold the machine. Ours to ask; not a principal's. */
+function distributorFilter() {
+  const list = (S.reference.distributors || []);
+  if (S.session.role !== ROLE.ADMIN || !list.length) return '';
+  return '<select id="distributorFilter"><option value="">All distributors</option>' +
+    list.map(function (d) {
+      return '<option value="' + h(d.id) + '"' +
+        (S.filters.distributorId === d.id ? ' selected' : '') + '>' + h(d.name) + '</option>';
+    }).join('') + '</select>';
+}
+
+/**
+ * The claims we are covering and the principal is not.
+ *
+ * This is the question the board asks and the portal could not answer: not
+ * "how many are out of warranty", but "how many are out of the principal's
+ * warranty while still inside ours".
+ */
+function costBorneToggle() {
+  if (S.session.role !== ROLE.ADMIN) return '';
+  return '<label class="inline"><input type="checkbox" id="costBorne"' +
+    (S.filters.costBorne ? ' checked' : '') + '> We absorb the cost</label>';
+}
+
 function activeChips() {
   const chips = [];
   if (S.filters.statuses.length) {
-    chips.push(chip('Status', S.filters.statuses.join(', '), 'statuses'));
+    chips.push(chip('Status', S.filters.statuses.map(statusLabel).join(', '), 'statuses'));
   }
   if (S.filters.warrantyTypes.length) {
     chips.push(chip('Warranty', S.filters.warrantyTypes.join(', '), 'warrantyTypes'));
   }
   if (S.filters.customerId) {
-    const c = S.reference.customers.filter(function (x) { return x.id === S.filters.customerId; })[0];
-    chips.push(chip('Customer', c ? c.name : S.filters.customerId, 'customerId'));
+    chips.push(chip('Customer', S.filters.customerName || S.filters.customerId, 'customerId'));
   }
   if (S.filters.principal) chips.push(chip('Principal', S.filters.principal, 'principal'));
+  if (S.filters.distributorId) {
+    const d = (S.reference.distributors || []).filter(function (x) {
+      return x.id === S.filters.distributorId;
+    })[0];
+    chips.push(chip('Distributor', d ? d.name : S.filters.distributorId, 'distributorId'));
+  }
+  if (S.filters.costBorne) chips.push(chip('Cost', 'we absorb it', 'costBorne'));
   if (!chips.length) return '';
   return '<div class="toolbar">' + chips.join('') + '</div>';
 }
@@ -439,14 +1199,105 @@ function chip(label, value, key) {
     '<button type="button" data-clear="' + key + '" aria-label="Remove filter">✕</button></span>';
 }
 
+/**
+ * The list cut into blocks. Both cuts have the same shape — a label and the
+ * rows under it — so the table draws one thing and only the heading differs.
+ */
+function groupClaims_(rows, by) {
+  // null, not an empty list: no grouping is a flat list, which is a different
+  // thing from a grouping that happened to find nothing.
+  if (by === 'none') return null;
+  return by === 'customer' ? groupByCustomer_(rows) : groupByStatus_(rows);
+}
+
+/** Collects rows by a key, keeping the order each key was first seen. */
+function collectBy_(rows, key) {
+  const grouped = {};
+  const seen = [];
+  rows.forEach(function (r) {
+    const k = key(r) || '';
+    if (!grouped[k]) { grouped[k] = []; seen.push(k); }
+    grouped[k].push(r);
+  });
+  return { grouped: grouped, seen: seen };
+}
+
+/**
+ * In the order a claim moves through them.
+ *
+ * A status the order does not name still gets a block, at the end: a row that
+ * quietly vanishes from the list is a worse fault than one out of order.
+ */
+function groupByStatus_(rows) {
+  const order = [STATUS.DRAFT, STATUS.RETURNED, STATUS.SUBMITTED, STATUS.IN_REVIEW,
+    STATUS.INTERNAL, STATUS.FULFILMENT, STATUS.CLOSED];
+  const bag = collectBy_(rows, function (r) { return r.status; });
+  return order.filter(function (s) { return bag.grouped[s]; })
+    .concat(bag.seen.filter(function (s) { return order.indexOf(s) === -1; }))
+    .map(function (s) { return { label: statusLabel(s), rows: bag.grouped[s] }; });
+}
+
+/**
+ * By hospital, in name order.
+ *
+ * Status order is the order of the work; a customer list has no such order of
+ * its own, and the reason to cut by customer is to go and find one. Alphabetical
+ * is the only arrangement you can search by eye.
+ */
+function groupByCustomer_(rows) {
+  const bag = collectBy_(rows, function (r) { return r.customerName; });
+  return bag.seen.filter(function (n) { return n; })
+    .sort(function (a, b) { return a.localeCompare(b); })
+    .concat(bag.seen.indexOf('') === -1 ? [] : [''])
+    .map(function (n) { return { label: n || 'No customer', rows: bag.grouped[n] }; });
+}
+
+/**
+ * A status block cut again by reference.
+ *
+ * One reference covers several claims, and repeating it down the rows says
+ * nothing the row above did not already say. It becomes the heading instead,
+ * and the rows under it carry only what tells them apart. A reference holding
+ * one claim still gets its heading: a list with two shapes in it costs the
+ * reader more than the row it saves.
+ *
+ * A claim not yet submitted has no reference at all, and those gather under a
+ * heading of their own at the end of the block rather than sitting at a depth
+ * nothing else in the table uses.
+ */
+function groupByRef_(rows) {
+  const grouped = {};
+  const seen = [];
+  rows.forEach(function (r) {
+    const key = r.refNo || '';
+    if (!grouped[key]) { grouped[key] = []; seen.push(key); }
+    grouped[key].push(r);
+  });
+  return seen.filter(function (k) { return k; })
+    .concat(seen.indexOf('') === -1 ? [] : [''])
+    .map(function (k) { return { refNo: k, rows: grouped[k] }; });
+}
+
 function claimTable() {
   const s = S.session;
-  const showCustomer = true;
+  // Cut by hospital, the heading is the hospital, and a column repeating it on
+  // every row says nothing the row above did not. The column goes; the space
+  // goes to the ones that still tell the rows apart.
+  const showCustomer = S.group !== 'customer';
   const showRequester = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
   const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
 
   const showPrincipal = s.role === ROLE.ADMIN;
-  const head = ['<th class="caret"></th>', '<th>Claim</th>', '<th>Date</th>'];
+  const showPick = canPickClaims();
+  const head = [];
+  if (showPick) {
+    // Ticks every claim on the page, not every claim the filter matched: what
+    // is off screen is not what anybody looked at before ticking.
+    head.push('<th class="pick"><input type="checkbox" id="pickAll"' +
+      (S.rows.length && S.rows.every(function (c) { return S.pick[c.claimId]; })
+        ? ' checked' : '') + ' aria-label="Select every claim on this page"></th>');
+  }
+  head.push('<th class="caret"></th>', '<th>Claim</th>', '<th>Date</th>');
   if (showPrincipal) head.push('<th>Principal</th>');
   if (showCustomer) head.push('<th>Customer</th>');
   head.push('<th>Serial number</th>', '<th>Parts</th>');
@@ -454,107 +1305,178 @@ function claimTable() {
   if (showWo) head.push('<th>Work order</th>');
   head.push('<th>Status</th>', '<th>Age</th>');
 
-  const body = S.rows.map(function (c) {
-    const open = !!S.expanded[c.claimId];
-    const cells = [
-      '<td class="caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
-      '<td class="stack"><span class="mono">' + h(c.claimId) + '</span>' +
-        '<span class="mono tiny">' + h(c.refNo || 'not submitted') + '</span></td>',
-      '<td>' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
-    ];
+  const groups = groupClaims_(S.rows, S.group);
+
+  const claimRows = function (c, underRef) {
+    const open = !S.collapsed[c.claimId];
+    const cells = [];
+    if (showPick) {
+      cells.push('<td class="pick c-pick"><input type="checkbox" data-pick="' + h(c.claimId) +
+        '"' + (S.pick[c.claimId] ? ' checked' : '') + ' aria-label="Select this claim"></td>');
+    }
+    cells.push(
+      // Each cell says what it is, not merely where it sits. Which columns a
+      // role gets varies, so a card layout that placed cells by position would
+      // reshuffle itself between roles.
+      '<td class="caret c-caret" data-toggle="' + h(c.claimId) + '">' + (open ? '▾' : '▸') + '</td>',
+      // Under a reference heading the row is only its own id — the heading
+      // above already carries the reference. Flat, nothing carries it but the
+      // row, so both lines come back; and a claim with no reference at all
+      // leads with the only name it has.
+      '<td class="stack c-claim">' + (underRef
+        ? '<span class="mono">' + h(c.claimId) + '</span>'
+        : (c.refNo
+          ? '<span class="mono">' + h(c.refNo) + '</span>' +
+            '<span class="mono tiny">' + h(c.claimId) + '</span>'
+          : '<span class="mono">' + h(c.claimId) + '</span>' +
+            '<span class="mono tiny">not submitted</span>')) +
+        // Inside the Claim cell rather than a column of its own: it belongs to
+        // the claim's name, and a column would be empty on most rows and would
+        // need a place of its own in the card layout as well.
+        (c.isNew ? '<span class="pill flat p-new tiny">moved</span>' : '') + '</td>',
+      '<td class="c-date">' + h(fmtDate(c.submittedAt || c.createdAt)) + '</td>'
+    );
     if (showPrincipal) {
-      cells.push('<td' + (c.principal ? '' : ' class="dimmer"') + '>' +
+      cells.push('<td class="c-principal' + (c.principal ? '' : ' dimmer') + '">' +
         h(c.principal || 'unattributed') + '</td>');
     }
-    if (showCustomer) cells.push('<td>' + h(c.customerName) + '</td>');
+    // The hospital, and who sold the machine to it. A claim on the distributor
+    // channel has to name both: the same hospital holds machines from several
+    // distributors, and one of them may be ours.
+    if (showCustomer) {
+      cells.push('<td class="stack c-cust">' + h(c.customerName) +
+        (c.distributorName && seesOurSide()
+          ? '<span class="tiny dim">via ' + h(c.distributorName) + '</span>' : '') + '</td>');
+    }
     cells.push(
-      '<td class="stack"><span class="mono">' + h(c.serialNumber) + '</span>' +
-        warrantyPill(c.warrantyType) + '</td>',
-      '<td>' + c.items.length + ' item' + (c.items.length === 1 ? '' : 's') + '</td>'
+      '<td class="stack c-serial"><span class="mono">' + h(c.serialNumber) + '</span>' +
+        warrantyPill(c.warrantyType) + ourWarrantyPill(c) + '</td>',
+      '<td class="c-parts">' + c.items.length + ' item' + (c.items.length === 1 ? '' : 's') + '</td>'
     );
-    if (showRequester) cells.push('<td class="dim">' + h(c.requesterName) + '</td>');
+    if (showRequester) cells.push('<td class="dim c-req">' + h(c.requesterName) + '</td>');
     if (showWo) {
-      cells.push('<td class="mono' + (c.workOrderNo ? '' : ' dimmer') + '">' +
+      cells.push('<td class="mono c-wo' + (c.workOrderNo ? '' : ' dimmer') + '">' +
         h(c.workOrderNo || '— required') + '</td>');
     }
     cells.push(
-      '<td class="stack">' + statusPill(c.status) +
+      '<td class="stack c-status">' + statusPill(c.status) +
         (summaryText(c.summary) ? '<span class="tiny">' + h(summaryText(c.summary)) + '</span>' : '') +
         '</td>',
-      '<td>' + ageCell(c.ageDays) + '</td>'
+      '<td class="c-age">' + ageCell(c.ageDays) + '</td>'
     );
 
-    const rows = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
+    const rowHtml = ['<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>'];
+    // The elbow sits under the caret, so a tick column in front of it pushes
+    // the whole sub-row across by one.
+    const lead = showPick ? '<td></td><td></td>' : '<td></td>';
+    const indent = showPick ? 2 : 1;
+    if (open && !c.items.length) {
+      rowHtml.push('<tr class="sub">' + lead + '<td class="part dimmer" colspan="' +
+        (head.length - indent) + '">No spare part on this claim yet</td></tr>');
+    }
     if (open) {
       c.items.forEach(function (i) {
-        rows.push('<tr class="sub"><td></td><td colspan="' + (head.length - 4) + '">' +
-          h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td><td>' +
-          itemPill(i.itemStatus) + (i.decisionReason
-            ? '<div class="tiny">' + h(i.decisionReason) + '</div>' : '') +
+        rowHtml.push('<tr class="sub">' + lead + '<td class="part" colspan="' +
+          (head.length - indent - 3) + '">' +
+          h(i.partName) + '</td><td class="mono">' + i.qty + ' pcs</td>' +
+          '<td class="stack">' + itemPill(i.itemStatus) +
+          (i.advanceIssued && seesAdvanceIssue()
+            ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
+          returnBadge(i.awaitingReturn) +
+          (i.decisionReason ? '<span class="tiny">' + h(i.decisionReason) + '</span>' : '') +
           '</td><td></td></tr>');
       });
     }
-    return rows.join('');
-  }).join('');
+    return rowHtml.join('');
+  };
+
+  // A hospital name is a sentence; a status is a label. Only the second reads
+  // as one in small caps.
+  const headClass = 'group-header' + (S.group === 'customer' ? ' plain' : '');
+
+  // Array.map hands its callback an index, so claimRows is never passed to it
+  // bare: every row after the first would read that index as `underRef` and
+  // drop its own reference.
+  const body = groups
+    ? groups.map(function (g) {
+        return '<tr class="' + headClass + '"><td colspan="' + head.length + '">' +
+          h(g.label) + '<span class="group-n">' + g.rows.length + '</span></td></tr>' +
+          groupByRef_(g.rows).map(function (r) {
+            return '<tr class="ref-header"><td colspan="' + head.length + '">' +
+              (r.refNo
+                ? '<span class="mono">' + h(r.refNo) + '</span>'
+                : '<span class="dimmer">No reference yet</span>') +
+              '<span class="group-n">' + r.rows.length + '</span></td></tr>' +
+              r.rows.map(function (c) { return claimRows(c, true); }).join('');
+          }).join('');
+      }).join('')
+    : S.rows.map(function (c) { return claimRows(c, false); }).join('');
 
   return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
     '</tr></thead><tbody>' + body + '</tbody></table></div>';
 }
 
-function itemTable() {
-  const s = S.session;
-  const showWo = s.role === ROLE.ADMIN || s.role === ROLE.PRINCIPAL;
-  const head = ['<th>Claim</th>', '<th>Serial number</th>', '<th>Customer</th>',
-    '<th>Spare part</th>', '<th>Qty</th>'];
-  if (showWo) head.push('<th>Work order</th>');
-  head.push('<th>Status</th>', '<th>Reason</th>');
-
-  const body = [];
-  S.rows.forEach(function (c) {
-    c.items.forEach(function (i, index) {
-      const faded = index > 0 ? ' dimmer' : '';
-      const cells = [
-        '<td class="mono' + faded + '">' + h(c.claimId) + '</td>',
-        '<td class="mono' + faded + '">' + h(c.serialNumber) + '</td>',
-        '<td class="' + (index > 0 ? 'dimmer' : '') + '">' + h(c.customerName) + '</td>',
-        '<td>' + h(i.partName) + '</td>',
-        '<td class="mono">' + i.qty + '</td>'
-      ];
-      if (showWo) cells.push('<td class="mono' + faded + '">' + h(c.workOrderNo || '—') + '</td>');
-      cells.push('<td class="stack">' + itemPill(i.itemStatus) +
-        (i.advanceIssued ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
-        '</td>',
-        '<td class="tiny">' + h(i.decisionReason || '') + '</td>');
-      body.push('<tr class="click" data-claim="' + h(c.claimId) + '">' + cells.join('') + '</tr>');
-    });
-  });
-
-  return '<div class="tablewrap"><table class="data"><thead><tr>' + head.join('') +
-    '</tr></thead><tbody>' + body.join('') + '</tbody></table></div>';
-}
-
 function wireClaimsToolbar() {
+  // The tab strip scrolls sideways when it does not fit, which on a phone puts
+  // the tab you are actually on past the right edge — the screen stops saying
+  // where you are. Bring it back into view after every draw.
+  const onTab = el('view').querySelector('.tabs button.on');
+  if (onTab && onTab.scrollIntoView) {
+    onTab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  const more = el('loadMore');
+  if (more) more.addEventListener('click', function () {
+    more.disabled = true;
+    more.textContent = 'Loading…';
+    loadClaims(true);
+  });
   el('view').querySelectorAll('[data-tab]').forEach(function (b) {
     b.addEventListener('click', function () { S.tab = b.dataset.tab; loadClaims(); });
-  });
-  el('view').querySelectorAll('[data-view]').forEach(function (b) {
-    b.addEventListener('click', function () { S.view = b.dataset.view; renderClaims(); });
   });
   el('view').querySelectorAll('[data-toggle]').forEach(function (td) {
     td.addEventListener('click', function (e) {
       e.stopPropagation();
       const id = td.dataset.toggle;
-      S.expanded[id] = !S.expanded[id];
+      S.collapsed[id] = !S.collapsed[id];
       renderClaims();
     });
   });
   el('view').querySelectorAll('[data-claim]').forEach(function (tr) {
     tr.addEventListener('click', function () { openClaimPanel(tr.dataset.claim); });
   });
+  el('view').querySelectorAll('[data-pick]').forEach(function (box) {
+    // The row opens the claim when clicked; ticking it must not, or every tick
+    // would be followed by a panel nobody asked for.
+    box.addEventListener('click', function (e) { e.stopPropagation(); });
+    box.addEventListener('change', function () {
+      if (this.checked) S.pick[this.dataset.pick] = true;
+      else delete S.pick[this.dataset.pick];
+      const all = el('pickAll');
+      if (all) all.checked = S.rows.length &&
+        S.rows.every(function (c) { return S.pick[c.claimId]; });
+      renderClaimBar();
+    });
+  });
+  const pickAll = el('pickAll');
+  if (pickAll) pickAll.addEventListener('change', function () {
+    const on = this.checked;
+    S.rows.forEach(function (c) {
+      if (on) S.pick[c.claimId] = true; else delete S.pick[c.claimId];
+    });
+    el('view').querySelectorAll('[data-pick]').forEach(function (b) { b.checked = on; });
+    renderClaimBar();
+  });
   el('view').querySelectorAll('[data-clear]').forEach(function (b) {
     b.addEventListener('click', function () {
       const key = b.dataset.clear;
-      S.filters[key] = Array.isArray(S.filters[key]) ? [] : '';
+      // A tick box clears to false, not to ''. Left as a string it would come
+      // back as "false", which is a string, which is true.
+      S.filters[key] = Array.isArray(S.filters[key]) ? []
+        : (typeof S.filters[key] === 'boolean' ? false : '');
+      // The id is what filters; the name is only what the chip and the box read
+      // back, and it has to go with it.
+      if (key === 'customerId') S.filters.customerName = '';
       loadClaims();
     });
   });
@@ -575,9 +1497,33 @@ function wireClaimsToolbar() {
   if (wf) wf.addEventListener('change', function () {
     S.filters.warrantyTypes = this.value ? [this.value] : []; loadClaims();
   });
-  const cf = el('customerFilter');
-  if (cf) cf.addEventListener('change', function () {
-    S.filters.customerId = this.value; loadClaims();
+  const df = el('distributorFilter');
+  if (df) df.addEventListener('change', function () {
+    S.filters.distributorId = this.value; loadClaims();
+  });
+  const cb = el('costBorne');
+  if (cb) cb.addEventListener('change', function () {
+    S.filters.costBorne = this.checked; loadClaims();
+  });
+  if (el('customerFilter')) wireCombo('customerFilter');
+  const gb = el('groupBy');
+  if (gb) gb.addEventListener('change', function () {
+    S.group = this.value; renderClaims();
+  });
+  const sv = el('savedView');
+  if (sv) sv.addEventListener('change', function () {
+    if (this.value) applyView(this.value);
+  });
+  const mv = el('manageViews');
+  if (mv) mv.addEventListener('click', openViewManager);
+  const seen = el('seenAll');
+  if (seen) seen.addEventListener('click', markAllSeen);
+  const dvc = el('dropViewCustomer');
+  if (dvc) dvc.addEventListener('click', function () {
+    S.filters.customerId = '';
+    S.filters.customerName = '';
+    S.viewNotice = '';
+    loadClaims();
   });
   const pf = el('principalFilter');
   if (pf) pf.addEventListener('change', function () {
@@ -604,7 +1550,9 @@ function doExport() {
   const btn = el('doExport');
   btn.disabled = true;
   btn.textContent = 'Preparing file…';
-  const filter = Object.assign({ tab: S.tab, view: S.view }, S.filters);
+  // The screen is one table now, claim over spare part, so the export that
+  // matches it is the per-part one.
+  const filter = Object.assign({ tab: S.tab, view: 'item' }, S.filters);
   api('claims.export', filter).then(function (r) {
     btn.textContent = 'Export to Excel';
     btn.disabled = false;
@@ -646,20 +1594,44 @@ function renderClaimPanel(c) {
   const s = S.session;
   const sec = [];
 
+  // The working — the assembly month, the months added, the exception that
+  // overrode it, who overrode it — is how the administrator defends a decision.
+  // To a requester it is a calculation they did not make and cannot change.
   sec.push(
-    '<div class="panel-sec"><h3>Warranty assessment</h3>' +
+    '<div class="panel-sec"><h3>' + (seesInternals() ? 'Warranty assessment' : 'Unit') + '</h3>' +
       '<div class="calc"><b>' + h(c.serialNumber) + '</b>' +
-        (c.productName ? ' · ' + h(c.productName) : '') + '<br>' + h(c.warrantyBasis) + '</div>' +
+        (c.productName ? ' · ' + h(c.productName) : '') +
+        (seesInternals() ? '<br>' + h(c.warrantyBasis) : '') + '</div>' +
       '<div class="row">' + warrantyPill(c.warrantyType) +
-        (c.warrantyOverridden ? '<span class="tiny" style="color:var(--warn);font-weight:600">🔧 overridden by administrator</span>' : '') +
+        (c.warrantyOverridden && seesInternals()
+          ? '<span class="tiny" style="color:var(--warn);font-weight:600">🔧 overridden by administrator</span>'
+          : '') +
         '</div>' +
-      (c.warrantyOverrideReason ? '<div class="tiny">' + h(c.warrantyOverrideReason) + '</div>' : '') +
+      (c.warrantyOverrideReason && seesInternals()
+        ? '<div class="tiny">' + h(c.warrantyOverrideReason) + '</div>' : '') +
+      // Correcting a verdict the population sheet got wrong belongs next to the
+      // verdict, not in the row of buttons that carry the claim forward.
+      (s.role === ROLE.ADMIN && c.status !== STATUS.CLOSED
+        ? '<div class="row" style="margin-top:8px">' +
+          '<button class="btn sm ghost" type="button" data-act="override">Override warranty</button>' +
+          '</div>'
+        : '') +
     '</div>'
   );
 
   sec.push(
     '<div class="panel-sec"><h3>Claim</h3>' +
-      kv('Principal', c.principal || '— not attributed') +
+      // Which principal a unit routes to, and the fact that it routes to none
+      // yet, is the administrator's problem to solve, not the requester's.
+      (S.session.role === ROLE.REQUESTER || S.session.role === ROLE.PRODUCTION
+        ? '' : kv('Principal', c.principal || '— not attributed')) +
+      // Same again: a unit the population sheet cannot place is attributed by
+      // hand, here, where the gap is visible.
+      (s.role === ROLE.ADMIN && !c.principal && c.status !== STATUS.CLOSED
+        ? '<div class="row" style="margin:2px 0 6px">' +
+          '<button class="btn sm ghost" type="button" data-act="principal">Assign principal</button>' +
+          '</div>'
+        : '') +
       kv('Customer', c.customerName) + kv('Requested by', c.requesterName) +
       kv('Reference', c.refNo || '—') + kv('Work order', c.workOrderNo || '—') +
       (c.returnReason ? kv('Returned because', c.returnReason) : '') +
@@ -672,11 +1644,15 @@ function renderClaimPanel(c) {
       c.items.map(function (i) {
         return '<div class="itemrow"><span class="nm">' + h(i.partName) + '</span>' +
           '<span class="mono tiny">' + i.qty + ' pcs</span>' + itemPill(i.itemStatus) +
-          (i.advanceIssued
+          (i.advanceIssued && seesAdvanceIssue()
             ? '<span class="pill flat p-sub">issued in advance</span>' +
               '<div class="tiny" style="width:100%">Supplied from local stock' +
               (i.advanceNote ? ' — ' + h(i.advanceNote) : '') +
               '. What arrives from the principal replenishes stock.</div>'
+            : '') +
+          returnBadge(i.awaitingReturn) +
+          (i.partReturnAt
+            ? '<span class="tiny">faulty part returned ' + h(fmtDate(i.partReturnAt)) + '</span>'
             : '') +
           (i.decisionReason ? '<div class="tiny" style="width:100%">' + h(i.decisionReason) + '</div>' : '') +
           (i.availabilityDate ? '<div class="tiny" style="width:100%">Available ' +
@@ -686,17 +1662,11 @@ function renderClaimPanel(c) {
     '</div>'
   );
 
-  if (c.attachments.length) {
-    sec.push('<div class="panel-sec"><h3>Evidence</h3><div class="gallery">' +
-      c.attachments.map(function (a) {
-        return '<figure data-att="' + h(a.attachmentId) + '">' +
-          '<div style="height:82px;display:grid;place-items:center;color:var(--ink-3);font-size:11px">' +
-            h(a.kind) + '</div>' +
-          '<figcaption>' + h(a.fileName) + '</figcaption></figure>';
-      }).join('') + '</div></div>');
-  }
+  sec.push(evidenceSection(c));
 
-  if (c.audit && c.audit.length) {
+  // The audit trail answers "who changed what, and why" — an administrator's
+  // question. The requester's own claim tells them everything they can act on.
+  if (c.audit && c.audit.length && seesInternals()) {
     sec.push('<div class="panel-sec"><h3>History</h3><div class="audit">' +
       c.audit.slice(0, 12).map(function (a) {
         return '<div class="entry"><div>' + h(a.action) +
@@ -726,6 +1696,74 @@ function renderClaimPanel(c) {
   el('panelHost').querySelectorAll('[data-att]').forEach(function (fig) {
     fig.addEventListener('click', function () { showAttachment(fig.dataset.att); });
   });
+  el('panelHost').querySelectorAll('[data-act]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (b.dataset.act === 'override') promptOverride(c);
+      if (b.dataset.act === 'principal') promptPrincipal(c);
+    });
+  });
+}
+
+/**
+ * Every file a claim is meant to carry, attached or not.
+ *
+ * Listing only what was uploaded hid the more useful half: a claim with nothing
+ * attached showed no section at all, which reads as "this screen does not show
+ * files" rather than "there are no files". A claim cannot be submitted without
+ * all of these, so the gaps are worth as much as the files.
+ */
+function evidenceSection(c) {
+  const slots = [
+    { kind: 'FAULT', label: 'Fault photo' },
+    { kind: 'REPORT', label: 'Service report' }
+  ].concat(c.items.map(function (i) {
+    return { kind: 'PART', itemId: i.itemId, label: 'Photo — ' + i.partName };
+  }));
+
+  const taken = {};
+  const rows = slots.map(function (slot) {
+    const found = c.attachments.filter(function (a) {
+      return a.kind === slot.kind && (slot.kind !== 'PART' || a.itemId === slot.itemId);
+    })[0];
+    if (found) taken[found.attachmentId] = true;
+    return evidenceRow(slot.label, found);
+  });
+
+  // Anything that matches no slot — a photo whose part row was removed — is
+  // still listed rather than quietly dropped.
+  c.attachments.forEach(function (a) {
+    if (!taken[a.attachmentId]) rows.push(evidenceRow(a.kind, a));
+  });
+
+  const missing = c.attachments.length === 0;
+  return '<div class="panel-sec"><h3>Evidence</h3>' + rows.join('') +
+    (missing
+      ? '<div class="tiny">No file has been uploaded for this claim yet. ' +
+        'Use Edit claim to attach them — all of them are required before it can be submitted.</div>'
+      : '') +
+    '</div>';
+}
+
+function evidenceRow(label, file) {
+  if (!file) {
+    return '<div class="itemrow" style="opacity:.75"><span class="nm">' + h(label) + '</span>' +
+      '<span class="pill flat p-no">not attached</span></div>';
+  }
+  return '<div class="itemrow click" data-att="' + h(file.attachmentId) + '" ' +
+    'style="cursor:pointer" title="Open ' + h(file.fileName) + '">' +
+    '<span class="nm">' + h(label) + '</span>' +
+    '<span class="tiny mono">' + h(file.fileName) + '</span>' +
+    (Number(file.version) > 1 ? '<span class="pill flat p-draft">v' + h(file.version) + '</span>' : '') +
+    '<span class="tiny">' + h(fileSize(file.sizeBytes)) + '</span>' +
+    '</div>';
+}
+
+function fileSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!n) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 function kv(label, value) {
@@ -753,52 +1791,62 @@ function renderPanelActions(c) {
     }
   }
 
-  if (isRequester && owner && (c.status === STATUS.DRAFT || c.status === STATUS.RETURNED)) {
-    buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
-  }
-
   if (s.role === ROLE.ADMIN) {
-    if (c.status !== STATUS.CLOSED) {
-      buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
-    }
-    if (!c.principal && c.status !== STATUS.CLOSED) {
-      buttons.push(btn('Assign principal', 'pri', function () { promptPrincipal(c); }));
-    }
-    if (c.status === STATUS.SUBMITTED || c.status === STATUS.INTERNAL) {
-      buttons.push(btn('Return to Requester', 'no', function () { promptReturn(c); }));
-      buttons.push(btn('Override warranty', '', function () { promptOverride(c); }));
-      buttons.push(btn('Amend', '', function () { closePanel(); openClaimForm(c); }));
-    }
+    // One status, one move. The panel used to offer everything that was legal
+    // at a status — eight buttons for what is really a single decision — and
+    // the decision got lost among the corrections. Correcting the warranty
+    // verdict or the attribution is not a step in this workflow; those sit
+    // beside the verdict and the attribution themselves, in the panel above.
+
+    // Asked in front of every claim: was this part already sent to this machine?
+    buttons.push(btn('Unit history', '', function () { showUnitHistory(c.serialNumber); }));
+
     if (c.status === STATUS.SUBMITTED) {
+      buttons.push(btn('Return to Requester', 'no', function () { promptReturn(c); }));
       if (c.warrantyType === WARRANTY.PRINCIPAL) {
         buttons.push(btn('Forward to Principal', 'pri', function () { promptForward(c); }));
       } else {
+        // Out of the principal's warranty: they supply nothing, so the only
+        // road on is our own.
         buttons.push(btn('Process Internal Warranty', 'pri', function () {
           api('claims.internal', { claimId: c.claimId, rowVersion: c.rowVersion })
             .then(function () { toast('Moved to internal verification.', 'ok'); reopen(c.claimId); })
             .catch(fail);
         }));
       }
-    }
-    if (c.status === STATUS.INTERNAL) {
+    } else if (c.status === STATUS.INTERNAL) {
       buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
       buttons.push(btn('Reject parts', 'no', function () { promptDecision(c, 'reject'); }));
-    }
-    if (c.status === STATUS.IN_REVIEW) {
-      buttons.push(btn('Withdraw from Principal', '', function () {
-        if (!confirm('Withdraw this claim from the principal?')) return;
-        api('claims.withdraw', { claimId: c.claimId, rowVersion: c.rowVersion })
-          .then(function () { toast('Withdrawn.', 'ok'); reopen(c.claimId); }).catch(fail);
-      }));
-    }
-    if (c.status === STATUS.FULFILMENT) {
-      buttons.push(btn('Open in Orders', 'pri', function () { closePanel(); navigate('orders'); }));
+    } else if (c.status !== STATUS.RETURNED && c.status !== STATUS.DRAFT) {
+      // A claim already under way. A draft, and one sent back for revision,
+      // are the requester's move — there is nothing here to do but look.
+      if (c.status !== STATUS.CLOSED) {
+        buttons.push(btn('Record advance issue', '', function () { promptAdvance(c); }));
+      }
+      if (c.summary && c.summary.awaitingReturn) {
+        buttons.push(btn('Record part return', 'pri', function () { promptPartReturn(c); }));
+      }
+      if (c.status === STATUS.IN_REVIEW) {
+        buttons.push(btn('Withdraw from Principal', '', function () {
+          if (!confirm('Withdraw this claim from the principal?')) return;
+          api('claims.withdraw', { claimId: c.claimId, rowVersion: c.rowVersion })
+            .then(function () { toast('Withdrawn.', 'ok'); reopen(c.claimId); }).catch(fail);
+        }));
+      }
+      if (c.status === STATUS.FULFILMENT) {
+        buttons.push(btn('Open in Orders', 'pri', function () { closePanel(); navigate('orders'); }));
+      }
     }
   }
 
   if (s.role === ROLE.PRINCIPAL && c.warrantyType === WARRANTY.PRINCIPAL &&
     [STATUS.IN_REVIEW, STATUS.FULFILMENT, STATUS.CLOSED].indexOf(c.status) !== -1) {
-    buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
+    // Approving a part that is already approved does nothing; rejecting one
+    // still can, while it has not been ordered. Offering both reads as though
+    // the decision had not been taken yet.
+    if (c.items.some(function (i) { return i.itemStatus === ITEM.PENDING; })) {
+      buttons.push(btn('Approve parts', 'ok', function () { promptDecision(c, 'approve'); }));
+    }
     buttons.push(btn('Reject parts', 'no', function () { promptDecision(c, 'reject'); }));
   }
 
@@ -821,18 +1869,131 @@ function btn(label, cls, onClick) {
 
 function reopen(claimId) { openClaimPanel(claimId); loadClaims(); }
 
+/**
+ * Opens one attachment.
+ *
+ * A photo comes back as a data URI built from the file itself, which takes a
+ * few seconds. Without something on screen the click looked like it had done
+ * nothing, so the box opens straight away and fills in when the file arrives.
+ */
 function showAttachment(attachmentId) {
+  const box = document.createElement('div');
+  box.className = 'lightbox';
+  box.innerHTML = '<div class="loading"><span class="spinner"></span>Opening…</div>';
+  box.addEventListener('click', function () { box.remove(); });
+  document.body.appendChild(box);
+
   api('claims.attachment', { attachmentId: attachmentId }).then(function (a) {
-    if (a.kind === 'pdf') { window.open(a.url, '_blank'); return; }
-    const box = document.createElement('div');
-    box.className = 'lightbox';
-    box.innerHTML = '<img src="' + a.dataUri + '" alt="' + h(a.name) + '">';
-    box.addEventListener('click', function () { box.remove(); });
-    document.body.appendChild(box);
-  }).catch(fail);
+    if (!box.isConnected) return;   // closed while it was loading
+    if (a.kind === 'pdf') { box.remove(); window.open(a.url, '_blank'); return; }
+    const img = new Image();
+    img.alt = a.name;
+    img.onload = function () {
+      if (!box.isConnected) return;
+      box.innerHTML = '';
+      box.appendChild(img);
+    };
+    img.onerror = function () {
+      box.innerHTML = '<div class="loading">' + h(a.name) + ' could not be shown.</div>';
+    };
+    img.src = a.dataUri;
+  }).catch(function (e) {
+    box.remove();
+    fail(e);
+  });
+}
+
+/**
+ * Everything ever claimed against one machine.
+ *
+ * A part sent to this unit before is either a double order or a repair that
+ * did not hold, so the repeats are counted at the top — spotting them halfway
+ * down a list is exactly what does not happen when you are busy.
+ */
+function showUnitHistory(serial) {
+  openModal({
+    title: 'Unit history',
+    meta: serial,
+    size: 'wide',
+    body: '<div id="unitHist">' + skeleton(4) + '</div>',
+    actions: [{ label: 'Close', close: true }],
+    onOpen: function () {
+      api('claims.unitHistory', { serialNumber: serial }).then(function (d) {
+        const host = el('unitHist');
+        if (!host) return;
+        host.innerHTML =
+          '<p class="tiny">' + h(d.productName || 'unit') + ' · ' + d.claims + ' claim' +
+            (d.claims === 1 ? '' : 's') + ' · ' + d.parts.length + ' spare part' +
+            (d.parts.length === 1 ? '' : 's') + ' ever requested</p>' +
+          (d.repeated.length
+            ? '<div class="notice">⚠ Requested more than once on this unit: ' +
+              d.repeated.map(function (r) {
+                return h(r.partName) + ' <b>×' + r.times + '</b>';
+              }).join(', ') + '</div>'
+            : '') +
+          (d.parts.length
+            ? '<div class="tablewrap"><table class="data"><thead><tr>' +
+              '<th>Date</th><th>Claim</th><th>Customer</th><th>Spare part</th><th>Qty</th>' +
+              '<th>Part status</th><th>Fulfilment</th><th>Faulty part back</th>' +
+              '</tr></thead><tbody>' +
+              d.parts.map(function (p) {
+                return '<tr><td class="tiny">' + h(fmtDate(p.submittedAt)) + '</td>' +
+                  '<td class="stack"><span class="mono">' + h(p.claimId) + '</span>' +
+                    '<span class="mono tiny">' + h(p.refNo || '—') + '</span></td>' +
+                  '<td class="tiny">' + h(p.customerName) + '</td>' +
+                  '<td>' + h(p.partName) + '</td>' +
+                  '<td class="mono">' + p.qty + '</td>' +
+                  '<td class="stack">' + itemPill(p.itemStatus) +
+                    (p.advanceIssued
+                      ? '<span class="pill flat p-sub tiny">issued in advance</span>' : '') +
+                    '</td>' +
+                  '<td class="tiny">' + h(p.fulfilmentRoute || '—') + '</td>' +
+                  '<td class="tiny">' + (p.partReturnAt ? h(fmtDate(p.partReturnAt))
+                    : p.awaitingReturn ? '<b style="color:var(--warn)">outstanding</b>' : '—') +
+                    '</td></tr>';
+              }).join('') + '</tbody></table></div>'
+            : '<div class="empty">Nothing has been claimed against this unit before.</div>');
+      }).catch(function (e) {
+        const host = el('unitHist');
+        if (host) host.innerHTML = '<div class="empty">' + h(e.message) + '</div>';
+      });
+    }
+  });
 }
 
 /* ---------------------------------------------------------- prompts */
+
+/**
+ * The faulty part coming back is what finishes a claim. Until it is recorded
+ * the claim stays open, because nothing else remembers that it is owed.
+ */
+function promptPartReturn(claim) {
+  const owed = claim.items.filter(function (i) { return i.awaitingReturn; });
+  openModal({
+    title: 'Record part return',
+    size: 'narrow',
+    body: '<p class="tiny">A claim stays open until every part sent has had its faulty ' +
+      'one returned.</p>' +
+      owed.map(function (i) {
+        return '<label class="itemrow"><input type="radio" name="ret" class="ret" value="' +
+          h(i.itemId) + '"><span class="nm">' + h(i.partName) + '</span>' +
+          '<span class="mono tiny">' + i.qty + ' pcs</span></label>';
+      }).join('') +
+      '<label class="field"><span>Note</span>' +
+      '<input type="text" id="retNote" placeholder="condition, who brought it back"></label>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Record return', primary: true, onClick: function (close) {
+        const picked = document.querySelector('.ret:checked');
+        if (!picked) { toast('Choose which part came back.', 'err'); return; }
+        api('claims.partReturn', { itemId: picked.value, note: el('retNote').value.trim() })
+          .then(function () {
+            close(); toast('Part return recorded.', 'ok'); reopen(claim.claimId); loadClaims();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
 
 function promptReturn(c) {
   openModal({
@@ -951,8 +2112,7 @@ function promptPrincipal(c) {
           claimId: c.claimId, rowVersion: c.rowVersion, customerId: c.customerId,
           serialNumber: c.serialNumber, problem: c.problem, principal: el('prn').value,
           items: c.items.map(function (i) {
-            return { itemId: i.itemId, partId: i.partId, qty: i.qty,
-              advanceIssued: i.advanceIssued, advanceNote: i.advanceNote };
+            return { itemId: i.itemId, partId: i.partId, qty: i.qty };
           })
         }).then(function () { close(); toast('Principal assigned.', 'ok'); reopen(c.claimId); })
           .catch(fail);
@@ -1049,9 +2209,300 @@ function openModal(spec) {
 
 function closeModal() { el('modalHost').innerHTML = ''; }
 
+/* ============================================================ combobox */
+
+/**
+ * A searchable dropdown.
+ *
+ * The customer list runs to 1,386 names and the unit register to a few thousand
+ * serial numbers. At that size a <select> is something you scroll rather than
+ * something you use, so both fields are typed into and filtered as you type.
+ * What is typed is never thrown away silently: when it matches nothing, the
+ * list says so and names the administrator to ask.
+ *
+ * spec: {
+ *   id          the hidden input the form reads; the visible box is <id>Text
+ *   options     [{ value, label, hint }]
+ *   value, text what the field carries and shows on first render
+ *   allowFree   keep text that is on no list (the serial number field)
+ *   mono, placeholder
+ *   emptyHtml(query)  what the list shows when nothing matches
+ *   onPick(value)     after a choice from the list
+ *   onType(value)     after free text, when allowFree
+ * }
+ */
+const COMBO = {};
+const COMBO_SHOWN = 40;
+// Long enough that a run of keystrokes is one search, short enough that a
+// pause feels answered.
+const COMBO_WAIT = 250;
+
+function comboField(spec) {
+  COMBO[spec.id] = spec;
+  return '<div class="combo" data-combo="' + h(spec.id) + '">' +
+    '<input type="text" id="' + h(spec.id) + 'Text" class="combo-box' + (spec.mono ? ' mono' : '') +
+      '" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="' +
+      h(spec.id) + 'List" autocomplete="off" spellcheck="false" placeholder="' +
+      h(spec.placeholder || 'Type to search…') + '" value="' + h(spec.text || '') + '">' +
+    '<input type="hidden" id="' + h(spec.id) + '" value="' + h(spec.value || '') + '">' +
+    '<div class="combo-pop" id="' + h(spec.id) + 'List" role="listbox" hidden></div>' +
+    '</div>';
+}
+
+function wireCombo(id) {
+  const spec = COMBO[id];
+  const box = el(id + 'Text');
+  const value = el(id);
+  const pop = el(id + 'List');
+  if (!spec || !box || !value || !pop) return;
+
+  spec.shown = [];
+  spec.active = -1;
+  spec.seq = 0;
+  spec.cache = {};
+  // A list-only box resets to the label of whatever it holds. With the list on
+  // the server that label may not be in the page it last fetched, so every
+  // label the box has ever shown for a value is remembered here.
+  spec.known = spec.known || {};
+  if (spec.value && spec.text) spec.known[spec.value] = spec.text;
+  // Until something is typed the whole list is offered, even when the box
+  // already holds a choice: a field you cannot reopen to change your mind is
+  // worse than no dropdown at all.
+  spec.typed = false;
+
+  function labelFor(v) {
+    const hit = (spec.options || []).filter(function (o) { return o.value === v; })[0];
+    return hit ? hit.label : (spec.known[v] || '');
+  }
+
+  /**
+   * Ask the server for the matches, newest question wins.
+   *
+   * Answers can come back in any order — "RS A" may be slower than the "RS Ad"
+   * typed after it — so each request takes a number and a late answer to an old
+   * question is dropped rather than overwriting a newer one.
+   */
+  function fetchRemote(query) {
+    // Nothing typed, nothing asked. Opening a box is not a question, and a
+    // search for "" is the whole table — the one search worth never making.
+    // Whatever the box offers without the server (see spec.always) still shows.
+    if (!String(query || '').trim()) {
+      clearTimeout(spec.timer);
+      spec.seq++;                       // an answer still in flight is now stale
+      spec.idle = true;
+      spec.options = [];
+      spec.total = 0;
+      spec.loading = false;
+      render(true);
+      return;
+    }
+    spec.idle = false;
+    const key = String(query || '').toLowerCase();
+    const hit = spec.cache[key];
+    if (hit) {
+      spec.options = hit.options;
+      spec.total = hit.total;
+      spec.loading = false;
+      render(true);
+      return;
+    }
+    spec.loading = true;
+    render(true);
+    const mine = ++spec.seq;
+    spec.remote(query).then(function (res) {
+      if (mine !== spec.seq) return;
+      spec.cache[key] = res;
+      spec.options = res.options || [];
+      spec.total = res.total === undefined ? spec.options.length : res.total;
+      spec.loading = false;
+      render(true);
+    }).catch(function () {
+      if (mine !== spec.seq) return;
+      spec.loading = false;
+      spec.options = [];
+      spec.total = 0;
+      spec.failed = true;
+      render(true);
+    });
+  }
+
+  function show() {
+    const opening = pop.hidden;
+    pop.hidden = false;
+    box.setAttribute('aria-expanded', 'true');
+    // A row near the bottom of the modal would otherwise open its list into the
+    // part of the scrolling body nobody can see.
+    if (opening && pop.scrollIntoView) pop.scrollIntoView({ block: 'nearest' });
+  }
+  function hide() { pop.hidden = true; box.setAttribute('aria-expanded', 'false'); spec.active = -1; }
+
+  function render(open) {
+    const query = spec.typed ? box.value.trim() : '';
+    const q = query.toLowerCase();
+    const all = spec.options || [];
+    const shown = [];
+    let total = 0;
+    if (spec.remote) {
+      // Options the box carries itself — "All customers" is not a customer, and
+      // picking it is how the filter is cleared, so it has to be there before
+      // anything is typed.
+      (spec.always || []).forEach(function (o) { shown.push(o); });
+      // The server has already matched and trimmed; filtering again here would
+      // hide rows it deliberately sent.
+      for (let i = 0; i < all.length; i++) shown.push(all[i]);
+      total = shown.length + (spec.idle ? 0 : Math.max(0, (spec.total || 0) - all.length));
+    } else {
+      for (let i = 0; i < all.length; i++) {
+        const o = all[i];
+        if (q && o.label.toLowerCase().indexOf(q) === -1 &&
+          !(o.hint && o.hint.toLowerCase().indexOf(q) !== -1)) continue;
+        total += 1;
+        if (shown.length < COMBO_SHOWN) shown.push(o);
+      }
+    }
+    spec.shown = shown;
+    if (spec.active >= shown.length) spec.active = shown.length - 1;
+
+    pop.innerHTML = shown.length
+      ? shown.map(function (o, i) {
+          return '<div class="combo-opt' + (i === spec.active ? ' on' : '') + '" role="option"' +
+            ' aria-selected="' + (i === spec.active) + '" data-i="' + i + '">' +
+            '<span class="combo-l' + (spec.mono ? ' mono' : '') + '">' + h(o.label) + '</span>' +
+            (o.hint ? '<span class="combo-h">' + h(o.hint) + '</span>' : '') + '</div>';
+        }).join('') +
+        (spec.idle
+          ? '<div class="combo-more">' + h(spec.idleText || 'Type to search…') + '</div>'
+          : total > shown.length
+            ? '<div class="combo-more">' + (total - shown.length) +
+              ' more — keep typing to narrow the list</div>'
+            : '')
+      : '<div class="combo-none">' +
+        (spec.loading ? 'Searching…'
+          : spec.failed ? 'The search could not be reached. Try again.'
+          : spec.idle ? h(spec.idleText || 'Type to search…')
+          : (spec.emptyHtml ? spec.emptyHtml(box.value.trim()) : 'Nothing matches.')) +
+        '</div>';
+
+    if (open) show();
+  }
+
+  function pick(option) {
+    if (!option) return;
+    box.value = option.label;
+    value.value = option.value;
+    spec.known[option.value] = option.label;
+    spec.typed = false;
+    hide();
+    if (spec.onPick) spec.onPick(option.value, option);
+  }
+
+  box.addEventListener('focus', function () {
+    spec.typed = false;
+    // What a list-only box displays is the name of the choice it holds, not
+    // text to be edited. Leaving it there means a click and a keystroke append
+    // to it — "All customers" + "ridwan" — and searches for something nobody
+    // asked for. The box empties to search; blur puts the name back if nothing
+    // was picked. A free-text box keeps what it has, because there the text is
+    // the value.
+    if (!spec.allowFree) box.value = '';
+    if (spec.remote) { fetchRemote(''); return; }
+    render(true);
+  });
+
+  box.addEventListener('input', function () {
+    spec.active = -1;
+    spec.typed = true;
+    if (spec.allowFree) {
+      value.value = box.value.trim();
+      if (spec.onType) spec.onType(value.value);
+    }
+    if (spec.remote) {
+      spec.failed = false;
+      clearTimeout(spec.timer);
+      const typed = box.value.trim();
+      // Emptying the box goes back to offering nothing, at once — waiting a
+      // quarter second to show nothing is just a flicker.
+      if (!typed) { fetchRemote(''); return; }
+      spec.timer = setTimeout(function () { fetchRemote(typed); }, COMBO_WAIT);
+      render(true);
+      return;
+    }
+    render(true);
+  });
+
+  box.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (pop.hidden) render(true);
+      if (!spec.shown.length) return;
+      spec.active = e.key === 'ArrowDown'
+        ? (spec.active + 1) % spec.shown.length
+        : (spec.active <= 0 ? spec.shown.length - 1 : spec.active - 1);
+      render(true);
+      const on = pop.querySelector('.combo-opt.on');
+      if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (!pop.hidden && spec.active >= 0) { e.preventDefault(); pick(spec.shown[spec.active]); }
+      else hide();
+      return;
+    }
+    if (e.key === 'Escape') hide();
+  });
+
+  // mousedown rather than click, with the default prevented: the field keeps
+  // focus, so choosing with the mouse never races the blur handler below.
+  pop.addEventListener('mousedown', function (e) {
+    const option = e.target.closest ? e.target.closest('.combo-opt') : null;
+    if (!option) return;
+    e.preventDefault();
+    pick(spec.shown[Number(option.dataset.i)]);
+  });
+
+  box.addEventListener('blur', function () {
+    hide();
+    spec.typed = false;
+    if (spec.allowFree) {
+      value.value = box.value.trim();
+      if (spec.onType) spec.onType(value.value);
+      return;
+    }
+    // A list-only field holds only what is on the list: half a customer name is
+    // not a customer, and leaving it in the box would look like a choice.
+    const typed = box.value.trim().toLowerCase();
+    const exact = (spec.options || []).filter(function (o) {
+      return o.label.toLowerCase() === typed;
+    })[0];
+    if (exact) { value.value = exact.value; box.value = exact.label; return; }
+    box.value = labelFor(value.value);
+  });
+
+  spec.render = render;
+  render(false);
+}
+
+/** Who to ask when a customer or a unit is not on the list. */
+function adminContactText() {
+  const admins = (S.reference && S.reference.administrators) || [];
+  if (!admins.length) return 'Please contact the portal administrator.';
+  return 'Please contact the administrator: ' + admins.map(function (a) {
+    return a.name + ' (' + a.email + ')';
+  }).join(', ') + '.';
+}
+
+function adminContactHtml() {
+  const admins = (S.reference && S.reference.administrators) || [];
+  if (!admins.length) return 'Please contact the portal administrator.';
+  return 'Please contact the administrator: ' + admins.map(function (a) {
+    return h(a.name) + ' <a href="mailto:' + h(a.email) + '" target="_blank">' +
+      h(a.email) + '</a>';
+  }).join(', ') + '.';
+}
+
 /* ========================================================== claim form */
 
-const FORM = { claim: null, items: [], files: {}, lookup: null };
+const FORM = { claim: null, items: [], files: {}, lookup: null, warnedNoCover: false };
 
 function openClaimForm(existing) {
   FORM.claim = existing || null;
@@ -1059,19 +2510,19 @@ function openClaimForm(existing) {
     ? existing.items.map(function (i) {
         return {
           itemId: i.itemId, partId: i.partId, partName: i.partName, qty: i.qty, file: null,
-          advanceIssued: !!i.advanceIssued, advanceNote: i.advanceNote || '',
           hasPhoto: (existing.attachments || []).some(function (a) {
             return a.kind === 'PART' && a.itemId === i.itemId;
           })
         };
       })
-    : [{ itemId: null, partId: '', partName: '', qty: 1, file: null, hasPhoto: false,
-        advanceIssued: false, advanceNote: '' }];
+    : [{ itemId: null, partId: '', partName: '', qty: 1, file: null, hasPhoto: false }];
   FORM.files = {
     FAULT: { file: null, has: existing ? (existing.attachments || []).some(function (a) { return a.kind === 'FAULT'; }) : false },
     REPORT: { file: null, has: existing ? (existing.attachments || []).some(function (a) { return a.kind === 'REPORT'; }) : false }
   };
   FORM.lookup = null;
+  // A fresh form has not warned anybody about anything yet.
+  FORM.warnedNoCover = false;
 
   openModal({
     title: existing ? (S.session.role === ROLE.ADMIN ? 'Amend Claim' : 'Edit Claim') : 'New Warranty Claim',
@@ -1108,15 +2559,43 @@ function claimFormBody() {
       '<label class="field"><span>Customer <b class="req">*</b></span>' +
         (isProduction
           ? '<div class="ro">' + h(S.reference.productionCustomer) + '</div>'
-          : '<select id="fCustomer"><option value="">Select a customer…</option>' +
-            S.reference.customers.map(function (x) {
-              return '<option value="' + h(x.id) + '"' +
-                (c && c.customerId === x.id ? ' selected' : '') + '>' + h(x.name) + '</option>';
-            }).join('') + '</select>') +
+          : comboField({
+            id: 'fCustomer',
+            value: c ? c.customerId : '',
+            text: c ? c.customerName : '',
+            placeholder: 'Type to search customers…',
+            known: c && c.customerId
+              ? (function (m) { m[c.customerId] = c.customerName; return m; })({})
+              : {},
+            remote: searchCustomers,
+            idleText: 'Type to search customers',
+            emptyHtml: function (query) {
+              return 'No customer matches “' + h(query) + '”. ' + adminContactHtml();
+            }
+          })) +
       '</label>',
       '<label class="field"><span>Serial number <b class="req">*</b></span>' +
-        '<input type="text" id="fSerial" class="mono" value="' + h(c ? c.serialNumber : '') +
-        '" placeholder="XT2410090"></label>',
+        comboField({
+          id: 'fSerial',
+          allowFree: true,
+          mono: true,
+          value: c ? c.serialNumber : '',
+          text: c ? c.serialNumber : '',
+          placeholder: 'XT2410090',
+          remote: searchUnits,
+          idleText: 'Type a serial number to search',
+          emptyHtml: function (query) {
+            return 'No unit matches “' + h(query) + '” in the Population sheet. You can still ' +
+              'claim on it, but nothing will say which principal it belongs to. ' +
+              adminContactHtml();
+          },
+          onType: function (v) { scheduleLookup(v); },
+          onPick: function (v) { runLookup(v); }
+        }) +
+        // A div, not a span: label.field styles its own spans as the field's
+        // caption, which would shout this quiet hint back in capitals.
+        '<div class="tiny" id="serialHint"></div>' +
+      '</label>',
     '</div><div id="lookupBox"></div>',
     isAdmin && c ? '<label class="field"><span>Reason for change</span>' +
       '<input type="text" id="fReason" placeholder="Required when the serial number changes"></label>' : '',
@@ -1140,19 +2619,35 @@ function claimFormBody() {
   ].join('');
 }
 
+/** The master name behind a part id, for a row that only kept the id. */
+function partName(partId) {
+  const hit = (S.reference.parts || []).filter(function (p) { return p.id === partId; })[0];
+  return hit ? hit.name : '';
+}
+
 function partRows() {
   return FORM.items.map(function (item, index) {
     const missing = !item.hasPhoto && !item.file;
     const warn = FORM.lookup && FORM.lookup.openParts && FORM.lookup.openParts[item.partId];
     return '<div class="partrow' + (missing ? ' bad' : '') + '" data-index="' + index + '">' +
       '<span class="idx">' + (index + 1) + '</span>' +
-      '<select class="pPart">' +
-        '<option value="">Select a spare part…</option>' +
-        S.reference.parts.map(function (p) {
-          return '<option value="' + h(p.id) + '"' + (p.id === item.partId ? ' selected' : '') + '>' +
-            h(p.name) + '</option>';
-        }).join('') +
-      '</select>' +
+      comboField({
+        id: 'pPart' + index,
+        value: item.partId,
+        text: item.partName || partName(item.partId),
+        placeholder: 'Type to search spare parts…',
+        options: S.reference.parts.map(function (p) {
+          return { value: p.id, label: p.name };
+        }),
+        emptyHtml: function (query) {
+          return 'No spare part matches “' + h(query) + '”. ' + adminContactHtml();
+        },
+        onPick: function (value, option) {
+          FORM.items[index].partId = value;
+          FORM.items[index].partName = option.label;
+          refreshPartRows();
+        }
+      }) +
       '<input type="number" class="pQty qty" min="1" value="' + (item.qty || 1) + '">' +
       '<label class="filebtn' + (missing ? '' : ' has') + ' file">' +
         (item.file ? '✓ ' + h(item.file.name) : item.hasPhoto ? '✓ photo attached' : 'Choose photo…') +
@@ -1161,14 +2656,6 @@ function partRows() {
       (warn ? '<div class="notice crit" style="grid-column:1/-1">⚠ This part is already requested on ' +
         '<span class="mono">' + h(warn.claimId) + '</span> (' + h(warn.status) + ') and not yet resolved.' +
         '</div>' : '') +
-      '<label class="row" style="grid-column:1/-1;gap:7px;font-size:12px;color:var(--ink-3)">' +
-        '<input type="checkbox" class="pAdv"' + (item.advanceIssued ? ' checked' : '') + '>' +
-        '<span>Part already supplied from local stock to keep the machine running</span>' +
-      '</label>' +
-      (item.advanceIssued
-        ? '<input type="text" class="pAdvNote" style="grid-column:1/-1" placeholder="Note — when it was handed over, by whom" value="' +
-          h(item.advanceNote) + '">'
-        : '') +
     '</div>';
   }).join('');
 }
@@ -1184,19 +2671,15 @@ function fileField(kind, label, accept) {
 }
 
 function wireClaimForm() {
-  const serial = el('fSerial');
-  if (serial) {
-    let timer = null;
-    serial.addEventListener('input', function () {
-      clearTimeout(timer);
-      const value = serial.value.trim();
-      timer = setTimeout(function () { runLookup(value); }, 400);
-    });
-  }
+  wireCombo('fCustomer');
+  wireCombo('fSerial');
+  setSerialHint();
+  setSerialHint();
+
   const add = el('addPart');
   if (add) add.addEventListener('click', function () {
     FORM.items.push({ itemId: null, partId: '', partName: '', qty: 1, file: null,
-      hasPhoto: false, advanceIssued: false, advanceNote: '' });
+      hasPhoto: false });
     refreshPartRows();
   });
   wirePartRows();
@@ -1212,26 +2695,13 @@ function wireClaimForm() {
 function wirePartRows() {
   document.querySelectorAll('.partrow').forEach(function (row) {
     const index = Number(row.dataset.index);
-    row.querySelector('.pPart').addEventListener('change', function () {
-      FORM.items[index].partId = this.value;
-      FORM.items[index].partName = this.options[this.selectedIndex].text;
-      refreshPartRows();
-    });
+    wireCombo('pPart' + index);
     row.querySelector('.pQty').addEventListener('change', function () {
       FORM.items[index].qty = Math.max(1, Number(this.value) || 1);
     });
     row.querySelector('.pFile').addEventListener('change', function () {
       FORM.items[index].file = this.files[0] || null;
       refreshPartRows();
-    });
-    const adv = row.querySelector('.pAdv');
-    if (adv) adv.addEventListener('change', function () {
-      FORM.items[index].advanceIssued = this.checked;
-      refreshPartRows();
-    });
-    const advNote = row.querySelector('.pAdvNote');
-    if (advNote) advNote.addEventListener('input', function () {
-      FORM.items[index].advanceNote = this.value;
     });
     row.querySelector('.pDel').addEventListener('click', function () {
       if (FORM.items.length === 1) { toast('A claim needs at least one spare part.', 'err'); return; }
@@ -1264,36 +2734,118 @@ function refreshAttachments() {
   });
 }
 
+function setSerialHint(message) {
+  const node = el('serialHint');
+  if (!node) return;
+  // No number here. Quoting how many units are registered means counting them,
+  // and counting them means reading the Population sheet for somebody who has
+  // not asked about a single one.
+  node.textContent = message !== undefined ? message
+    : 'Type a serial number to search';
+}
+
+let lookupTimer = null;
+
+function scheduleLookup(serial) {
+  clearTimeout(lookupTimer);
+  lookupTimer = setTimeout(function () { runLookup(serial); }, 400);
+}
+
 function runLookup(serial) {
+  clearTimeout(lookupTimer);
   const box = el('lookupBox');
   if (!box) return;
-  if (!serial) { box.innerHTML = ''; FORM.lookup = null; return; }
+  if (!serial) { box.innerHTML = ''; FORM.lookup = null; FORM.warnedNoCover = false; return; }
+  // A different unit is a different question: whatever was acknowledged about
+  // the last one says nothing about this one.
+  FORM.warnedNoCover = false;
   box.innerHTML = '<div class="lookup none"><div class="l1">' + h(serial) + '</div>' +
     '<div class="tiny">Checking…</div></div>';
 
   api('claims.lookup', { serialNumber: serial }).then(function (data) {
+    // Editing an existing claim: the open-claim warning is not asked for.
+    //
+    // The claim being edited is itself an open claim on this unit, so the
+    // warning fires against the requester's own work — and the per-row "already
+    // requested on CLM-…" flag turns every part red for the same reason. There
+    // is nothing here for them to act on: they are not starting a second claim,
+    // they are finishing this one.
+    if (FORM.claim) {
+      data = Object.assign({}, data, { openClaims: [], openParts: {} });
+    }
+
     FORM.lookup = data;
     const w = data.warranty;
     const cls = w.type === WARRANTY.PRINCIPAL ? 'ok'
       : w.type === WARRANTY.OUT ? 'out'
         : w.type === WARRANTY.MANUAL ? 'manual' : 'none';
-    const verdict = w.type === WARRANTY.PRINCIPAL
-      ? 'PRINCIPAL WARRANTY — valid until ' + monthLabel(w.expiry) +
-        (w.daysRemaining !== null ? ' <span class="tiny">(' + w.daysRemaining + ' days remaining)</span>' : '')
-      : w.type === WARRANTY.OUT
-        ? 'OUT OF PRINCIPAL WARRANTY — expired ' + monthLabel(w.expiry)
-        : 'MANUAL VERIFICATION REQUIRED — the administrator will check this';
+    // Two tiers, and which of them a person is shown depends on which one is
+    // theirs to act on.
+    //
+    // What the principal still covers is our commercial position with them, and
+    // the field engineer standing at the machine can do nothing with it. What
+    // they need to know is whether WE are covering the repair — so that is the
+    // one line they get, and where it is not yet known it says so rather than
+    // answering the other question and hoping the two agree. They frequently
+    // do not; that is the entire reason for the second tier.
+    const ours = data.customerWarranty;
+    const verdict = !seesInternals()
+      ? (ours && ours.type === OUR_WARRANTY.IN
+        ? 'UNDER WARRANTY' + (ours.expiry ? ' — until ' + monthLabel(ours.expiry) : '')
+        : ours && ours.type === OUR_WARRANTY.OUT
+          ? 'OUT OF WARRANTY' + (ours.expiry ? ' — since ' + monthLabel(ours.expiry) : '')
+          : 'THE ADMINISTRATOR WILL CHECK THIS UNIT')
+      : w.type === WARRANTY.PRINCIPAL
+        ? 'PRINCIPAL WARRANTY — valid until ' + monthLabel(w.expiry) +
+          (w.daysRemaining !== null ? ' <span class="tiny">(' + w.daysRemaining + ' days remaining)</span>' : '')
+        : w.type === WARRANTY.OUT
+          ? 'OUT OF PRINCIPAL WARRANTY — expired ' + monthLabel(w.expiry)
+          : 'MANUAL VERIFICATION REQUIRED — the administrator will check this';
+
+    // The second line, for the people inside the company. Underneath it, the
+    // quadrant that costs money: their warranty has run out and ours has not.
+    const oursLine = (seesInternals() && ours)
+      ? '<div class="l3">' + (ours.type === OUR_WARRANTY.IN
+        ? 'OUR WARRANTY TO THE BUYER — valid until ' + monthLabel(ours.expiry)
+        : ours.type === OUR_WARRANTY.OUT
+          ? 'OUR WARRANTY TO THE BUYER — ended ' + monthLabel(ours.expiry)
+          : 'OUR WARRANTY TO THE BUYER — not established') + '</div>' +
+        '<div class="tiny" style="color:inherit">' + h(ours.basis) + '</div>' +
+        (data.costBorne
+          ? '<div class="tiny" style="color:inherit"><b>We absorb the cost of this one</b> — ' +
+            'the principal no longer covers it and we still do.</div>'
+          : '')
+      : '';
 
     box.innerHTML =
       '<div class="lookup ' + cls + '">' +
         '<div class="l1">' + h(data.serial) + '</div>' +
         (data.productName ? '<div>' + h(data.productName) + '</div>' : '') +
-        '<div class="tiny" style="color:inherit">Principal: ' +
-          (data.principal ? h(data.principal) : 'not attributed — the administrator will assign one') +
-          '</div>' +
-        '<div class="tiny" style="color:inherit">' + h(w.basis) + '</div>' +
+        (seesInternals()
+          ? '<div class="tiny" style="color:inherit">Principal: ' +
+            (data.principal ? h(data.principal) : 'not attributed — the administrator will assign one') +
+            '</div>' +
+            (data.distributorName && seesOurSide()
+              ? '<div class="tiny" style="color:inherit">Sold through: ' +
+                h(data.distributorName) + '</div>' : '') +
+            '<div class="tiny" style="color:inherit">' + h(w.basis) + '</div>'
+          : '') +
         '<div class="l3">' + verdict + '</div>' +
+        oursLine +
       '</div>' +
+      (data.registered === false
+        ? '<div class="notice" style="margin-top:8px">⚠ <b class="mono">' + h(data.serial) +
+          '</b> is not on the unit register' +
+          (seesInternals() ? ' the Population sheet supplies' : '') + '. ' +
+          // Said here, at the serial number, rather than after the whole form
+          // has been filled in: the answer is the same either way, and knowing
+          // it now is worth more than knowing it in five minutes.
+          'You can still fill this claim in and it will be <b>saved as a draft</b>, but it ' +
+          'cannot be submitted until the unit is registered — the administrator is asked ' +
+          'automatically, and you are emailed when it is done. ' +
+          'Worth checking the serial number against the machine first. ' +
+          adminContactHtml() + '</div>'
+        : '') +
       (data.openClaims.length
         ? '<div class="notice" style="margin-top:8px">⚠ This unit has ' + data.openClaims.length +
           ' open claim' + (data.openClaims.length === 1 ? '' : 's') + ': ' +
@@ -1307,14 +2859,88 @@ function runLookup(serial) {
   });
 }
 
+// An expiry is a month when the months were counted from the assembly month,
+// which is all the serial number carries, and a full date when they were
+// counted from a date the sheet actually holds. Rendering the second as the
+// first would say a warranty runs to the end of a month it expires part way
+// through, so the day is kept when there is one.
 function monthLabel(key) {
   if (!key) return '—';
   const parts = String(key).split('-');
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return names[Number(parts[1]) - 1] + ' ' + parts[0];
+  const month = names[Number(parts[1]) - 1];
+  if (!month) return String(key);
+  if (parts.length > 2 && parts[2]) return Number(parts[2]) + ' ' + month + ' ' + parts[0];
+  return month + ' ' + parts[0];
 }
 
 /* ------------------------------------------------------ save & submit */
+
+/**
+ * What this claim still needs before it can be submitted, in the server's own
+ * terms.
+ *
+ * submitClaim_ refuses an incomplete claim, and it is right to: a principal
+ * cannot judge a fault they cannot see. But it refuses at the end, after the
+ * claim has been saved and its files uploaded — so the claim exists, sits at
+ * Draft, and the only word about why is a toast behind a panel. Asking first
+ * costs nothing and says exactly what is missing.
+ */
+function missingForSubmit() {
+  const missing = [];
+  if (!el('fProblem').value.trim()) missing.push('a problem description');
+  if (!FORM.files.FAULT.has && !FORM.files.FAULT.file) missing.push('a fault photo');
+  if (!FORM.files.REPORT.has && !FORM.files.REPORT.file) missing.push('a service report');
+  FORM.items.forEach(function (item, index) {
+    if (item.hasPhoto || item.file) return;
+    missing.push('a photo for ' + (item.partName || 'spare part ' + (index + 1)));
+  });
+  return missing;
+}
+
+/** An error the form itself carries, where the fields are, rather than a toast. */
+function showFormProblem(message) {
+  const body = el('formBody');
+  if (!body) { toast(message, 'err'); return; }
+  let box = el('formProblem');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'formProblem';
+    box.className = 'notice crit';
+    body.insertBefore(box, body.firstChild);
+  }
+  box.innerHTML = message;
+  box.scrollIntoView({ block: 'nearest' });
+}
+
+function clearFormProblem() {
+  const box = el('formProblem');
+  if (box) box.remove();
+}
+
+/**
+ * Whether this claim is covered by nobody, said before it is sent rather than
+ * after.
+ *
+ * Out of the principal's warranty and out of ours as well means the hospital
+ * is going to be quoted for the part. Finding that out after the claim has
+ * been filed wastes a round trip and, worse, an expectation somebody has
+ * already given the hospital. A warning, not a block: an uncovered claim is a
+ * perfectly ordinary thing to file — it becomes a spare-part order.
+ *
+ * Silent when either side is still to be checked. "Nobody covers this" and
+ * "nobody has worked it out yet" are not the same sentence.
+ */
+function noCoverWarning(lookup) {
+  if (!lookup || !lookup.warranty) return '';
+  const ours = lookup.customerWarranty;
+  if (!ours) return '';
+  if (lookup.warranty.type !== WARRANTY.OUT) return '';
+  if (ours.type !== OUR_WARRANTY.OUT) return '';
+  return 'This unit is outside both warranties — the principal\u2019s and ours. ' +
+    'The claim can still be filed, but the parts will be chargeable. ' +
+    'Press <b>Submit</b> again to send it anyway.';
+}
 
 function saveForm(thenSubmit) {
   const customerId = el('fCustomer') ? el('fCustomer').value : '';
@@ -1322,11 +2948,40 @@ function saveForm(thenSubmit) {
   const problem = el('fProblem').value.trim();
   const reason = el('fReason') ? el('fReason').value.trim() : '';
 
-  if (S.session.role !== ROLE.PRODUCTION && !customerId) { toast('Choose a customer.', 'err'); return; }
+  if (S.session.role !== ROLE.PRODUCTION && !customerId) {
+    const typed = el('fCustomerText') ? el('fCustomerText').value.trim() : '';
+    toast(typed
+      ? '“' + typed + '” is not on the customer list. ' + adminContactText()
+      : 'Choose a customer.', 'err');
+    return;
+  }
   if (!serial) { toast('Enter the serial number.', 'err'); return; }
   if (FORM.items.some(function (i) { return !i.partId; })) {
     toast('Choose a spare part for every row.', 'err'); return;
   }
+
+  // The administrator's "Save changes" carries thenSubmit as well, and amends
+  // rather than submits — only a real submission has to be complete.
+  const submitting = thenSubmit && !(FORM.claim && S.session.role === ROLE.ADMIN);
+  if (submitting) {
+    const missing = missingForSubmit();
+    if (missing.length) {
+      showFormProblem('This claim cannot be submitted yet — it still needs ' +
+        missing.map(function (m) { return h(m); }).join(', ') +
+        '. <b>Save Draft</b> keeps everything you have entered, and you can add the rest later.');
+      toast('Still missing ' + missing.length + ' thing' + (missing.length === 1 ? '' : 's') +
+        ' — see the top of the form.', 'err');
+      return;
+    }
+    const uncovered = noCoverWarning(FORM.lookup);
+    if (uncovered && !FORM.warnedNoCover) {
+      FORM.warnedNoCover = true;
+      showFormProblem(uncovered);
+      toast('Nothing covers this unit — see the top of the form.', 'err');
+      return;
+    }
+  }
+  clearFormProblem();
 
   const steps = buildSteps(thenSubmit);
   showStepper(steps);
@@ -1339,10 +2994,7 @@ function saveForm(thenSubmit) {
     problem: problem,
     reason: reason,
     items: FORM.items.map(function (i) {
-      return {
-        itemId: i.itemId, partId: i.partId, qty: i.qty,
-        advanceIssued: !!i.advanceIssued, advanceNote: i.advanceNote || ''
-      };
+      return { itemId: i.itemId, partId: i.partId, qty: i.qty };
     })
   };
 
@@ -1368,23 +3020,31 @@ function saveForm(thenSubmit) {
     })
     .then(function (result) {
       closeModal();
-      toast(thenSubmit
-        ? result.claim.claimId + ' submitted.'
-        : 'Draft saved as ' + result.claim.claimId + '.', 'ok');
-      if (thenSubmit) showSubmitted(result.claim);
+      // Submitting a claim on a unit nobody has registered comes back as the
+      // draft it stayed, with the request that was raised for it.
+      const held = thenSubmit && result.claim && result.claim.unitRequest;
+      toast(held
+        ? 'Saved as a draft — the unit has to be registered first.'
+        : thenSubmit
+          ? result.claim.claimId + ' submitted.'
+          : 'Draft saved as ' + result.claim.claimId + '.', held ? 'info' : 'ok');
+      reportUploadFailures();
+      if (held) showUnitHeld(result.claim);
+      else if (thenSubmit) showSubmitted(result.claim);
       loadClaims();
     })
     .catch(function (e) {
       if (e.kind === 'stale') { showConflict(e); return; }
       closeModal();
       fail(e);
+      reportUploadFailures();
       if (claim) openClaimPanel(claim.claimId);
       loadClaims();
     });
 }
 
 function buildSteps(thenSubmit) {
-  const steps = ['Validating serial number'];
+  const steps = ['Saving the claim'];
   const partFiles = FORM.items.filter(function (i) { return i.file; });
   partFiles.forEach(function (i, n) {
     steps.push('Uploading part photo ' + (n + 1) + ' of ' + partFiles.length);
@@ -1422,6 +3082,10 @@ function completeStep(index) {
   const node = document.querySelector('[data-step="' + index + '"]');
   if (node) { node.classList.remove('now'); node.classList.add('done'); }
 }
+function failStep(index) {
+  const node = document.querySelector('[data-step="' + index + '"]');
+  if (node) { node.classList.remove('now'); node.classList.add('bad'); }
+}
 function stepProgress(index, pct) {
   const node = document.querySelector('[data-step="' + index + '"] .bar');
   if (!node) return;
@@ -1447,6 +3111,11 @@ function uploadAll(claim, startStep) {
   let step = startStep;
   let chain = Promise.resolve();
 
+  // A file that fails does not abandon the ones after it, and it is never
+  // silent: the claim is saved either way, so a lost upload would otherwise
+  // leave a claim that looks complete and cannot be submitted.
+  UPLOAD_FAILURES.length = 0;
+
   jobs.forEach(function (job) {
     const at = step++;
     chain = chain.then(function () {
@@ -1457,19 +3126,65 @@ function uploadAll(claim, startStep) {
         claimId: claim.claimId, kind: job.kind, itemId: job.itemId,
         data: prepared.data, fileName: prepared.name, mimeType: prepared.mimeType
       });
-    }).then(function () { completeStep(at); });
+    }).then(function () { completeStep(at); })
+      .catch(function (e) {
+        failStep(at);
+        UPLOAD_FAILURES.push(job.file.name + ' — ' + (e && e.message ? e.message : 'upload failed'));
+      });
   });
 
   return chain.then(function () { return step; });
+}
+
+const UPLOAD_FAILURES = [];
+
+/** Says which files did not make it, and stays on screen until dismissed. */
+function reportUploadFailures() {
+  if (!UPLOAD_FAILURES.length) return;
+  const list = UPLOAD_FAILURES.slice();
+  UPLOAD_FAILURES.length = 0;
+  toast(list.length + ' file' + (list.length === 1 ? '' : 's') + ' could not be uploaded: ' +
+    list.join('; ') + '. The claim was saved — open it and attach ' +
+    (list.length === 1 ? 'it' : 'them') + ' again.', 'err');
 }
 
 /**
  * Reads a file as base64. Photos are resized first: base64 inflates by a third,
  * and a modern phone photo would otherwise make every submission crawl.
  */
-function prepareFile(file, onProgress) {
+// Mirrors MAX_UPLOAD_BYTES on the server. The server's check is the one that
+// binds; this one saves reading a file that was never going to be accepted.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+// The principal's workbook comes through the same reader but is not an
+// attachment, and a year of population rows is legitimately bigger than a
+// photograph. Capping it at the attachment limit would break the import.
+const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
+
+// What the base64 in the payload will weigh once Drive has decoded it — the
+// same arithmetic the server does, so both sides refuse the same files.
+function base64Bytes(data) {
+  const str = String(data || '');
+  if (!str) return 0;
+  const pad = str.charAt(str.length - 1) === '=' ? (str.charAt(str.length - 2) === '=' ? 2 : 1) : 0;
+  return Math.max(0, Math.floor(str.length * 3 / 4) - pad);
+}
+
+function tooLarge(name, bytes, limit) {
+  return new Error(name + ' is ' + fileSize(bytes) + ', over the ' +
+    fileSize(limit) + ' limit.');
+}
+
+function prepareFile(file, onProgress, maxBytes) {
+  const limit = maxBytes || MAX_UPLOAD_BYTES;
   return new Promise(function (resolve, reject) {
     const isImage = /^image\//.test(file.type);
+    // A photograph is resized below and usually ends up far smaller, so only a
+    // file that will be sent as it stands is refused before being read.
+    if (!isImage && file.size > limit) {
+      reject(tooLarge(file.name, file.size, limit));
+      return;
+    }
     const reader = new FileReader();
     reader.onprogress = function (e) {
       if (e.lengthComputable && onProgress) onProgress((e.loaded / e.total) * 60);
@@ -1478,9 +3193,14 @@ function prepareFile(file, onProgress) {
 
     reader.onload = function () {
       if (!isImage) {
+        const data = String(reader.result).split(',')[1];
+        if (base64Bytes(data) > limit) {
+          reject(tooLarge(file.name, base64Bytes(data), limit));
+          return;
+        }
         if (onProgress) onProgress(100);
         resolve({
-          data: String(reader.result).split(',')[1],
+          data: data,
           name: file.name,
           mimeType: file.type || 'application/octet-stream'
         });
@@ -1494,10 +3214,16 @@ function prepareFile(file, onProgress) {
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+        // Resizing usually settles a phone photo well under the limit, but a
+        // very large scan can still land over it after the shrink.
+        if (base64Bytes(data) > limit) {
+          reject(tooLarge(file.name, base64Bytes(data), limit));
+          return;
+        }
         if (onProgress) onProgress(100);
         resolve({
-          data: dataUrl.split(',')[1],
+          data: data,
           name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
           mimeType: 'image/jpeg'
         });
@@ -1506,6 +3232,34 @@ function prepareFile(file, onProgress) {
       img.src = String(reader.result);
     };
     reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * The claim could not be submitted, and that is not a failure.
+ *
+ * Everything the engineer typed and photographed is saved and safe; what is
+ * missing is the unit, which is somebody else's job. So this says what happens
+ * next and who is doing it, rather than reporting an error at somebody who did
+ * nothing wrong.
+ */
+function showUnitHeld(claim) {
+  openModal({
+    title: 'Saved — waiting for the unit to be registered',
+    size: 'narrow',
+    body: '<p><span class="mono">' + h(claim.serialNumber) + '</span> is not on the unit ' +
+      'register, so the claim cannot be submitted yet.</p>' +
+      '<p><b>Nothing you entered is lost.</b> <span class="mono">' + h(claim.claimId) +
+      '</span> is saved as a draft with its photos, and the administrator has been asked ' +
+      'to register the unit.</p>' +
+      '<p class="tiny">You will be emailed when it is done. The draft can then be ' +
+      'submitted exactly as it stands.</p>' +
+      '<p class="tiny">If the serial number is wrong, open the draft and correct it.</p>',
+    actions: [
+      { label: 'Close', close: true },
+      { label: 'Open the draft', primary: true,
+        onClick: function (close) { close(); openClaimPanel(claim.claimId); } }
+    ]
   });
 }
 
@@ -1567,6 +3321,7 @@ function renderBatches() {
     tabButton('action', 'Needs Action', S.counts.action),
     tabButton('progress', 'In Progress'),
     tabButton('completed', 'Completed'),
+    tabButton('closed', 'Closed'),
     tabButton('all', 'All'),
     '</div>',
     '<div class="toolbar">',
@@ -1669,24 +3424,73 @@ function renderSelectionBar() {
   if (!ids.length) { host.innerHTML = ''; return; }
 
   const isAdmin = S.session.role === ROLE.ADMIN;
+  const track = selectedTrack();
+
+  // Which buttons appear follows what is selected. A principal order and a
+  // purchase request are different things to do with a part, and a selection
+  // spanning both has no single right answer — so it offers none.
+  let admin = '';
+  if (isAdmin && track === 'principal') {
+    admin = '<button class="btn sm" id="selAvail" type="button">Set Availability &amp; Document Ref</button>' +
+      '<button class="btn sm pri" id="selForward" type="button">Forward Order…</button>';
+  } else if (isAdmin && track === 'internal') {
+    admin = '<button class="btn sm" id="selStock" type="button">Fulfil from stock…</button>' +
+      '<button class="btn sm pri" id="selPr" type="button">Raise purchase request…</button>';
+  } else if (isAdmin && track === 'mixed') {
+    admin = '<span class="tiny">Principal orders and internal parts are selected together — ' +
+      'choose one list at a time.</span>';
+  }
+
+  // Orders lists parts that have already been approved — that is what puts
+  // them there. Approve and Reject belong where the decision is still open,
+  // which is the claim and batch screens, not here.
+  const decides = S.page !== 'orders';
+
   host.innerHTML = '<div class="selbar"><b>' + ids.length + ' part' +
     (ids.length === 1 ? '' : 's') + ' selected</b><span class="spacer"></span>' +
-    '<button class="btn sm ok" id="selApprove" type="button">Approve</button>' +
-    '<button class="btn sm no" id="selReject" type="button">Reject</button>' +
-    (isAdmin ? '<button class="btn sm" id="selAvail" type="button">Set Availability &amp; Document Ref</button>' +
-      '<button class="btn sm pri" id="selForward" type="button">Forward Order…</button>' : '') +
-    '</div>';
+    (decides
+      ? '<button class="btn sm ok" id="selApprove" type="button">Approve</button>' +
+        '<button class="btn sm no" id="selReject" type="button">Reject</button>'
+      : '') +
+    admin + '</div>';
 
-  el('selApprove').addEventListener('click', function () { bulkDecision('approve'); });
-  el('selReject').addEventListener('click', function () { bulkDecision('reject'); });
-  if (isAdmin) {
-    el('selAvail').addEventListener('click', promptAvailability);
-    el('selForward').addEventListener('click', promptForwardOrder);
+  if (decides) {
+    el('selApprove').addEventListener('click', function () { bulkDecision('approve'); });
+    el('selReject').addEventListener('click', function () { bulkDecision('reject'); });
   }
+  if (el('selAvail')) el('selAvail').addEventListener('click', function () { promptAvailability(false); });
+  if (el('selForward')) el('selForward').addEventListener('click', promptForwardOrder);
+  if (el('selPr')) el('selPr').addEventListener('click', function () { promptAvailability(true); });
+  if (el('selStock')) el('selStock').addEventListener('click', promptStock);
+}
+
+/** 'principal', 'internal', 'mixed' or '' — which list the selection came from. */
+function selectedTrack() {
+  let principal = false;
+  let internal = false;
+  S.rows.forEach(function (c) {
+    c.items.forEach(function (i) {
+      if (!S.selection[i.itemId]) return;
+      if (isPrincipalClaim(c)) principal = true; else internal = true;
+    });
+  });
+  if (principal && internal) return 'mixed';
+  if (principal) return 'principal';
+  return internal ? 'internal' : '';
 }
 
 function bulkDecision(decision) {
-  const ids = Object.keys(S.selection);
+  decideModal(Object.keys(S.selection), decision, function () {
+    S.selection = {};
+    S.page === 'orders' ? loadOrders() : loadBatches();
+  });
+}
+
+/**
+ * One decision over a list of parts, wherever the list came from — parts ticked
+ * on Orders, or every open part under the claims ticked on the claim list.
+ */
+function decideModal(ids, decision, after) {
   openModal({
     title: decision === 'approve' ? 'Approve selected parts' : 'Reject selected parts',
     size: 'narrow',
@@ -1701,10 +3505,8 @@ function bulkDecision(decision) {
           const reason = el('reason').value.trim();
           if (decision === 'reject' && !reason) { toast('A rejection must state its reason.', 'err'); return; }
           api('claims.decide', { itemIds: ids, decision: decision, reason: reason })
-            .then(function () {
-              close(); S.selection = {}; toast('Decision recorded.', 'ok');
-              S.page === 'orders' ? loadOrders() : loadBatches();
-            }).catch(fail);
+            .then(function () { close(); toast('Decision recorded.', 'ok'); after(); })
+            .catch(fail);
         } }
     ]
   });
@@ -1732,10 +3534,40 @@ function renderOrders() {
     return;
   }
 
-  const batches = {};
-  S.rows.forEach(function (c) { (batches[c.refNo] = batches[c.refNo] || []).push(c); });
+  // A unit still under principal warranty is ordered from the principal. One
+  // that is not never reaches them: the part is raised as a purchase request or
+  // taken from stock, and mixing the two lists invites forwarding the wrong one.
+  const principal = S.rows.filter(isPrincipalClaim);
+  const internal = S.rows.filter(function (c) { return !isPrincipalClaim(c); });
 
-  const html = Object.keys(batches).sort().reverse().map(function (ref) {
+  el('view').innerHTML = '<div class="toolbar"><h2 style="margin:0;font-size:16px">Approved parts</h2>' +
+    '<span class="spacer"></span><button class="btn" id="doExport" type="button">Export to Excel</button>' +
+    '</div>' +
+    orderSection('Principal orders', 'Ordered from the principal under their warranty.', principal) +
+    orderSection('Purchase request or stock',
+      'These units are outside principal warranty, so the principal supplies nothing. ' +
+      'Raise a purchase request, or fulfil the part from stock.', internal) +
+    '<div id="selbar"></div>';
+
+  wireOrders();
+}
+
+function isPrincipalClaim(c) { return c.warrantyType === WARRANTY.PRINCIPAL; }
+
+function orderSection(title, note, rows) {
+  return '<div class="blk"><h3>' + h(title) + '</h3>' +
+    '<p class="tiny" style="margin:0">' + h(note) + '</p>' +
+    (rows.length
+      ? orderBatches(rows)
+      : '<div class="tablewrap"><div class="empty">Nothing waiting here.</div></div>') +
+    '</div>';
+}
+
+function orderBatches(rows) {
+  const batches = {};
+  rows.forEach(function (c) { (batches[c.refNo] = batches[c.refNo] || []).push(c); });
+
+  return Object.keys(batches).sort().reverse().map(function (ref) {
     const claims = batches[ref];
     const groups = {};
     const loose = [];
@@ -1749,9 +3581,9 @@ function renderOrders() {
       });
     });
 
-    return '<div class="bulk"><div class="bulk-head"><span class="ref">' + h(ref) + '</span>' +
-      '<span class="tiny">' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') + '</span>' +
-      '</div>' +
+    return '<div class="bulk"><div class="bulk-head"><span class="ref">' + h(ref || 'no reference') +
+      '</span><span class="tiny">' + claims.length + ' claim' + (claims.length === 1 ? '' : 's') +
+      '</span></div>' +
       Object.keys(groups).map(function (doc) {
         const entries = groups[doc];
         const date = entries[0].item.availabilityDate;
@@ -1770,11 +3602,9 @@ function renderOrders() {
         : '') +
     '</div>';
   }).join('');
+}
 
-  el('view').innerHTML = '<div class="toolbar"><h2 style="margin:0;font-size:16px">Approved parts</h2>' +
-    '<span class="spacer"></span><button class="btn" id="doExport" type="button">Export to Excel</button>' +
-    '</div>' + html + '<div id="selbar"></div>';
-
+function wireOrders() {
   el('view').querySelectorAll('.pick').forEach(function (box) {
     box.addEventListener('change', function () {
       if (box.checked) S.selection[box.value] = true; else delete S.selection[box.value];
@@ -1815,32 +3645,78 @@ function orderRow(entry) {
     '<span class="nm">' + h(i.partName) + ' · <span class="dim">' + h(c.customerName) + '</span></span>' +
     '<span class="mono tiny">' + i.qty + ' pcs</span>' +
     itemPill(i.itemStatus) +
+    (i.fulfilmentRoute && i.fulfilmentRoute !== 'Principal order'
+      ? '<span class="pill flat p-wait">' + h(i.fulfilmentRoute) + '</span>' : '') +
     '<button class="btn sm ghost" data-open="' + h(c.claimId) + '" type="button">' +
       h(c.claimId) + '</button>' +
     '</div>';
 }
 
-function promptAvailability() {
+/**
+ * A purchase request is the same transaction as a principal order's schedule —
+ * a number to quote and a date to expect it by — so it is the same form, and
+ * the same transition underneath. Only the words and the route differ.
+ */
+function promptAvailability(isPr) {
   const ids = Object.keys(S.selection);
   openModal({
-    title: 'Set availability & document reference',
+    title: isPr ? 'Raise purchase request' : 'Set availability & document reference',
     size: 'narrow',
     body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') + ' selected.</p>' +
-      '<label class="field"><span>Availability date <b class="req">*</b></span>' +
-      '<input type="date" id="avail"></label>' +
-      '<label class="field"><span>Document reference <b class="req">*</b></span>' +
-      '<input type="text" id="doc" placeholder="DOC-2609-011"></label>' +
-      '<p class="tiny">Parts sharing a document reference are shown together as one shipment.</p>',
+      '<label class="field"><span>' + (isPr ? 'Expected availability' : 'Availability date') +
+      ' <b class="req">*</b></span><input type="date" id="avail"></label>' +
+      '<label class="field"><span>' + (isPr ? 'PR number' : 'Document reference') +
+      ' <b class="req">*</b></span><input type="text" id="doc" placeholder="' +
+      (isPr ? 'PR-2609-011' : 'DOC-2609-011') + '"></label>' +
+      '<p class="tiny">Parts sharing a ' + (isPr ? 'PR number' : 'document reference') +
+      ' are shown together as one shipment.</p>',
     actions: [
       { label: 'Cancel', close: true },
-      { label: 'Apply', primary: true, onClick: function (close) {
+      { label: isPr ? 'Raise PR' : 'Apply', primary: true, onClick: function (close) {
         const date = el('avail').value;
         const doc = el('doc').value.trim();
         if (!date || !doc) { toast('Both fields are required.', 'err'); return; }
-        api('claims.availability', { itemIds: ids, availabilityDate: date, documentRefNo: doc })
-          .then(function () {
-            close(); S.selection = {}; toast('Schedule recorded.', 'ok'); loadOrders();
-          }).catch(fail);
+        api('claims.availability', {
+          itemIds: ids, availabilityDate: date, documentRefNo: doc,
+          route: isPr ? 'Purchase request' : ''
+        }).then(function () {
+          close(); S.selection = {};
+          toast(isPr ? 'Purchase request recorded.' : 'Schedule recorded.', 'ok');
+          loadOrders();
+        }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/**
+ * The part is on the shelf, but it has not moved yet — so it is recorded now
+ * and marked shipped when it actually goes out, which is what the shipping
+ * date is supposed to mean.
+ */
+function promptStock() {
+  const ids = Object.keys(S.selection);
+  openModal({
+    title: 'Fulfil from stock',
+    size: 'narrow',
+    body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') +
+      ' will be taken from stock rather than ordered.</p>' +
+      '<label class="field"><span>Expected to go out</span>' +
+      '<input type="date" id="avail"></label>' +
+      '<label class="field"><span>Reference or note</span>' +
+      '<input type="text" id="doc" placeholder="e.g. stock issue note"></label>' +
+      '<p class="tiny">Nothing is shipped yet. Mark the parts as shipped when they leave, ' +
+      'so the shipping date is the day they actually did.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Fulfil from stock', primary: true, onClick: function (close) {
+        api('claims.fulfilStock', {
+          itemIds: ids,
+          availabilityDate: el('avail').value,
+          note: el('doc').value.trim()
+        }).then(function () {
+          close(); S.selection = {}; toast('Recorded as coming from stock.', 'ok'); loadOrders();
+        }).catch(fail);
       } }
     ]
   });
@@ -1884,14 +3760,324 @@ function promptForwardOrder() {
   });
 }
 
+/* ===================================================== advance issue */
+
+/**
+ * What has to go out from stock today.
+ *
+ * Recording an advance issue one claim at a time answers "what did I send
+ * against this claim?" — a question asked after the fact. The question in
+ * front of an administrator in the morning is the other one, and no screen
+ * asked it: a courier run spans claims, so this list does too.
+ *
+ * Nothing here is filtered by how far the claim has got. A machine is down;
+ * the part goes out. Whether the principal has approved it, and whether the
+ * bill lands with them or with us, is settled afterwards on the claim — the
+ * part they eventually ship replenishes the shelf instead of travelling to
+ * site.
+ */
+function loadAdvance() {
+  el('view').innerHTML = skeleton(6);
+  api('claims.advanceQueue', {}).then(function (data) {
+    S.advance = data;
+    S.counts = Object.assign({}, S.counts, { advance: data.awaiting.length });
+    S.selection = {};
+    renderChrome();
+    renderAdvance();
+  }).catch(fail);
+}
+
+function renderAdvance() {
+  const data = S.advance || { awaiting: [], issued: [] };
+  const issuedView = S.advanceView === 'issued';
+  const rows = issuedView ? data.issued : data.awaiting;
+
+  el('view').innerHTML =
+    '<div class="tabs">' +
+      '<button type="button" data-av="awaiting"' + (issuedView ? '' : ' class="on"') + '>' +
+        'To send' + (data.awaiting.length
+          ? ' <span class="count">' + data.awaiting.length + '</span>' : '') + '</button>' +
+      '<button type="button" data-av="issued"' + (issuedView ? ' class="on"' : '') + '>' +
+        'Sent from stock' + (data.issued.length
+          ? ' <span class="count">' + data.issued.length + '</span>' : '') + '</button>' +
+    '</div>' +
+    '<p class="tiny" style="margin:10px 0 0">' + (issuedView
+      ? 'Parts already supplied from local stock. What the principal sends against these ' +
+        'claims replenishes the shelf rather than travelling to site.'
+      : 'Every part on an open claim that has not left the building. A part is listed here ' +
+        'whether or not the principal has decided on it — the machine is down either way, and ' +
+        'who pays is settled on the claim afterwards.') + '</p>' +
+    (rows.length ? advanceTable(rows, issuedView)
+      : '<div class="tablewrap"><div class="empty">' + (issuedView
+        ? 'Nothing has been sent from stock yet.'
+        : 'Nothing is waiting to go out.') + '</div></div>') +
+    '<div id="advbar"></div>';
+
+  wireAdvance();
+  renderAdvanceBar();
+}
+
+function advanceTable(rows, issuedView) {
+  const head = ['<th style="width:26px"><input type="checkbox" id="advAll"></th>',
+    '<th>Claim</th>', '<th>Customer</th>', '<th>Unit</th>', '<th>Spare part</th>',
+    '<th>Claim status</th>', '<th>Part</th>',
+    issuedView ? '<th>Sent</th>' : '<th>Waiting</th>'];
+
+  const body = rows.map(function (r) {
+    return '<tr>' +
+      '<td><input type="checkbox" class="advpick" value="' + h(r.itemId) + '"' +
+        (S.selection[r.itemId] ? ' checked' : '') + '></td>' +
+      '<td class="stack"><button class="btn sm ghost" data-open="' + h(r.claimId) + '" ' +
+        'type="button">' + h(r.claimId) + '</button>' +
+        '<span class="mono tiny">' + h(r.refNo || 'no reference') + '</span></td>' +
+      '<td>' + h(r.customerName) + '</td>' +
+      '<td class="stack"><span class="mono">' + h(r.serialNumber) + '</span>' +
+        warrantyPill(r.warrantyType) + '</td>' +
+      '<td class="stack"><span>' + h(r.partName) + '</span>' +
+        '<span class="mono tiny">' + r.qty + ' pcs</span></td>' +
+      '<td>' + statusPill(r.claimStatus) + '</td>' +
+      '<td>' + itemPill(r.itemStatus) + '</td>' +
+      (issuedView
+        ? '<td class="stack"><span class="tiny">' + h(fmtDateTime(r.advanceIssuedAt)) + '</span>' +
+          '<span class="tiny dim">' + h(r.advanceIssuedBy) + '</span>' +
+          (r.advanceNote ? '<span class="tiny">“' + h(r.advanceNote) + '”</span>' : '') + '</td>'
+        : '<td>' + ageCell(r.ageDays) + '</td>') +
+      '</tr>';
+  }).join('');
+
+  return '<div class="tablewrap" style="margin-top:10px"><table class="data">' +
+    '<thead><tr>' + head.join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+
+function wireAdvance() {
+  el('view').querySelectorAll('[data-av]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      S.advanceView = b.dataset.av;
+      S.selection = {};
+      renderAdvance();
+    });
+  });
+  el('view').querySelectorAll('.advpick').forEach(function (box) {
+    box.addEventListener('change', function () {
+      if (box.checked) S.selection[box.value] = true; else delete S.selection[box.value];
+      renderAdvanceBar();
+      syncAdvanceAll();
+    });
+  });
+  el('view').querySelectorAll('[data-open]').forEach(function (b) {
+    b.addEventListener('click', function () { openClaimPanel(b.dataset.open); });
+  });
+  const all = el('advAll');
+  if (all) {
+    all.addEventListener('change', function () {
+      el('view').querySelectorAll('.advpick').forEach(function (box) {
+        box.checked = all.checked;
+        if (all.checked) S.selection[box.value] = true; else delete S.selection[box.value];
+      });
+      renderAdvanceBar();
+    });
+  }
+}
+
+/** The header box reflects the rows rather than pretending to lead them. */
+function syncAdvanceAll() {
+  const all = el('advAll');
+  if (!all) return;
+  const boxes = Array.prototype.slice.call(el('view').querySelectorAll('.advpick'));
+  const picked = boxes.filter(function (b) { return b.checked; }).length;
+  all.checked = picked > 0 && picked === boxes.length;
+  all.indeterminate = picked > 0 && picked < boxes.length;
+}
+
+function renderAdvanceBar() {
+  const host = el('advbar');
+  if (!host) return;
+  const ids = Object.keys(S.selection);
+  if (!ids.length) { host.innerHTML = ''; return; }
+
+  const issuedView = S.advanceView === 'issued';
+  host.innerHTML = '<div class="selbar"><b>' + ids.length + ' part' +
+    (ids.length === 1 ? '' : 's') + ' selected</b><span class="spacer"></span>' +
+    (issuedView
+      ? '<button class="btn sm no" id="advUndo" type="button">Not sent after all</button>'
+      : '<button class="btn sm pri" id="advSend" type="button">Record as sent from stock…</button>') +
+    '</div>';
+
+  if (el('advSend')) el('advSend').addEventListener('click', promptAdvanceBulk);
+  if (el('advUndo')) {
+    el('advUndo').addEventListener('click', function () {
+      if (!confirm('Take back the advance-issue note on ' + ids.length + ' part(s)?')) return;
+      api('claims.advanceIssue', { itemIds: ids, issued: false })
+        .then(function (r) {
+          toast(r.count + ' part(s) no longer marked as sent.', 'ok');
+          loadAdvance();
+        }).catch(fail);
+    });
+  }
+}
+
+/**
+ * One note for the whole courier run. The note is what an administrator writes
+ * to explain a shelf that is one pump short, and typing it once per claim is
+ * how it ends up not being written at all.
+ */
+function promptAdvanceBulk() {
+  const ids = Object.keys(S.selection);
+  const rows = (S.advance.awaiting || []).filter(function (r) {
+    return S.selection[r.itemId];
+  });
+  const claims = {};
+  rows.forEach(function (r) { claims[r.claimId] = true; });
+
+  openModal({
+    title: 'Record as sent from stock',
+    size: 'narrow',
+    body: '<p>' + ids.length + ' part' + (ids.length === 1 ? '' : 's') + ' across ' +
+      Object.keys(claims).length + ' claim' + (Object.keys(claims).length === 1 ? '' : 's') +
+      '.</p>' +
+      '<div class="blk"><h3>Going out</h3>' +
+      rows.map(function (r) {
+        return '<div class="itemrow"><span class="nm">' + h(r.partName) + '</span>' +
+          '<span class="mono tiny">' + r.qty + ' pcs</span>' +
+          '<span class="tiny">' + h(r.customerName) + ' · ' + h(r.serialNumber) + '</span></div>';
+      }).join('') + '</div>' +
+      '<label class="field"><span>Note (optional)</span>' +
+      '<input type="text" id="advNote" placeholder="Courier 12 Sep, replaces stock on hand"></label>' +
+      '<p class="tiny">The claims carry on unchanged. What the principal eventually sends against ' +
+      'them replenishes stock instead of travelling to site.</p>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Record', primary: true, onClick: function (close) {
+        api('claims.advanceIssue', { itemIds: ids, note: el('advNote').value.trim() })
+          .then(function (r) {
+            close();
+            toast(r.count + ' part(s) recorded as sent from stock.', 'ok');
+            loadAdvance();
+          }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/* ==================================================== cost borne by us */
+
+const COST = { from: '', to: '', cut: 'month', data: null };
+
+function loadCostReport() {
+  el('view').innerHTML = skeleton(4);
+  api('reports.cost', { from: COST.from, to: COST.to }).then(function (data) {
+    COST.data = data;
+    renderCostReport();
+  }).catch(fail);
+}
+
+/**
+ * One number, then the ways of cutting it, then the claims behind it.
+ *
+ * The top line is the answer to the question actually asked; everything below
+ * exists so that the answer can be argued with. A total nobody can trace back
+ * to a list of claim numbers does not survive its first meeting.
+ */
+function renderCostReport() {
+  const d = COST.data;
+  const t = d.totals;
+  const cut = d.cuts[COST.cut] || [];
+
+  el('view').innerHTML = [
+    '<div class="toolbar">',
+      '<label class="inline">From <input type="date" id="costFrom" value="' +
+        h(COST.from) + '"></label>',
+      '<label class="inline">To <input type="date" id="costTo" value="' +
+        h(COST.to) + '"></label>',
+      '<span class="spacer"></span>',
+      '<button class="btn" id="costExport" type="button">Export to Excel</button>',
+    '</div>',
+    '<div class="notice' + (t.claims ? '' : ' ok') + '">',
+      t.claims
+        ? 'The principal has stopped covering <b>' + t.units + '</b> unit' +
+          (t.units === 1 ? '' : 's') + ' that we still do: <b>' + t.claims + '</b> claim' +
+          (t.claims === 1 ? '' : 's') + ', <b>' + t.parts + '</b> part' +
+          (t.parts === 1 ? '' : 's') + ' on us, ' + t.shipped + ' already sent.'
+        : 'Nothing in this period is being absorbed by us.',
+    '</div>',
+    // Counts, not money. Saying so on the screen is cheaper than being asked in
+    // the meeting where the number is first used.
+    '<p class="tiny">Counts, not value — the portal holds no spare-part prices.</p>',
+    '<div class="tabs">' + d.groups.map(function (g) {
+      return '<button type="button" data-cut="' + h(g.key) + '"' +
+        (COST.cut === g.key ? ' class="on"' : '') + '>' + h(g.label) + '</button>';
+    }).join('') + '</div>',
+    '<div class="tablewrap"><table class="data"><thead><tr>' +
+      ['', 'Claims', 'Units', 'Parts', 'Shipped'].map(function (x) {
+        return '<th>' + h(x) + '</th>';
+      }).join('') + '</tr></thead><tbody>' +
+      (cut.length ? cut.map(function (b) {
+        return '<tr><td>' + h(b.key) + '</td><td class="num">' + b.claims +
+          '</td><td class="num">' + b.units + '</td><td class="num">' + b.parts +
+          '</td><td class="num">' + b.shipped + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="empty">Nothing to show.</td></tr>') +
+      '</tbody></table></div>',
+    '<h3 class="tiny" style="margin:16px 0 6px">The claims behind it</h3>',
+    '<div class="tablewrap"><table class="data"><thead><tr>' +
+      ['Claim', 'Date', 'Product', 'Serial number', 'Hospital', 'Distributor',
+        'Parts', 'Their cover ended', 'Ours ends'].map(function (x) {
+        return '<th>' + h(x) + '</th>';
+      }).join('') + '</tr></thead><tbody>' +
+      (d.rows.length ? d.rows.map(function (r) {
+        return '<tr><td class="stack"><span class="mono">' + h(r.refNo || r.claimId) +
+          '</span><span class="mono tiny">' + h(r.claimId) + '</span></td>' +
+          '<td>' + h(fmtDate(r.date)) + '</td>' +
+          '<td>' + h(r.productName) + '</td>' +
+          '<td class="mono">' + h(r.serialNumber) + '</td>' +
+          '<td>' + h(r.customerName) + '</td>' +
+          '<td' + (r.distributorName ? '' : ' class="dimmer"') + '>' +
+            h(r.distributorName || 'direct') + '</td>' +
+          '<td class="num">' + r.parts + '</td>' +
+          '<td class="tiny">' + h(monthLabel(r.warrantyExpiry)) + '</td>' +
+          '<td class="tiny">' + h(monthLabel(r.customerWarrantyExpiry)) + '</td></tr>';
+      }).join('') : '<tr><td colspan="9" class="empty">Nothing to show.</td></tr>') +
+      '</tbody></table></div>'
+  ].join('');
+
+  el('view').querySelectorAll('[data-cut]').forEach(function (b) {
+    b.addEventListener('click', function () { COST.cut = b.dataset.cut; renderCostReport(); });
+  });
+  const from = el('costFrom');
+  if (from) from.addEventListener('change', function () { COST.from = this.value; loadCostReport(); });
+  const to = el('costTo');
+  if (to) to.addEventListener('change', function () { COST.to = this.value; loadCostReport(); });
+  const ex = el('costExport');
+  if (ex) ex.addEventListener('click', function () {
+    toast('Building the report…', 'info');
+    api('reports.costExport', { from: COST.from, to: COST.to }).then(function (r) {
+      toast(r.rows + ' row(s) exported.', 'ok');
+      window.open(r.url, '_blank');
+    }).catch(fail);
+  });
+}
+
 /* ======================================================= master data */
 
 function loadMaster(kind) {
   S.master.kind = kind;
   el('view').innerHTML = skeleton(5);
+  if (kind === 'requests') {
+    api('master.unitRequests', { all: S.master.allRequests || false })
+      .then(function (data) {
+        S.master.rows = data.rows;
+        S.master.requestsOpen = data.open;
+        renderMaster(data.rows.length);
+      }).catch(fail);
+    return;
+  }
   if (kind === 'units') {
-    api('master.units', {}).then(function (data) {
+    const f = unitFilters();
+    api('master.units', {
+      search: f.search, material: f.material, distributorId: f.distributorId,
+      incomplete: f.incomplete, limit: 200
+    }).then(function (data) {
       S.master.rows = data.rows;
+      S.master.units = data;
       renderMaster(data.total);
     }).catch(fail);
     return;
@@ -1908,7 +4094,11 @@ const MASTER_TABS = [
   { id: 'customers', label: 'Customers' },
   { id: 'parts', label: 'Spare Parts' },
   { id: 'recipients', label: 'Recipients' },
-  { id: 'units', label: 'Units' }
+  { id: 'products', label: 'Products' },
+  { id: 'rules', label: 'Warranty Rules' },
+  { id: 'distributors', label: 'Distributors' },
+  { id: 'units', label: 'Units' },
+  { id: 'requests', label: 'Registration Requests' }
 ];
 
 function renderMaster(total) {
@@ -1917,29 +4107,101 @@ function renderMaster(total) {
   const active = rows.filter(function (r) { return r.Active !== false; }).length;
 
   const head = {
-    users: ['Email', 'Name', 'Role', 'Principal', 'Active', 'Claims', ''],
+    users: ['Email', 'Name', 'Role', 'Belongs to', 'Active', 'Claims', ''],
     principals: ['ID', 'Name', 'Active', 'Claims', ''],
     customers: ['ID', 'Name', 'Active', 'Claims', ''],
     parts: ['ID', 'Name', 'Active', 'Used in claims', ''],
     recipients: ['ID', 'Name', 'Email', 'Company', 'Principal', 'Active', ''],
-    units: ['Serial number', 'Product', 'Principal', 'Selling in', 'Computed warranty']
+    products: ['Material', 'Name', 'Principal', 'AKD/AKL', 'Active', 'Units', ''],
+    rules: ['Rule', 'Model', 'Side', 'Channel', 'Counted from', 'Months',
+      'Effective', 'Active', 'Units', ''],
+    distributors: ['ID', 'Name', 'Email', 'Active', 'Claims', ''],
+    units: ['Serial number', 'Product', 'Sold through', 'Principal warranty',
+      'Our warranty', 'Still needed', '']
   }[kind];
 
   const body = rows.map(function (r) {
+    if (kind === 'requests') {
+      const open = r.status === 'Open';
+      return '<tr><td class="mono">' + h(r.serialNumber) + '</td>' +
+        '<td' + (r.productGuess ? '' : ' class="dimmer"') + '>' +
+          h(r.productGuess || 'not known') + '</td>' +
+        '<td class="stack">' + h(r.customerName || '—') +
+          (r.distributorName
+            ? '<span class="tiny dim">via ' + h(r.distributorName) + '</span>' : '') + '</td>' +
+        '<td class="dim">' + h(r.requestedByName || r.requestedBy) + '</td>' +
+        '<td class="tiny">' + h(fmtDate(r.requestedAt)) + '</td>' +
+        '<td><button class="btn sm" data-draft="' + h(r.claimId) + '" type="button">' +
+          h(r.claimId) + '</button></td>' +
+        '<td>' + (open ? '<span class="pill p-wait">Waiting</span>'
+          : r.status === 'Registered' ? '<span class="pill p-ok">Registered</span>'
+            : '<span class="pill p-no">Turned down</span>') + '</td>' +
+        '<td>' + (open
+          ? '<button class="btn sm" data-register="' + h(r.serialNumber) + '" type="button">' +
+            'Register</button> <button class="btn sm" data-reject="' + h(r.requestId) +
+            '" type="button">Turn down</button>'
+          : '<span class="tiny dim">' + h(r.outcome || '') + '</span>') + '</td>' +
+        '</tr>';
+    }
     if (kind === 'units') {
-      return '<tr><td class="mono">' + h(r.serialNumber) + '</td><td>' + h(r.product) + '</td>' +
-        '<td' + (r.principal ? '' : ' class="dimmer"') + '>' +
-          h(r.principal || 'unattributed') + '</td>' +
-        '<td>' + h(r.sellingInDate) + '</td>' +
-        '<td class="stack">' + warrantyPill(r.computedType) +
-          '<span class="tiny">' + h(r.computedBasis) + '</span></td></tr>';
+      return '<tr><td class="mono">' + h(r.serialNumber) + '</td>' +
+        '<td class="stack">' + h(r.product) +
+          '<span class="tiny dim">' + h(r.material || 'no model code') + '</span></td>' +
+        '<td class="stack' + (r.distributorName ? '' : ' dimmer') + '">' +
+          h(r.distributorName || (r.channel === 'direct' ? 'sold direct' : 'not recorded')) +
+          (r.installedAt ? '<span class="tiny dim">installed ' + h(r.installedAt) + '</span>' : '') +
+          '</td>' +
+        '<td class="stack">' + warrantyPill(r.warrantyType) +
+          (r.warrantyEndPrincipal
+            ? '<span class="tiny">to ' + h(monthLabel(r.warrantyEndPrincipal)) + '</span>' : '') +
+          '</td>' +
+        '<td class="stack">' + ourWarrantyPill({
+          customerWarrantyType: r.customerWarrantyType,
+          customerWarrantyExpiry: r.warrantyEndCustomer
+        }) + '</td>' +
+        // What to go and fill in, on the row that needs it. "Manual
+        // verification required" on two thousand units is a wall; "no
+        // installation date" is an afternoon with an end to it.
+        '<td class="tiny' + (r.complete ? ' dimmer' : '') + '">' +
+          (r.complete ? '—' : h(r.missing.join('; '))) + '</td>' +
+        '<td><button class="btn sm" data-unit="' + h(r.serialNumber) + '" type="button">Edit</button></td>' +
+        '</tr>';
     }
     const cells = [];
     if (kind === 'users') {
       cells.push('<td class="mono">' + h(r.Email) + '</td>', '<td>' + h(r.Name) + '</td>',
         '<td>' + h(r.Role) + '</td>',
-        '<td' + (r.Principal ? '' : ' class="dimmer"') + '>' +
-          h(r.Principal || (r.Role === ROLE.PRINCIPAL ? 'required' : '—')) + '</td>');
+        '<td' + (r.Principal || r.Distributor ? '' : ' class="dimmer"') + '>' +
+          h(r.Distributor
+            ? (distributorLabel(r.Distributor) + ' · distributor')
+            : (r.Principal || (r.Role === ROLE.PRINCIPAL ? 'required' : 'our own staff'))) +
+          '</td>');
+    } else if (kind === 'rules') {
+      // Everything that decides which rule applies, on one line: a collision is
+      // spotted by reading down the column, not by opening each one.
+      return '<tr><td class="mono' + (r.Active ? '' : ' dimmer') + '">' + h(r.RuleID) + '</td>' +
+        '<td class="mono">' + h(r.Material) + '</td>' +
+        '<td>' + h(r.Scope === 'customer' ? 'ours to the buyer' : 'principal to us') + '</td>' +
+        '<td' + (r.Channel === '*' || !r.Channel ? ' class="dim"' : '') + '>' +
+          h(!r.Channel || r.Channel === '*' ? 'either' : r.Channel) + '</td>' +
+        '<td>' + h(r.Basis) + '</td>' +
+        '<td class="num">' + h(r.Months) + '</td>' +
+        '<td class="tiny">' + h(effectiveLabel(r)) + '</td>' +
+        '<td>' + (r.Active ? '<span class="pill p-ok">Active</span>'
+          : '<span class="pill p-draft">Retired</span>') + '</td>' +
+        '<td class="num">' + (r.__used || 0) + '</td>' +
+        '<td><button class="btn sm" data-edit="' + h(r.RuleID) + '" type="button">Edit</button></td>' +
+        '</tr>';
+    } else if (kind === 'products') {
+      cells.push('<td class="mono' + (r.Active ? '' : ' dimmer') + '">' + h(r.Material) + '</td>',
+        '<td>' + h(r.Name) + '</td>',
+        '<td' + (r.Principal ? '' : ' class="dimmer"') + '>' + h(r.Principal || '—') + '</td>',
+        '<td class="dim">' + h(r.Regulation || '—') + '</td>');
+    } else if (kind === 'distributors') {
+      cells.push('<td class="mono' + (r.Active ? '' : ' dimmer') + '">' +
+        h(r.DistributorID) + '</td>',
+        '<td>' + h(r.Name) + '</td>',
+        '<td class="mono dim">' + h(r.Email || '—') + '</td>');
     } else if (kind === 'recipients') {
       cells.push('<td class="mono">' + h(r.RecipientID) + '</td>', '<td>' + h(r.Name) + '</td>',
         '<td class="mono">' + h(r.Email) + '</td>', '<td>' + h(r.Company) + '</td>',
@@ -1966,18 +4228,31 @@ function renderMaster(total) {
       '<span class="tiny">' + total + ' item' + (total === 1 ? '' : 's') +
         (kind === 'units' ? '' : ' · ' + active + ' active') + '</span>',
       '<span class="spacer"></span>',
-      kind === 'units'
-        ? '<button class="btn pri" id="importUnits" type="button">Import from Excel</button>'
+      kind === 'requests'
+        ? '<label class="inline"><input type="checkbox" id="allRequests"' +
+          (S.master.allRequests ? ' checked' : '') + '> Show ones already handled</label>'
+        : kind === 'units'
+        ? '<button class="btn" id="updateUnits" type="button">Update from CSV</button>' +
+          '<button class="btn" id="importUnits" type="button">Import from Excel</button>' +
+          '<button class="btn pri" id="addUnit" type="button">Register unit</button>'
         : '<button class="btn pri" id="addMaster" type="button">Add</button>',
     '</div>',
+    kind === 'units' ? unitToolbar() : '',
     '<div class="tablewrap"><table class="data"><thead><tr>' +
       head.map(function (x) { return '<th>' + h(x) + '</th>'; }).join('') +
       '</tr></thead><tbody>' + body + '</tbody></table></div>',
-    kind === 'units'
+    kind === 'requests'
+      ? '<p class="tiny">A claim on a unit the register does not carry is held as a draft and ' +
+        'lands here. Registering the unit \u2014 from this row, from the Units tab, from a CSV, or ' +
+        'in the principal\u2019s own file \u2014 closes the request and emails whoever raised it, ' +
+        'and their draft goes through untouched. Turning one down leaves the draft with them.</p>'
+      : kind === 'units'
       ? '<div id="principalHealth"></div>' +
-        '<p class="tiny">Unit data is read-only here. It arrives from the principal as a file, so it ' +
-        'is replaced by import rather than edited row by row. Warranty is computed from the serial ' +
-        'number; the Status column of the source sheet is never used.</p>'
+        '<p class="tiny">The principal\u2019s file brings the serial numbers and what they are. ' +
+        'How the unit reached the hospital \u2014 direct or through a distributor, when it was ' +
+        'installed, any extension bought with it \u2014 is filled in here, one unit at a time or from ' +
+        'a CSV. Warranty dates are worked out from the rules and written back; they are not ' +
+        'editable, and the Status column of the source sheet is never used.</p>'
       : '<p class="tiny">Entries are never deleted — deactivating one hides it from selection lists ' +
         'while older claims keep showing the name they were submitted with.</p>'
   ].join('');
@@ -1995,6 +4270,35 @@ function renderMaster(total) {
   if (add) add.addEventListener('click', function () { openMasterForm(kind, null); });
   const imp = el('importUnits');
   if (imp) imp.addEventListener('click', promptImportUnits);
+  const addU = el('addUnit');
+  if (addU) addU.addEventListener('click', function () { openUnitForm(null); });
+  const upd = el('updateUnits');
+  if (upd) upd.addEventListener('click', promptUnitUpdate);
+  const allReq = el('allRequests');
+  if (allReq) allReq.addEventListener('change', function () {
+    S.master.allRequests = this.checked; loadMaster('requests');
+  });
+  el('view').querySelectorAll('[data-register]').forEach(function (b) {
+    // Straight into the unit form with the serial already in it: the whole
+    // point of the queue is that nobody retypes anything.
+    b.addEventListener('click', function () {
+      openUnitForm(null, b.dataset.register);
+    });
+  });
+  el('view').querySelectorAll('[data-reject]').forEach(function (b) {
+    b.addEventListener('click', function () { rejectUnitRequest(b.dataset.reject); });
+  });
+  el('view').querySelectorAll('[data-draft]').forEach(function (b) {
+    b.addEventListener('click', function () { openClaimPanel(b.dataset.draft); });
+  });
+  el('view').querySelectorAll('[data-unit]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      openUnitForm(rows.filter(function (r) {
+        return r.serialNumber === b.dataset.unit;
+      })[0]);
+    });
+  });
+  wireUnitToolbar();
 
   // Units the population sheet cannot place reach no principal at all, so it is
   // worth saying so rather than letting them sit unnoticed.
@@ -2019,11 +4323,446 @@ function renderMaster(total) {
   }
 }
 
+/* ------------------------------------------------------------- units screen */
+
+function unitFilters() {
+  if (!S.master.unitFilters) {
+    S.master.unitFilters = { search: '', material: '', distributorId: '', incomplete: false };
+  }
+  return S.master.unitFilters;
+}
+
+/**
+ * The controls that turn the register into a work list.
+ *
+ * "Only units still missing something", narrowed to one distributor or one
+ * model, is not a filter so much as a job: these forty units, this distributor,
+ * one email. Without it, filling the data in has no end anybody can see.
+ */
+function unitToolbar() {
+  const f = unitFilters();
+  const u = S.master.units || { total: 0, incomplete: 0, materials: [] };
+  return '<div class="toolbar">' +
+    '<input type="text" id="uSearch" class="grow" placeholder="Serial number, model, ' +
+      'distributor or hospital\u2026" value="' + h(f.search) + '">' +
+    '<select id="uMaterial"><option value="">All models</option>' +
+      (u.materials || []).map(function (m) {
+        return '<option value="' + h(m) + '"' + (f.material === m ? ' selected' : '') +
+          '>' + h(m) + '</option>';
+      }).join('') + '</select>' +
+    '<select id="uDistributor"><option value="">All distributors</option>' +
+      (S.reference.distributors || []).map(function (d) {
+        return '<option value="' + h(d.id) + '"' +
+          (f.distributorId === d.id ? ' selected' : '') + '>' + h(d.name) + '</option>';
+      }).join('') + '</select>' +
+    '<label class="inline"><input type="checkbox" id="uIncomplete"' +
+      (f.incomplete ? ' checked' : '') + '> Only units still missing something</label>' +
+    '<span class="spacer"></span>' +
+    '<span class="tiny' + (u.incomplete ? '' : ' dimmer') + '">' + u.incomplete +
+      ' of ' + u.total + ' still need something</span>' +
+    '</div>';
+}
+
+function wireUnitToolbar() {
+  const f = unitFilters();
+  const q = el('uSearch');
+  if (q) {
+    let timer = null;
+    q.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { f.search = q.value.trim(); loadMaster('units'); }, 350);
+    });
+  }
+  const m = el('uMaterial');
+  if (m) m.addEventListener('change', function () { f.material = this.value; loadMaster('units'); });
+  const d = el('uDistributor');
+  if (d) d.addEventListener('change', function () {
+    f.distributorId = this.value; loadMaster('units');
+  });
+  const i = el('uIncomplete');
+  if (i) i.addEventListener('change', function () {
+    f.incomplete = this.checked; loadMaster('units');
+  });
+}
+
+/** The fields an administrator may set, and how each is asked for. */
+const UNIT_FORM = [
+  { key: 'Material', label: 'Model code', from: 'material' },
+  { key: 'ItemDescription', label: 'Product', from: 'product' },
+  { key: 'Principal', label: 'Principal', from: 'principalName' },
+  { key: 'ShipToParty', label: 'Hospital', from: 'shipTo' },
+  { key: 'Channel', label: 'Sold', from: 'channel',
+    options: ['', 'direct', 'distributor'] },
+  { key: 'DistributorID', label: 'Distributor', from: 'distributorId', distributors: true },
+  { key: 'CustomerID', label: 'Customer ID', from: 'customerId' },
+  { key: 'SellingInDate', label: 'Selling-in date', from: 'sellingInDate', date: true },
+  { key: 'ReceivedAtDistributor', label: 'Received by distributor', from: 'receivedAtDistributor', date: true },
+  { key: 'InstalledAt', label: 'Installed (BAST)', from: 'installedAt', date: true },
+  { key: 'ExtendedMonthsPrincipal', label: 'Extended months, principal side', from: 'extendedMonthsPrincipal' },
+  { key: 'ExtendedMonthsCustomer', label: 'Extended months, our side', from: 'extendedMonthsCustomer' },
+  { key: 'ContractRef', label: 'Contract reference', from: 'contractRef' },
+  { key: 'WarrantyNote', label: 'Note', from: 'warrantyNote' }
+];
+
+function rejectUnitRequest(requestId) {
+  openModal({
+    title: 'Turn down this request',
+    size: 'narrow',
+    body: '<p class="tiny">The draft stays with whoever wrote it \u2014 correcting the serial ' +
+      'number or abandoning the claim is their decision, not yours. They are emailed the ' +
+      'reason you give here.</p>' +
+      '<label class="field"><span>Reason <b class="req">*</b></span>' +
+      '<textarea id="rejReason"></textarea></label>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Turn down', danger: true, onClick: function (close) {
+        const reason = el('rejReason').value.trim();
+        if (!reason) { toast('Say why, so the requester knows what to do.', 'err'); return; }
+        api('master.rejectUnitRequest', { requestId: requestId, reason: reason })
+          .then(function () { close(); toast('Request turned down.', 'ok'); loadMaster('requests'); })
+          .catch(fail);
+      } }
+    ]
+  });
+}
+
+function openUnitForm(record, prefillSerial) {
+  const isNew = !record;
+  const field = function (spec) {
+    const value = record ? (record[spec.from] === undefined ? '' : record[spec.from]) : '';
+    let input;
+    if (spec.options) {
+      input = '<select id="u_' + spec.key + '">' + spec.options.map(function (o) {
+        return '<option value="' + h(o) + '"' + (String(value) === o ? ' selected' : '') +
+          '>' + h(o || '\u2014 not recorded \u2014') + '</option>';
+      }).join('') + '</select>';
+    } else if (spec.distributors) {
+      input = '<select id="u_' + spec.key + '"><option value="">\u2014 none \u2014</option>' +
+        (S.reference.distributors || []).map(function (d) {
+          return '<option value="' + h(d.id) + '"' +
+            (String(value) === d.id ? ' selected' : '') + '>' + h(d.name) + '</option>';
+        }).join('') + '</select>';
+    } else {
+      input = '<input type="text" id="u_' + spec.key + '" value="' + h(value) + '"' +
+        (spec.date ? ' placeholder="dd/mm/yyyy"' : '') + '>';
+    }
+    return '<label class="field"><span>' + h(spec.label) + '</span>' + input + '</label>';
+  };
+
+  openModal({
+    title: isNew ? 'Register a unit' : 'Edit unit',
+    meta: isNew ? '' : record.serialNumber,
+    body:
+      (isNew
+        ? '<label class="field"><span>Serial number</span>' +
+          '<input type="text" id="u_Batch" class="mono" value="' +
+          h(prefillSerial || '') + '"></label>'
+        : '<p class="tiny">Warranty dates are worked out from the rules when this is saved. ' +
+          'They are not editable here.</p>') +
+      UNIT_FORM.map(field).join('') +
+      // Dates are read day first. Saying so on the form is cheaper than
+      // explaining a warranty that came out half a year wrong.
+      '<p class="tiny">Dates are read as <b>dd/mm/yyyy</b>. 03/09/2025 is 3 September.</p>' +
+      (record && !record.complete
+        ? '<div class="notice">Still needed: ' + h(record.missing.join('; ')) + '</div>'
+        : ''),
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: isNew ? 'Register' : 'Save', primary: true, onClick: function (close) {
+        const payload = { isNew: isNew };
+        payload.Batch = isNew ? el('u_Batch').value.trim() : record.serialNumber;
+        UNIT_FORM.forEach(function (spec) { payload[spec.key] = el('u_' + spec.key).value; });
+        api('master.saveUnit', payload).then(function () {
+          close();
+          toast(isNew ? payload.Batch + ' registered.' : payload.Batch + ' saved.', 'ok');
+          loadMaster(prefillSerial ? 'requests' : 'units');
+        }).catch(fail);
+      } }
+    ]
+  });
+}
+
+/* --------------------------------------------------------- update from a file */
+
+/**
+ * A delimited file, read without guessing.
+ *
+ * Excel writes a comma here and a semicolon there depending on the locale it
+ * was saved from, and a tab when it is pasted straight out of a sheet. The
+ * separator is taken from whichever of the three appears most in the header
+ * line rather than assumed, because getting it wrong turns every row into one
+ * column and the error it produces says nothing useful.
+ */
+function parseDelimited(text) {
+  const clean = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!clean) return { header: [], rows: [] };
+  const firstLine = clean.split('\n')[0];
+  const counts = [
+    { sep: '\t', n: (firstLine.match(/\t/g) || []).length },
+    { sep: ';', n: (firstLine.match(/;/g) || []).length },
+    { sep: ',', n: (firstLine.match(/,/g) || []).length }
+  ].sort(function (a, b) { return b.n - a.n; });
+  const sep = counts[0].n ? counts[0].sep : ',';
+
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (quoted) {
+      if (ch === '"' && clean[i + 1] === '"') { cell += '"'; i++; continue; }
+      if (ch === '"') { quoted = false; continue; }
+      cell += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === sep) { row.push(cell.trim()); cell = ''; continue; }
+    if (ch === '\n') { row.push(cell.trim()); rows.push(row); row = []; cell = ''; continue; }
+    cell += ch;
+  }
+  row.push(cell.trim());
+  rows.push(row);
+
+  return { header: rows[0] || [], rows: rows.slice(1), separator: sep };
+}
+
+/** Column names the file might use for each field, so most files map themselves. */
+const UNIT_ALIASES = {
+  Batch: ['batch', 'serial', 'serialnumber', 'serialno', 'sn', 'nomorseri'],
+  Material: ['material', 'model', 'materialcode', 'modelcode'],
+  Channel: ['channel', 'saleschannel', 'jalur'],
+  DistributorID: ['distributorid', 'distributor', 'distributorcode'],
+  CustomerID: ['customerid', 'customer', 'hospitalid'],
+  SellingInDate: ['sellingindate', 'sellingin', 'tanggalsellingin'],
+  ReceivedAtDistributor: ['receivedatdistributor', 'received', 'tanggalterima'],
+  InstalledAt: ['installedat', 'installed', 'bast', 'tanggalinstalasi'],
+  ExtendedMonthsPrincipal: ['extendedmonthsprincipal', 'extendedprincipal'],
+  ExtendedMonthsCustomer: ['extendedmonthscustomer', 'extendedcustomer'],
+  ContractRef: ['contractref', 'contract', 'kontrak'],
+  WarrantyNote: ['warrantynote', 'note', 'catatan']
+};
+
+function normaliseHeader(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function guessMapping(header) {
+  const map = {};
+  header.forEach(function (name, i) {
+    const key = normaliseHeader(name);
+    Object.keys(UNIT_ALIASES).forEach(function (field) {
+      if (map[field] !== undefined) return;
+      if (normaliseHeader(field) === key || UNIT_ALIASES[field].indexOf(key) !== -1) {
+        map[field] = i;
+      }
+    });
+  });
+  return map;
+}
+
+/**
+ * The mapped rows, with the file's own line number kept for the rejection list.
+ *
+ * Numbered before the blank lines are dropped, not after: a rejection that
+ * names line 7 has to mean line 7 of the file the person is looking at.
+ */
+function mappedRows(parsed, mapping) {
+  return parsed.rows
+    .map(function (r, i) {
+      const out = { __line: i + 2, __blank: !r.some(function (c) { return c !== ''; }) };
+      Object.keys(mapping).forEach(function (field) {
+        const at = mapping[field];
+        if (at === undefined || at === '' || at === -1) return;
+        out[field] = r[Number(at)] === undefined ? '' : r[Number(at)];
+      });
+      return out;
+    })
+    .filter(function (r) { return !r.__blank; });
+}
+
+const UPDATE = { parsed: null, mapping: {}, rows: [] };
+
+function promptUnitUpdate() {
+  UPDATE.parsed = null;
+  UPDATE.mapping = {};
+  UPDATE.rows = [];
+  openModal({
+    title: 'Update units from a file',
+    body:
+      '<p class="tiny">A CSV or tab-separated file, with a header row. It fills columns in on ' +
+      'units already on the register \u2014 it never adds one. Comma, semicolon and tab all work. ' +
+      'Dates are read as <b>dd/mm/yyyy</b>.</p>' +
+      '<label class="filebtn" style="padding:9px 12px">Choose file\u2026' +
+      '<input type="file" id="uFile" accept=".csv,.tsv,.txt"></label>' +
+      '<label class="field"><span>\u2026or paste it here</span>' +
+      '<textarea id="uPaste" rows="5"></textarea></label>' +
+      '<div id="uMap"></div><div id="uPreview"></div>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Check the file', onClick: function () { runUnitPreview(); } },
+      { label: 'Write the changes', primary: true, onClick: function (close) {
+        if (!UPDATE.rows.length) { toast('Check the file first.', 'err'); return; }
+        writeUnitUpdate(close);
+      } }
+    ],
+    onOpen: function () {
+      el('uFile').addEventListener('change', function () {
+        const file = this.files[0];
+        if (!file) return;
+        if (file.size > MAX_IMPORT_BYTES) {
+          toast('That file is larger than the portal will take.', 'err');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = function () { el('uPaste').value = String(reader.result); showUnitMapping(); };
+        reader.readAsText(file);
+      });
+      el('uPaste').addEventListener('change', showUnitMapping);
+    }
+  });
+}
+
+function showUnitMapping() {
+  const parsed = parseDelimited(el('uPaste').value);
+  UPDATE.parsed = parsed;
+  if (!parsed.header.length) { el('uMap').innerHTML = ''; return; }
+  UPDATE.mapping = guessMapping(parsed.header);
+
+  el('uMap').innerHTML = '<p class="tiny">' + parsed.rows.length + ' row' +
+    (parsed.rows.length === 1 ? '' : 's') + ', separated by ' +
+    (parsed.separator === '\t' ? 'tabs' : '"' + parsed.separator + '"') +
+    '. Check the columns line up:</p>' +
+    '<div class="tablewrap"><table class="data"><tbody>' +
+    Object.keys(UNIT_ALIASES).map(function (field) {
+      return '<tr><td>' + h(field) + '</td><td><select data-map="' + h(field) + '">' +
+        '<option value="">\u2014 not in this file \u2014</option>' +
+        parsed.header.map(function (name, i) {
+          return '<option value="' + i + '"' +
+            (UPDATE.mapping[field] === i ? ' selected' : '') + '>' + h(name) + '</option>';
+        }).join('') + '</select></td></tr>';
+    }).join('') + '</tbody></table></div>';
+
+  el('uMap').querySelectorAll('[data-map]').forEach(function (sel) {
+    sel.addEventListener('change', function () {
+      const field = sel.dataset.map;
+      if (sel.value === '') delete UPDATE.mapping[field];
+      else UPDATE.mapping[field] = Number(sel.value);
+      el('uPreview').innerHTML = '';
+      UPDATE.rows = [];
+    });
+  });
+}
+
+/**
+ * What would happen, before any of it happens.
+ *
+ * Every rejected row is named by its line number and its reason. "The import
+ * failed" against a two thousand row file is not something a person can do
+ * anything with.
+ */
+function runUnitPreview() {
+  if (!UPDATE.parsed) showUnitMapping();
+  if (!UPDATE.parsed || !UPDATE.parsed.header.length) {
+    toast('Choose a file or paste the rows first.', 'err');
+    return;
+  }
+  if (UPDATE.mapping.Batch === undefined) {
+    toast('One column has to be the serial number.', 'err');
+    return;
+  }
+  const rows = mappedRows(UPDATE.parsed, UPDATE.mapping);
+  api('master.previewUnits', { rows: rows }).then(function (p) {
+    UPDATE.rows = p.rejected.length ? [] : rows;
+    const changing = p.accepted - p.unchanged;
+    el('uPreview').innerHTML =
+      '<div class="notice' + (p.rejected.length ? '' : ' ok') + '">' +
+        '<b>' + changing + '</b> unit' + (changing === 1 ? '' : 's') + ' would change, ' +
+        p.unchanged + ' already say this' +
+        (p.rejected.length
+          ? ', and <b>' + p.rejected.length + '</b> row' +
+            (p.rejected.length === 1 ? '' : 's') + ' will not be accepted. ' +
+            'Nothing is written until every row is accepted.'
+          : '.') +
+      '</div>' +
+      (p.rejected.length
+        ? '<div class="tablewrap"><table class="data"><thead><tr><th>Line</th>' +
+          '<th>Serial number</th><th>Why not</th></tr></thead><tbody>' +
+          p.rejected.slice(0, 50).map(function (r) {
+            return '<tr><td class="num">' + r.line + '</td><td class="mono">' +
+              h(r.serial || '\u2014') + '</td><td class="tiny">' +
+              h(r.reasons.join('; ')) + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '') +
+      (p.sample.length
+        ? '<p class="tiny">For example: ' + p.sample.slice(0, 3).map(function (a) {
+          return h(a.serial) + ' \u2014 ' + Object.keys(a.changes).map(function (k) {
+            return k + ' \u2192 ' + (a.changes[k].to || 'blank');
+          }).join(', ');
+        }).join(' \u00b7 ') + '</p>'
+        : '');
+  }).catch(fail);
+}
+
+/**
+ * Writes it, in waves.
+ *
+ * An execution gets six minutes and each wave is a full pass over the sheet, so
+ * a large file goes up in batches that are each complete in themselves. An
+ * import that stops halfway has written half the units properly rather than all
+ * of them badly, and the screen says how far it got.
+ */
+function writeUnitUpdate(close) {
+  const all = UPDATE.rows.slice();
+  let done = 0;
+  let changed = 0;
+
+  const wave = function () {
+    if (!all.length) {
+      close();
+      toast('Updated ' + done + ' unit' + (done === 1 ? '' : 's') + '; ' +
+        changed + ' warranty date' + (changed === 1 ? '' : 's') + ' moved.', 'ok');
+      loadMaster('units');
+      return;
+    }
+    const batch = all.splice(0, 500);
+    el('uPreview').innerHTML = '<div class="notice">Writing\u2026 ' + done + ' of ' +
+      (done + batch.length + all.length) + '.</div>';
+    api('master.applyUnits', { rows: batch }).then(function (r) {
+      done += r.written;
+      changed += r.recomputed;
+      wave();
+    }).catch(function (e) {
+      el('uPreview').innerHTML = '<div class="notice">Stopped after ' + done +
+        ' unit(s). ' + h(String(e.error || e.message || e)) + '</div>';
+      fail(e);
+    });
+  };
+  wave();
+}
+
+/** A distributor's name for a stored id, falling back to the id itself. */
+function distributorLabel(id) {
+  const hit = (S.reference.distributors || []).filter(function (d) { return d.id === id; })[0];
+  return hit ? hit.name : id;
+}
+
 function masterKey(kind, r) {
   return kind === 'users' ? r.Email
     : kind === 'parts' ? r.PartID
       : kind === 'customers' ? r.CustomerID
-        : kind === 'principals' ? r.PrincipalID : r.RecipientID;
+        : kind === 'principals' ? r.PrincipalID
+          : kind === 'products' ? r.Material
+            : kind === 'rules' ? r.RuleID
+              : kind === 'distributors' ? r.DistributorID : r.RecipientID;
+}
+
+/** The period a rule covers, matched against the unit's own basis date. */
+function effectiveLabel(r) {
+  if (!r.EffectiveFrom && !r.EffectiveTo) return 'always';
+  if (!r.EffectiveFrom) return 'up to ' + r.EffectiveTo;
+  if (!r.EffectiveTo) return 'from ' + r.EffectiveFrom;
+  return r.EffectiveFrom + ' → ' + r.EffectiveTo;
 }
 
 function principalSelect(id, value, includeBlank) {
@@ -2054,7 +4793,94 @@ function openMasterForm(kind, record) {
         principalSelect('mPrincipal', record ? record.Principal : '', true) + '</label>' +
       '<p class="tiny">Required for a Principal account — it decides which claims that account ' +
         'can see and which digests it receives. Ignored for every other role.</p>' +
+      '<label class="field"><span>Distributor</span><select id="mDistributor">' +
+        '<option value="">\u2014 our own staff \u2014</option>' +
+        (S.reference.distributors || []).map(function (d) {
+          return '<option value="' + h(d.id) + '"' +
+            (record && record.Distributor === d.id ? ' selected' : '') + '>' +
+            h(d.name) + '</option>';
+        }).join('') + '</select></label>' +
+      // Two rules that are easy to get wrong from the form alone, so the form
+      // says them rather than waiting for the save to refuse.
+      '<p class="tiny">A distributor gets <b>one</b> account, and it belongs to the company ' +
+        'rather than to a person — it sees everything that company filed, whoever filed it. ' +
+        'Our own field service keeps one account each.</p>' +
       activeToggle(record);
+  } else if (kind === 'products') {
+    body =
+      '<label class="field"><span>Material code</span><input type="text" id="mMaterial" ' +
+        'class="mono" value="' + h(record ? record.Material : '') + '"' +
+        (record ? ' readonly' : '') + '></label>' +
+      '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
+        h(record ? record.Name : '') + '"></label>' +
+      '<label class="field"><span>Principal</span>' +
+        principalSelect('mPrincipal', record ? record.Principal : '', true) + '</label>' +
+      '<label class="field"><span>Regulation</span><select id="mRegulation">' +
+        ['', 'AKD', 'AKL'].map(function (o) {
+          return '<option value="' + h(o) + '"' +
+            (record && record.Regulation === o ? ' selected' : '') + '>' +
+            h(o || '\u2014 not set \u2014') + '</option>';
+        }).join('') + '</select></label>' +
+      '<label class="field"><span>Serial pattern</span><input type="text" id="mSerialPattern" ' +
+        'class="mono" value="' + h(record ? record.SerialPattern : '') + '"></label>' +
+      '<label class="field"><span>Notes</span><input type="text" id="mNotes" value="' +
+        h(record ? record.Notes : '') + '"></label>' +
+      activeToggle(record) +
+      '<p class="tiny">The material code is the key every warranty rule hangs off, and it is what ' +
+        'the principal\u2019s own file calls the model. It cannot be changed once units refer to it.</p>';
+  } else if (kind === 'rules') {
+    const opt = function (id, values, current, labels) {
+      return '<select id="' + id + '">' + values.map(function (v, i) {
+        return '<option value="' + h(v) + '"' + (String(current) === v ? ' selected' : '') +
+          '>' + h(labels ? labels[i] : v) + '</option>';
+      }).join('') + '</select>';
+    };
+    body =
+      '<label class="field"><span>Model</span><input type="text" id="mMaterial" class="mono" ' +
+        'value="' + h(record ? record.Material : '') + '"></label>' +
+      '<label class="field"><span>Which side</span>' +
+        opt('mScope', ['principal', 'customer'], record ? record.Scope : 'principal',
+          ['What the principal covers for us', 'What we cover for the buyer']) + '</label>' +
+      '<label class="field"><span>Sales channel</span>' +
+        opt('mChannel', ['*', 'direct', 'distributor'],
+          record ? (record.Channel || '*') : '*',
+          ['Either way', 'Sold direct', 'Sold through a distributor']) + '</label>' +
+      '<label class="field"><span>Counted from</span>' +
+        opt('mBasis', ['assembly', 'selling-in', 'received', 'installation'],
+          record ? record.Basis : 'assembly',
+          ['The assembly month in the serial number', 'The selling-in date',
+            'The date the distributor received it', 'The installation (BAST) date']) + '</label>' +
+      '<label class="field"><span>Months</span><input type="number" id="mMonths" min="1" ' +
+        'step="1" value="' + h(record ? record.Months : '') + '"></label>' +
+      '<label class="field"><span>Effective from</span><input type="text" id="mFrom" ' +
+        'placeholder="dd/mm/yyyy" value="' + h(record ? record.EffectiveFrom : '') + '"></label>' +
+      '<label class="field"><span>Effective to</span><input type="text" id="mTo" ' +
+        'placeholder="dd/mm/yyyy" value="' + h(record ? record.EffectiveTo : '') + '"></label>' +
+      '<label class="field"><span>Notes</span><input type="text" id="mNotes" value="' +
+        h(record ? record.Notes : '') + '"></label>' +
+      activeToggle(record) +
+      // Two things nobody guesses right the first time, so the form says them.
+      '<p class="tiny">The effective dates are matched against <b>the unit\u2019s own</b> starting ' +
+        'date, never against today \u2014 entering next year\u2019s terms leaves every unit already ' +
+        'sold exactly where it is. Leave both blank for a rule with no end dates.</p>' +
+      '<p class="tiny">Saving works every unit\u2019s warranty out again, so the change shows up ' +
+        'on the claims immediately.</p>' +
+      (record && record.__used
+        ? '<div class="notice">\u26a0 ' + record.__used + ' unit' +
+          (record.__used === 1 ? '' : 's') + ' of this model are governed by rules like this one. ' +
+          'Retiring it rather than editing it keeps what past claims decided readable.</div>'
+        : '');
+  } else if (kind === 'distributors') {
+    body =
+      '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
+        h(record ? record.Name : '') + '"></label>' +
+      '<label class="field"><span>Account email</span><input type="email" id="mEmail" value="' +
+        h(record ? record.Email : '') + '"></label>' +
+      '<label class="field"><span>Notes</span><input type="text" id="mNotes" value="' +
+        h(record ? record.Notes : '') + '"></label>' +
+      activeToggle(record) +
+      '<p class="tiny">One account per distributor company, not per person. Whoever sits behind ' +
+        'it may change; the claim history stays where it is.</p>';
   } else if (kind === 'recipients') {
     body =
       '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
@@ -2088,12 +4914,38 @@ function openMasterForm(kind, record) {
     actions: [
       { label: 'Cancel', close: true },
       { label: 'Save', primary: true, onClick: function (close) {
-        const payload = { Active: el('mActive').checked };
+        // The product list is keyed by a code somebody types, so the server has
+        // to be told this is an add rather than an edit of whatever is already
+        // under that code.
+        const payload = { Active: el('mActive').checked, __isNew: isNew };
         if (kind === 'users') {
           payload.Email = el('mEmail').value.trim().toLowerCase();
           payload.Name = el('mName').value.trim();
           payload.Role = el('mRole').value;
           payload.Principal = el('mPrincipal').value;
+          payload.Distributor = el('mDistributor').value;
+        } else if (kind === 'products') {
+          payload.Material = el('mMaterial').value.trim().toUpperCase();
+          payload.Name = el('mName').value.trim();
+          payload.Principal = el('mPrincipal').value;
+          payload.Regulation = el('mRegulation').value;
+          payload.SerialPattern = el('mSerialPattern').value.trim();
+          payload.Notes = el('mNotes').value.trim();
+        } else if (kind === 'rules') {
+          payload.RuleID = record ? record.RuleID : '';
+          payload.Material = el('mMaterial').value.trim().toUpperCase();
+          payload.Scope = el('mScope').value;
+          payload.Channel = el('mChannel').value;
+          payload.Basis = el('mBasis').value;
+          payload.Months = el('mMonths').value.trim();
+          payload.EffectiveFrom = el('mFrom').value.trim();
+          payload.EffectiveTo = el('mTo').value.trim();
+          payload.Notes = el('mNotes').value.trim();
+        } else if (kind === 'distributors') {
+          payload.DistributorID = record ? record.DistributorID : '';
+          payload.Name = el('mName').value.trim();
+          payload.Email = el('mEmail').value.trim();
+          payload.Notes = el('mNotes').value.trim();
         } else if (kind === 'recipients') {
           payload.RecipientID = record ? record.RecipientID : '';
           payload.Name = el('mName').value.trim();
@@ -2141,7 +4993,7 @@ function promptImportUnits() {
         const file = el('unitFile').files[0];
         if (!file) { toast('Choose a file first.', 'err'); return; }
         toast('Importing — this can take a minute.', 'info');
-        prepareFile(file).then(function (prepared) {
+        prepareFile(file, null, MAX_IMPORT_BYTES).then(function (prepared) {
           return api('master.import', {
             data: prepared.data, fileName: prepared.name, mimeType: file.type
           });
@@ -2336,13 +5188,107 @@ function saveTemplate() {
 
 /* ============================================================= audit */
 
+/**
+ * What the portal has actually sent.
+ *
+ * sendMail_ has always written every attempt here, delivered or not, but
+ * nothing ever showed it — so "was the administrator notified?" had no answer
+ * short of opening the spreadsheet. In test mode nothing reaches the real
+ * recipients at all: the message is redirected to the tester, and this is where
+ * that becomes visible rather than surprising.
+ */
+function loadEmailLog() {
+  el('view').innerHTML = skeleton(6);
+  api('email.log', { limit: 200 }).then(function (data) {
+    const rows = data.rows || [];
+    const failed = rows.filter(function (r) { return r.status !== 'Sent'; }).length;
+    el('view').innerHTML =
+      '<div class="toolbar"><h2 style="margin:0;font-size:16px">Email Log</h2>' +
+        '<span class="tiny">' + rows.length + ' message' + (rows.length === 1 ? '' : 's') +
+        (failed ? ' · ' + failed + ' not delivered' : '') + '</span>' +
+        '<span class="spacer"></span>' +
+        '<label class="row" style="gap:7px;font-size:12.5px">' +
+          '<input type="checkbox" id="mailOn"' + (data.enabled ? ' checked' : '') + '>' +
+          '<span>Send email notifications</span></label>' +
+      '</div>' +
+      (data.enabled ? '' :
+        '<div class="notice">⚠ Email notifications are switched off. Claims still move ' +
+        'through the workflow and every message is still recorded below — nothing is sent.</div>') +
+      (rows.length
+        ? '<div class="tablewrap"><table class="data"><thead><tr>' +
+          '<th>Sent</th><th>Template</th><th>To</th><th>Subject</th>' +
+          '<th>Claim</th><th>Status</th></tr></thead><tbody>' +
+          rows.map(function (r) {
+            return '<tr class="click" data-email="' + h(r.emailId) + '">' +
+              '<td class="tiny">' + h(fmtDateTime(r.sentAt)) + '</td>' +
+              '<td class="tiny mono">' + h(r.code) + (r.isTest ? ' <b>[TEST]</b>' : '') + '</td>' +
+              '<td class="tiny">' + h(r.to || '—') + '</td>' +
+              '<td>' + h(r.subject) + '</td>' +
+              '<td class="tiny mono">' + h(r.claimIds || r.refNo || '') + '</td>' +
+              '<td>' + (r.status === 'Sent'
+                ? '<span class="pill p-ok">Sent</span>'
+                : '<span class="pill p-no">' + h(r.status) + '</span>' +
+                  (r.error ? '<div class="tiny">' + h(r.error) + '</div>' : '')) +
+              '</td></tr>';
+          }).join('') +
+          '</tbody></table></div>'
+        : '<div class="tablewrap"><div class="empty">Nothing has been sent yet.</div></div>') +
+      '<p class="tiny">Every message the portal attempts is recorded here, sent or not. ' +
+        'In test mode nothing reaches the real recipients — the message is redirected to the ' +
+        'tester\'s own address and marked <b>[TEST]</b>.</p>';
+
+    el('view').querySelectorAll('[data-email]').forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        const row = rows.filter(function (r) { return r.emailId === tr.dataset.email; })[0];
+        if (row) showEmail(row);
+      });
+    });
+
+    el('mailOn').addEventListener('change', function () {
+      const wanted = this.checked;
+      api('email.setEnabled', { enabled: wanted })
+        .then(function () {
+          toast(wanted ? 'Email notifications are on.' : 'Email notifications are off.', 'ok');
+          loadEmailLog();
+        })
+        .catch(function (e) { fail(e); loadEmailLog(); });
+    });
+  }).catch(fail);
+}
+
+function showEmail(row) {
+  openModal({
+    title: row.subject,
+    meta: row.emailId,
+    body: '<div class="blk">' +
+        kv('Sent', fmtDateTime(row.sentAt)) + kv('Template', row.code + ' v' + row.version) +
+        kv('To', row.to || '—') + (row.cc ? kv('Cc', row.cc) : '') +
+        kv('Claim', row.claimIds || '—') + kv('Status', row.status) +
+        (row.error ? '<div class="notice crit">' + h(row.error) + '</div>' : '') +
+      '</div>' +
+      '<div class="mail"><div class="mail-body">' + h(row.body) + '</div></div>',
+    actions: [{ label: 'Close', close: true }]
+  });
+}
+
+// Which year the Audit Log screen is showing. Empty means the current one,
+// which is what the server picks when it is not told.
+let AUDIT_YEAR = '';
+
 function loadAudit() {
   el('view').innerHTML = skeleton(6);
-  api('audit.list', { limit: 200 }).then(function (data) {
+  api('audit.list', { limit: 200, year: AUDIT_YEAR }).then(function (data) {
+    AUDIT_YEAR = data.year;
     el('view').innerHTML =
       '<div class="toolbar"><h2 style="margin:0;font-size:16px">Audit Log</h2>' +
-        '<span class="tiny">' + data.total + ' entries · showing the most recent ' +
-        data.rows.length + '</span></div>' +
+        '<select id="auditYear" style="width:auto;min-width:100px">' +
+          data.years.map(function (y) {
+            return '<option value="' + h(y) + '"' +
+              (y === data.year ? ' selected' : '') + '>' + h(y) + '</option>';
+          }).join('') +
+        '</select>' +
+        '<span class="tiny">' + data.total + ' entries in ' + h(data.year) +
+        ' · showing the most recent ' + data.rows.length + '</span></div>' +
       '<div class="tablewrap"><table class="data"><thead><tr>' +
         '<th>When</th><th>Actor</th><th>Claim</th><th>Action</th><th>Field</th>' +
         '<th>Change</th><th>Reason</th></tr></thead><tbody>' +
@@ -2357,7 +5303,16 @@ function loadAudit() {
               ? h(r.oldValue || '(empty)') + ' → ' + h(r.newValue || '(empty)') : '') + '</td>' +
             '<td class="tiny">' + h(r.reason) + '</td></tr>';
         }).join('') +
-      '</tbody></table></div>';
+      '</tbody></table></div>' +
+      (data.years.length > 1
+        ? '<p class="tiny">Entries from a finished year are kept on their own sheet ' +
+          'so this screen only ever reads one year at a time. Nothing is deleted.</p>'
+        : '');
+
+    el('auditYear').addEventListener('change', function () {
+      AUDIT_YEAR = this.value;
+      loadAudit();
+    });
   }).catch(fail);
 }
 </script>

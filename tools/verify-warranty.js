@@ -38,7 +38,7 @@ vm.createContext(sandbox);
 // Both files are run as one script: a top-level `const` in a vm script stays in
 // that script's own scope, so loading them separately would hide Config's
 // constants from Warranty.
-const source = ['Config.gs', 'Warranty.gs']
+const source = ['Config.gs', 'Warranty.gs', 'WarrantyRules.gs']
   .map(function (file) { return fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8'); })
   .concat(['globalThis.__api = { parseSerial_, determineWarranty_, WARRANTY_TYPE, SHEET };'])
   .join('\n');

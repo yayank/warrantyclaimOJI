@@ -11,53 +11,103 @@
  */
 
 function exportClaims_(session, filter) {
-  const result = listClaims_(session, filter || {});
+  // Everything the filter matches, not the page the screen happens to be
+  // showing: an export of the first fifty rows is a wrong report, not a short
+  // one. listClaims_ pages only when asked, and this never asks.
+  const wanted = Object.assign({}, filter || {});
+  delete wanted.limit;
+  delete wanted.offset;
+  const result = listClaims_(session, wanted);
   const flat = (filter && filter.view === 'item');
+
+  // The customer side is ours, not the principal's. listClaims_ has already
+  // taken those fields out of the rows for a principal; leaving the columns in
+  // would produce a report of blanks that still says what the columns are.
+  const twoTier = session.role !== ROLE.PRINCIPAL;
+  const tierHead = twoTier
+    ? ['Distributor', 'Our warranty', 'Our warranty basis', 'Cost borne by us'] : [];
+  function tierCells(c) {
+    return twoTier
+      ? [c.distributorName || '', c.customerWarrantyType || '',
+        c.customerWarrantyBasis || '', c.costBorne ? 'Yes' : '']
+      : [];
+  }
 
   const header = flat
     ? ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
-      'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Spare part', 'Qty',
-      'Item status', 'Advance issue', 'Reason', 'Availability date', 'Document ref',
-      'Shipped at', 'Part return', 'Requested by', 'Status', 'Attachments']
+      'Principal warranty', 'Principal warranty basis']
+      .concat(tierHead, ['Work order', 'Problem', 'Spare part', 'Qty',
+        'Item status', 'Advance issue', 'Reason', 'Availability date', 'Document ref',
+        'Shipped at', 'Part return', 'Requested by', 'Status', 'Attachments'])
     : ['Claim ID', 'Reference', 'Date', 'Principal', 'Customer', 'Serial number', 'Product',
-      'Warranty', 'Warranty basis', 'Work order', 'Problem', 'Parts', 'Approved',
-      'Rejected', 'Pending', 'Advance issued', 'Requested by', 'Status', 'Attachments'];
+      'Principal warranty', 'Principal warranty basis']
+      .concat(tierHead, ['Work order', 'Problem', 'Parts', 'Approved',
+        'Rejected', 'Pending', 'Advance issued', 'Requested by', 'Status', 'Attachments']);
 
   const folderLink = claimFolderLink_();
   const rows = [header];
 
   result.rows.forEach(function (c) {
     const link = folderLink(c);
-    if (flat) {
+    if (flat && !c.items.length) {
+      // One row per spare part loses a claim that has none yet — a draft, or a
+      // claim whose parts were all removed. The claim is what was asked for;
+      // the part columns are simply blank.
+      rows.push([
+        c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+      ].concat(tierCells(c), [
+        c.workOrderNo, c.problem, '', '', '', '', '', '', '', '', '',
+        c.requesterName, c.status, link
+      ]));
+    } else if (flat) {
       c.items.forEach(function (i) {
         rows.push([
           c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-          c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-          c.problem, i.partName, i.qty, i.itemStatus,
+          c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+        ].concat(tierCells(c), [
+          c.workOrderNo, c.problem, i.partName, i.qty, i.itemStatus,
           i.advanceIssued ? 'Yes — ' + (i.advanceNote || 'issued from local stock') : '',
           i.decisionReason, i.availabilityDate, i.documentRefNo, i.shippedAt,
           i.partReturnNote, c.requesterName, c.status, link
-        ]);
+        ]));
       });
     } else {
       rows.push([
         c.claimId, c.refNo, c.submittedAt || c.createdAt, c.principal, c.customerName,
-        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis, c.workOrderNo,
-        c.problem,
+        c.serialNumber, c.productName, c.warrantyType, c.warrantyBasis
+      ].concat(tierCells(c), [
+        c.workOrderNo, c.problem,
         c.items.map(function (i) { return i.partName + ' ×' + i.qty; }).join('; '),
         c.summary.approved, c.summary.rejected, c.summary.pending, c.summary.advance,
         c.requesterName, c.status, link
-      ]);
+      ]));
     }
   });
 
-  const name = exportFileName_(filter);
+  return writeWorkbook_(exportFileName_(filter), 'Claims', rows);
+}
+
+/**
+ * Rows to an .xlsx in Drive, and a link to it.
+ *
+ * Apps Script cannot start a download from inside its own iframe, so the file
+ * is built as a spreadsheet, fetched back as xlsx, and dropped in the export
+ * folder. Shared here rather than copied because there is more than one report
+ * now, and two copies of this would eventually disagree about the cleanup.
+ */
+function writeWorkbook_(name, sheetName, rows) {
+  const width = rows.reduce(function (w, r) { return Math.max(w, r.length); }, 0);
   const temp = SpreadsheetApp.create(name);
   try {
     const sheet = temp.getSheets()[0];
-    sheet.setName('Claims');
-    sheet.getRange(1, 1, rows.length, header.length).setValues(rows);
-    sheet.getRange(1, 1, 1, header.length).setFontWeight('bold');
+    sheet.setName(sheetName);
+    sheet.getRange(1, 1, rows.length, width).setValues(rows.map(function (r) {
+      const line = r.slice();
+      while (line.length < width) line.push('');
+      return line;
+    }));
+    sheet.getRange(1, 1, 1, width).setFontWeight('bold');
     sheet.setFrozenRows(1);
     SpreadsheetApp.flush();
 

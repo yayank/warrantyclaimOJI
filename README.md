@@ -51,13 +51,52 @@ Yang disunting tetap `src/`. Setelah berubah, jalankan `node tools/bundle.js` un
 ```bash
 node tools/verify-warranty.js units.json    # 22 pemeriksaan
 node tools/verify-access.js                 # 27 pemeriksaan
-node tools/verify-templates.js              # 18 pemeriksaan
-node tools/verify-sheets.js                 # 25 pemeriksaan
+node tools/verify-templates.js              # 19 pemeriksaan
+node tools/verify-sheets.js                 # 27 pemeriksaan
+node tools/verify-payload.js                # 13 pemeriksaan
+node tools/verify-tabs.js                   # 364 pemeriksaan
+node tools/verify-cache.js                  # 11 pemeriksaan
+node tools/verify-fulfilment.js             # 18 pemeriksaan
+node tools/verify-closing.js                # 12 pemeriksaan
+node tools/verify-unit.js                   # 21 pemeriksaan
+node tools/verify-actions.js                # 17 pemeriksaan
+node tools/verify-advance.js                # 17 pemeriksaan
+node tools/verify-save.js                   # 15 pemeriksaan
+node tools/verify-search.js                 # 25 pemeriksaan
+node tools/verify-grouping.js               # 70 pemeriksaan
+node tools/verify-paging.js                 # 18 pemeriksaan
+node tools/verify-audit.js                  # 42 pemeriksaan
+node tools/verify-summary.js                # 75 pemeriksaan
+node tools/verify-views.js                  # 51 pemeriksaan
+node tools/verify-bulk.js                   # 69 pemeriksaan
+node tools/verify-visits.js                 # 39 pemeriksaan
+node tools/verify-rules.js                  # 65 pemeriksaan
+node tools/verify-unit-warranty.js          # 54 pemeriksaan
+node tools/verify-two-tier.js               # 57 pemeriksaan
+node tools/verify-unit-admin.js             # 56 pemeriksaan
+node tools/verify-rules-admin.js            # 57 pemeriksaan
+node tools/verify-unit-requests.js          # 50 pemeriksaan
+node tools/verify-cost-report.js            # 35 pemeriksaan
+node tools/verify-distributor-access.js     # 31 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.
 
+Penguji payload menjalankan `Repo.gs` dan `Claims.gs` di atas sheet `Claims` yang selnya berisi `Date` sungguhan — persis seperti yang Sheets lakukan pada stempel waktu ISO yang ditulis aplikasi ini. `google.script.run` menolak `Date` di mana pun dalam nilai kembalian: panggilannya gagal dan halaman menerima `null`, sehingga satu sel saja bisa mengosongkan seluruh layar klaim.
+
 Penguji sheet menjalankan `Repo.gs` terhadap spreadsheet tiruan dan membuktikan bahwa baris pertama yang berisi data tidak pernah dibaca sebagai baris judul — persoalan nyata pada sheet `Customer` dan `sparepart` yang datang dari workbook lama tanpa judul kolom, yang membuat dropdown terisi baris kosong.
+
+Penguji audit membuktikan bahwa pemindahan jejak tahun lama ke sheet arsipnya sendiri tidak pernah menghilangkan satu baris pun — termasuk ketika trigger berjalan dua kali dan ketika ia mati di tengah, setelah menyalin tetapi sebelum menghapus. Penguji yang sama memeriksa batas ukuran lampiran di kedua sisi, klien dan server, terhadap angka yang sama.
+
+Ukur biaya satu `claims.list` dengan `node tools/measure-list.js` — ia menghitung panggilan `getValues()` beserta jumlah selnya, sehingga perubahan cara daftar dijawab bisa dinilai dari angka, bukan dari argumen.
+
+Penguji ringkasan menjaga kolom hitungan pada baris `Claims` — salinan dari `ClaimItems` yang dipakai aturan tab. Salinan yang melenceng diam-diam lebih buruk daripada tidak ada salinan, jadi penguji ini menelusuri **setiap** klaim setelah **setiap** jenis perubahan item dan membandingkan angka tersimpan dengan hitungan segar dari `ClaimItems`. Ia juga membaca `src/Claims.gs` sebagai teks: jalur mana pun yang menulis item tanpa menghitung ulang akan gagal di sini, sebelum ada yang sempat memikirkan fixture untuknya.
+
+Penguji saved views menjaga satu jebakan yang tidak kelihatan dari layar: aplikasi web ini dijalankan sebagai orang yang men-deploy-nya, jadi `PropertiesService.getUserProperties()` — tempat yang paling wajar untuk preset per pengguna — sebenarnya milik satu orang itu untuk semua pengunjung. Preset karenanya disimpan pada properti skrip dengan alamat si penandatangan sebagai kuncinya, dan pemeriksaan pertama di penguji itu adalah dua orang yang menyimpan di pagi yang sama tetap punya presetnya masing-masing.
+
+Penguji aksi massal menjaga dua hal yang sama-sama tidak terlihat saat rusak: batch yang berhenti separuh jalan tanpa ada yang menyebut separuh mana, dan bilah pilihan yang menawarkan langkah untuk pilihan yang mencakup dua status. Ia juga mengukur bahwa jalur batch tidak membangun panel klaim penuh per klaim — 39 pembacaan versus 54 bila dijalankan satu per satu.
+
+Penguji kunjungan menjaga dua aturan yang membedakan penanda "baru" yang berguna dari yang mengganggu: batasnya bergerak saat halaman dibuka setelah benar-benar pergi — **tidak pernah saat daftar digambar**, berapa kali pun itu terjadi — dan perubahan oleh diri sendiri tidak pernah ditandai. Jamnya digerakkan dengan tangan, karena pengujian yang menunggu menit sungguhan adalah pengujian yang tidak pernah dijalankan.
 
 Penguji akses membuktikan pemisahan antar principal: dua principal tidak pernah saling melihat klaim, klaim yang belum terpetakan tidak sampai ke siapa pun, dan klaim uji tersembunyi dari semua peran kecuali Tester.
 

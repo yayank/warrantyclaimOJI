@@ -92,8 +92,14 @@ check('a template keeping only some required tokens still fails',
 check('the amendment template requires the change list, not just the claim id',
   defaultTemplate_(TEMPLATE.CLAIM_AMEND).required.indexOf('{{#Changes}}') !== -1);
 
-check('all seven templates are defined', DEFAULT_TEMPLATES.length === 7,
-  String(DEFAULT_TEMPLATES.length));
+check('every template code has a built-in behind it',
+  Object.keys(TEMPLATE).every(function (k) { return !!defaultTemplate_(TEMPLATE[k]); }),
+  Object.keys(TEMPLATE).filter(function (k) {
+    return !defaultTemplate_(TEMPLATE[k]);
+  }).join(', '));
+check('and no built-in exists that nothing can send',
+  DEFAULT_TEMPLATES.length === Object.keys(TEMPLATE).length,
+  DEFAULT_TEMPLATES.length + ' built-ins for ' + Object.keys(TEMPLATE).length + ' codes');
 
 /* -------------------------------------- a realistic digest renders in full */
 

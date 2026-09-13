@@ -1,6 +1,11 @@
 /**
  * Warranty.gs — principal warranty from the serial number.
  *
+ * This is now the fallback rather than the rule. WarrantyRules.gs answers from
+ * the terms recorded per model; what is below is what happens when no rule on
+ * file covers the unit, and it is kept because the whole XT population relies
+ * on it until the rules sheet is filled in.
+ *
  * The serial number carries the assembly month, and that is the only reliable
  * starting point: measured from the selling-in date the same units scatter
  * across 13-22 months, while assembly + 22 months matches 1,112 of the 1,113
@@ -61,10 +66,37 @@ function endOfMonth_(year, month) {
 /**
  * Determines the principal warranty for a serial number.
  * Returns {type, expiry, basis, assemblyMonth, daysRemaining, source}.
+ *
+ * The shape of that answer is fixed: every caller in the application reads
+ * those six fields, so the rules engine is folded in behind them rather than
+ * beside them.
+ *
+ * A rule that matches decides the answer, including when it decides the answer
+ * is "somebody has to look at this" — a rule counting from the installation
+ * date on a unit with no installation date must not quietly become 22 months
+ * from assembly. Only when no rule matches at all does the serial-number
+ * formula below get a say, which is what keeps every unit answered the way it
+ * is answered today until the rules sheet is filled in.
  */
 function determineWarranty_(serial, today) {
   const now = today || new Date();
   const parsed = parseSerial_(serial);
+  const assemblyOf = parsed ? monthKey_(parsed.year, parsed.month) : '';
+
+  const unit = unitOf_(serial);
+  if (unit && unit.Material) {
+    const ruled = resolveWarranty_(unit, WARRANTY_SCOPE.PRINCIPAL, now);
+    if (ruled.source === 'rule') {
+      return {
+        type: ruled.type,
+        expiry: ruled.expiry,
+        assemblyMonth: assemblyOf,
+        basis: ruled.basis,
+        daysRemaining: ruled.daysRemaining,
+        source: 'rule'
+      };
+    }
+  }
 
   if (!parsed) {
     return {
@@ -144,21 +176,29 @@ function warrantyTableExpiry_(serial) {
   return { year: Number(m[2]), month: Number(m[1]) };
 }
 
+/**
+ * Indexes held for the life of one execution.
+ *
+ * A single save reads the same index three times over — the warranty verdict,
+ * the product name and the owning principal — and the claims list reads it once
+ * per row. Holding it here turns that back into one read; the cache below turns
+ * the next request's read into none.
+ */
+const INDEX_MEMO = {};
+
 function warrantyIndex_() {
-  const cache = CacheService.getScriptCache();
-  const hit = cache.get('warrantyIndex');
-  if (hit) return JSON.parse(hit);
+  if (INDEX_MEMO.warranty) return INDEX_MEMO.warranty;
+
+  const cached = cacheGetLarge_('warrantyIndex');
+  if (cached) { INDEX_MEMO.warranty = cached; return cached; }
 
   const index = {};
   readAll_(SHEET.WARRANTY).forEach(function (r) {
     const sn = String(r.Batch || '').trim().toUpperCase();
     if (sn && !index[sn]) index[sn] = r.Expired;
   });
-  try {
-    cache.put('warrantyIndex', JSON.stringify(index), 1800);
-  } catch (e) {
-    // Larger than the cache entry limit; recomputed each call instead.
-  }
+  cachePutLarge_('warrantyIndex', index, 1800);
+  INDEX_MEMO.warranty = index;
   return index;
 }
 
@@ -168,9 +208,15 @@ function warrantyIndex_() {
  * unit belongs to decides who may see the claim and who receives it.
  */
 function populationIndex_() {
-  const cache = CacheService.getScriptCache();
-  const hit = cache.get('populationIndex');
-  if (hit) return JSON.parse(hit);
+  if (INDEX_MEMO.population) return INDEX_MEMO.population;
+
+  // The key is deliberately not versioned even though the shape changed. An
+  // entry cached by the previous revision carries no unit, so the units it
+  // holds are answered by the fallback below until it expires — which is what
+  // they were answered by before this deploy. Half an hour of unchanged
+  // behaviour, never a wrong date.
+  const cached = cacheGetLarge_('populationIndex');
+  if (cached) { INDEX_MEMO.population = cached; return cached; }
 
   const index = {};
   readAll_(SHEET.POPULATION).forEach(function (r) {
@@ -178,12 +224,15 @@ function populationIndex_() {
     if (!sn || index[sn]) return;
     index[sn] = {
       product: String(r.ItemDescription || ''),
-      principal: String(r.Principal || '').trim()
+      principal: String(r.Principal || '').trim(),
+      // What the warranty rules count from, read the same way the recompute
+      // reads it. A hand-typed dd/mm/yyyy cell has to mean the same date here
+      // as it does there.
+      unit: unitRowToUnit_(r)
     };
   });
-  try {
-    cache.put('populationIndex', JSON.stringify(index), 1800);
-  } catch (e) { /* oversized; recomputed next call */ }
+  cachePutLarge_('populationIndex', index, 1800);
+  INDEX_MEMO.population = index;
   return index;
 }
 
@@ -203,11 +252,67 @@ function principalFor_(serial) {
 }
 
 /**
+ * Whether the population sheet carries this unit at all.
+ *
+ * The population sheet is the register of units the portal serves: it is what
+ * says who the unit belongs to and what it is. A serial number missing from it
+ * is either a typo or a unit nobody has imported yet, and in both cases the
+ * claim would reach no principal — so the claim form offers the register rather
+ * than a blank box, and says who to ask when a unit is not on it.
+ */
+function isRegisteredUnit_(serial) {
+  const sn = String(serial || '').trim().toUpperCase();
+  return !!(sn && populationIndex_()[sn]);
+}
+
+/** Every registered unit, serial number first, for the claim form's unit list. */
+
+/** How many units are registered, without building the list to find out. */
+function populationUnitCount_() {
+  return Object.keys(populationIndex_()).length;
+}
+
+/**
+ * A page of registered units matching what has been typed.
+ *
+ * The whole list is a few thousand serial numbers and used to cross to the
+ * browser once per session whether the claim form was opened or not. Matching
+ * runs over the cached index here instead, and only what is shown crosses.
+ *
+ * A serial number is matched from the start rather than anywhere inside it:
+ * typing "XT24" means units of that batch, and a substring match would bury
+ * them under every serial that happens to contain those characters. The product
+ * name still matches anywhere, since that is a phrase, not a code.
+ */
+function searchUnits_(session, payload) {
+  requireRole_(session, [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN]);
+  const p = payload || {};
+  const q = String(p.query || '').trim().toUpperCase();
+  const limit = Math.min(Number(p.limit) || 40, 100);
+  const index = populationIndex_();
+  const serials = Object.keys(index).sort();
+
+  const options = [];
+  let total = 0;
+  for (let i = 0; i < serials.length; i++) {
+    const sn = serials[i];
+    if (q && sn.indexOf(q) !== 0 &&
+      String(index[sn].product || '').toUpperCase().indexOf(q) === -1) continue;
+    total += 1;
+    if (options.length < limit) {
+      options.push({ value: sn, label: sn, hint: index[sn].product || '' });
+    }
+  }
+  return { options: options, total: total };
+}
+
+/**
  * Everything the claim form shows the moment a serial number is typed: product,
  * warranty verdict with its working shown, and any open claim on the same unit.
  */
 function lookupSerial_(session, serial) {
-  const warranty = determineWarranty_(serial);
+  const twoTier = claimWarranty_(serial);
+  const warranty = twoTier.principal;
   const sn = String(serial || '').trim().toUpperCase();
 
   const openClaims = readLive_(SHEET.CLAIMS).filter(function (c) {
@@ -228,9 +333,14 @@ function lookupSerial_(session, serial) {
 
   return {
     serial: sn,
+    registered: isRegisteredUnit_(sn),
     productName: productName_(sn),
     principal: principalFor_(sn),
     warranty: warranty,
+    customerWarranty: twoTier.customer,
+    costBorne: twoTier.costBorne,
+    distributorId: twoTier.unit ? twoTier.unit.DistributorID : '',
+    distributorName: twoTier.unit ? distributorName_(twoTier.unit.DistributorID) : '',
     openClaims: openClaims.map(function (c) {
       return { claimId: c.ClaimID, status: c.Status, customer: c.CustomerName };
     }),

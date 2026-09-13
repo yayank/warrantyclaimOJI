@@ -105,11 +105,27 @@ Empat hal yang membentuk alur ini dan mudah terlewat:
 - **Work Order adalah gerbang** menuju principal, bukan syarat pengiriman. Principal menerima klaim yang sudah punya nomor kerja internal.
 - **Keputusan diambil per sparepart**, bukan per klaim.
 - **Penolakan tidak final.** Diskusi berlanjut di luar aplikasi, dan keputusan dapat diubah kapan saja dengan alasan tertulis.
-- **Klaim ditutup saat part dikirim.** Pengembalian part rusak dicatat sesudahnya sebagai keterangan.
+- **Klaim ditutup setelah part rusaknya kembali**, bukan saat part barunya dikirim — lihat bagian 11.
+
+### Isian yang bisa dicari
+
+Tiga isian pada formulir klaim adalah **dropdown yang bisa dicari**: kotak teks yang menyaring daftarnya sambil diketik. Daftar Customer berisi 1.386 nama dan daftar unit beberapa ribu serial number — pada ukuran itu `<select>` biasa hanya bisa digulung, tidak bisa dipakai.
+
+| Field | Sumber daftar | Isian di luar daftar |
+|---|---|---|
+| Customer | master `Customer` yang aktif | Ditolak. Kotak menampilkan “tidak ada yang cocok” beserta nama dan alamat email Administrator, lalu isian dikembalikan ke pilihan terakhir yang sah |
+| Serial number | kolom `Batch` pada sheet `Population` | **Diterima.** Klaim tetap bisa disimpan dan di-submit; layar memberi tahu bahwa unit itu tidak terdaftar, apa akibatnya, dan siapa Administrator yang bisa dihubungi |
+| Sparepart (tiap baris) | master `sparepart` yang aktif | Ditolak, sama seperti Customer |
+
+Selama belum ada yang diketik, seluruh daftar ditawarkan — termasuk saat isian sudah terisi. Isian yang tidak bisa dibuka ulang untuk diganti lebih buruk daripada tidak ada dropdown sama sekali.
+
+Serial number yang tidak ada di `Population` **tidak menghalangi apa pun** — mesin di lapangan tidak menunggu sheet diperbarui, dan sebuah unit bisa saja belum sempat diimpor. Yang terjadi hanyalah klaim itu tidak terpetakan ke principal mana pun, jadi Administrator harus menetapkannya sendiri (`Assign principal`) atau mendaftarkan unitnya. Layar menyebutkan hal itu apa adanya, beserta nama dan email Administrator aktif dari sheet `users`.
+
+Daftar unit diambil sekali per sesi lewat `claims.units`, bukan ikut dalam payload login: setiap layar butuh daftar customer, hanya formulir klaim yang butuh beberapa ribu serial number.
 
 ## 5. Sparepart talangan
 
-Di lapangan, mesin sering tidak bisa menunggu keputusan principal. Sparepart diambil dari stok lokal supaya alat kembali jalan, sementara klaim tetap berjalan.
+Di lapangan, mesin sering tidak bisa menunggu keputusan principal. Sparepart dikirim dari stok lokal supaya alat kembali jalan, sementara klaim tetap berjalan.
 
 Aplikasi mengakomodasi ini **tanpa mengubah alur klaim sama sekali.** Yang ditambahkan hanya penanda pada baris sparepart:
 
@@ -117,8 +133,8 @@ Aplikasi mengakomodasi ini **tanpa mengubah alur klaim sama sekali.** Yang ditam
 ClaimItems
   AdvanceIssued     TRUE
   AdvanceIssuedAt   2026-08-30T09:15:00
-  AdvanceIssuedBy   rian@rs.co.id
-  AdvanceNote       Diserahkan langsung ke RSUD Koja, 30 Agu pagi
+  AdvanceIssuedBy   admin@oneject.co.id
+  AdvanceNote       Dikirim dari stok, 30 Agu pagi
 ```
 
 Apa yang berubah karenanya:
@@ -130,10 +146,17 @@ Apa yang berubah karenanya:
 | Yang dilihat principal | daftar part biasa | ditandai *already supplied from local stock* |
 | Kalau ditolak principal | rumah sakit belum terima apa-apa | **biaya sudah tertanggung di sisi Anda** — terlihat jelas di ringkasan dan ekspor |
 
-Siapa yang mencatat:
+**Yang mencatat hanya Administrator.** Stoknya milik Administrator dan hanya dia yang tahu apakah ada part yang keluar dari sana — Requester meminta part dan tidak pernah melihat penanda ini di formulir.
 
-- **Requester** — saat mengisi form, mencentang *"Part already supplied from local stock"* pada baris sparepart yang bersangkutan.
-- **Administrator** — kapan saja sebelum klaim ditutup, lewat tombol *Record advance issue* di panel detail. Bisa juga mencabut penandanya.
+### Menu *Advance Issue* — apa yang harus dikirim hari ini
+
+Mencatat talangan satu klaim demi satu klaim menjawab pertanyaan *"apa yang sudah saya kirim atas klaim ini?"* — pertanyaan yang diajukan setelah kejadian. Pertanyaan yang ada di depan Administrator setiap pagi justru sebaliknya, dan tidak ada layar yang menanyakannya. Menu **Advance Issue** adalah daftar itu: satu tabel, tingkat sparepart, melintasi semua klaim, dengan angka pada menunya sehingga antreannya tidak perlu diingat sendiri.
+
+Isinya **tidak disaring oleh sejauh mana klaimnya berjalan**. Mesinnya mati; partnya berangkat. Apakah principal sudah menyetujui, dan apakah biayanya akhirnya jatuh ke mereka atau ke kita, diselesaikan belakangan pada klaimnya. Sebuah baris hilang dari daftar hanya karena dua hal: partnya sudah keluar (`Shipped`, atau sudah dicatat sebagai talangan) atau memang tidak akan dikirim (`Rejected`, klaim masih `Draft`, klaim sudah `Closed`).
+
+Urutannya klaim terlama di atas — mesin yang paling lama mati adalah yang pertama naik ke kurir. Pilih beberapa baris sekaligus, tulis satu keterangan untuk satu rit pengiriman, dan semuanya tercatat dalam satu langkah. Tab **Sent from stock** menyimpan catatan sebaliknya, lengkap dengan siapa dan kapan, dan penandanya bisa dicabut dari sana bila ternyata tidak jadi berangkat. Tombol *Record advance issue* di panel klaim tetap ada untuk kasus satuan.
+
+Karena itu `claims.save` tidak pernah menyentuh penanda ini: Requester boleh menyunting klaimnya selama masih Draft atau Returned, dan suntingan itu tidak boleh mengubah catatan apa yang sudah dikirim dari stok. Satu-satunya jalan masuk adalah `claims.advanceIssue`, yang hanya menerima Administrator.
 
 Setiap perubahan penanda ini tercatat di `AuditLog` sebagai aksi `AdvanceIssue`, sehingga selalu jelas kapan part berpindah dan atas keputusan siapa.
 
@@ -297,6 +320,7 @@ Dua belas sheet operasional ditambah dua sheet rujukan.
 | DecisionBy · DecisionAt · DecisionReason | teks · datetime · teks | Alasan wajib untuk penolakan dan setiap perubahan keputusan |
 | AvailabilityDate | tanggal | Diisi Administrator |
 | DocumentRefNo | teks | Diisi Administrator; kesamaan nilai membentuk kelompok pengiriman |
+| **FulfilmentRoute** | enum | `Principal order` · `Purchase request` · `From stock`; kosong sampai Administrator memutuskan |
 | ForwardedAt · ForwardedTo | datetime · teks | Penerusan pesanan ke pihak luar |
 | ShippedAt · ShippedBy | datetime · teks | Penandaan pengiriman |
 | PartReturnNote · PartReturnAt | teks · datetime | Catatan, bukan syarat penutupan |
@@ -345,9 +369,13 @@ Ketujuh template bawaan tertanam di kode dan aktif sejak awal. Sheet ini hanya m
 | Sheet | Kolom | Peran |
 |---|---|---|
 | `warranty` | `SellingInDate` · `Material` · `Batch` · `Status` · `exp` · `Expired` | Tabel pengecualian untuk SN `XT`; kolom `Status` diabaikan |
-| `Population` | `Delivery` · `SellingInDate` · `Material` · `ItemDescription` · `Batch` · `DeliveryQuantity` · `ShipToParty` · **`Principal`** | Sumber nama produk **dan pemetaan principal** |
+| `Population` | `Delivery` · `SellingInDate` · `Material` · `ItemDescription` · `Batch` · `DeliveryQuantity` · `ShipToParty` · **`Principal`** | Sumber nama produk, **pemetaan principal**, dan daftar unit yang boleh diklaim (kolom `Batch`) |
 
 Keduanya diperbarui lewat impor Excel dengan pratinjau perubahan.
+
+**Keduanya juga di-indeks, dan indeksnya harus benar-benar tersimpan.** Satu penyimpanan klaim menanyakan hal berbeda ke indeks yang sama tiga kali — verdict garansi, nama produk, principal pemilik — dan setiap pencarian serial number sambil diketik menanyakannya lagi. Indeksnya lebih besar dari 100KB yang bisa ditampung satu entri `CacheService`, sehingga `put` gagal tanpa berkata apa-apa dan setiap panggilan membaca ulang 2.610 baris dari sheet.
+
+Sekarang indeks disimpan sebagai potongan bernomor (`cachePutLarge_`), dan dipegang di memori selama satu eksekusi (`INDEX_MEMO`). Hasilnya: satu eksekusi membaca sheet **sekali**, eksekusi berikutnya **tidak sama sekali**. `tools/verify-cache.js` menghitung panggilan `getValues()` untuk membuktikannya.
 
 ## 11. State machine
 
@@ -372,13 +400,106 @@ Keduanya diperbarui lewat impor Excel dengan pratinjau perubahan.
 |---|---|---|---|
 | Pending | Approved / Rejected | Principal atau Administrator | Penolakan wajib beralasan |
 | Approved / Rejected | keputusan sebaliknya | Principal | Kapan saja, alasan wajib, tercatat |
-| Approved | Order Forwarded | Administrator | Email terkirim ke penerima terpilih |
+| Approved | Order Forwarded | Administrator | **Hanya garansi principal.** Email terkirim ke penerima terpilih |
+| Approved | Awaiting Part Availability | Administrator | Jalur internal: PR diajukan, atau dipenuhi dari stok |
 | Order Forwarded | Awaiting Part Availability | Administrator | `AvailabilityDate` dan `DocumentRefNo` terisi |
 | Awaiting Part Availability | Shipped | Administrator | Penandaan pengiriman |
+| Shipped | Closed | otomatis | **Hanya setelah part rusaknya dikembalikan** |
 
 Penanda `AdvanceIssued` **berdiri di luar rangkaian ini** — bisa dipasang atau dicabut kapan saja sebelum klaim ditutup, tanpa mengubah status item.
 
 Kolom Status pada tabel menampilkan **posisi alur**; hasil keputusan tampil terpisah sebagai ringkasan seperti `2 approved · 1 rejected · 1 issued in advance`.
+
+### Peringatan klaim terbuka hanya untuk klaim baru
+
+Saat serial number diketik, portal memberi tahu kalau unit itu punya klaim lain yang masih terbuka, dan menandai baris sparepart yang sudah diminta di klaim itu. Berguna untuk klaim baru — di situlah order ganda bermula.
+
+**Saat menyunting klaim, peringatan itu tidak ditampilkan.** Klaim yang sedang disunting itu sendiri adalah klaim terbuka atas unit tersebut, jadi peringatannya menuduh requester bersaing dengan dirinya sendiri, dan penanda per baris membuat seluruh sparepart-nya merah karena alasan yang sama. Tidak ada yang bisa mereka tindaklanjuti: mereka bukan sedang memulai klaim kedua, mereka sedang menyelesaikan yang ini.
+
+Server tetap menghitung dan melaporkannya seperti biasa — yang berubah hanya apa yang ditampilkan layar, karena ini memang perkara tampilan.
+
+### Satu unit, satu hari, satu klaim
+
+Mesin yang sama diklaim dua kali dalam sehari adalah satu klaim dengan lebih banyak sparepart, bukan dua klaim. Principal menerima batch harian sebagai satu kesatuan, dan dua klaim untuk satu serial number di dalamnya terbaca sebagai order ganda.
+
+Saat submit, `submitClaim_` mencari klaim lain dengan **RefNo, serial number, dan requester yang sama** yang statusnya masih `Submitted`. Kalau ada, sparepart dan lampirannya dipindahkan ke sana dan klaim yang kosong ditandai terhapus. Sparepart yang sudah ada di klaim tujuan tidak digandakan — kuantitasnya yang dijumlahkan, karena meminta dua buah adalah kuantitas, bukan baris kedua.
+
+Penggabungan **hanya** terjadi selama klaim tujuan masih `Submitted`. Begitu Administrator atau principal menyentuhnya, menambahkan sparepart di bawah mereka berarti menulis ulang keputusan yang sudah diambil — jadi klaim keduanya berdiri sendiri dan diumumkan sendiri. Klaim milik orang lain, unit lain, hari lain, dan klaim uji tidak pernah ikut tergabung. `tools/verify-unit.js` menguji semuanya.
+
+### Riwayat sebuah unit
+
+Pertanyaan yang muncul di depan setiap klaim baru: apakah pompa ini sudah pernah dikirim bulan lalu? Kalau iya, itu order ganda atau perbaikan yang tidak bertahan, dan keduanya mengubah langkah berikutnya.
+
+Tombol **Unit history** di panel klaim (Administrator) menampilkan setiap sparepart yang pernah diklaim atas serial number itu — klaimnya, customer-nya, statusnya, jalur pemenuhannya, dan apakah part rusaknya sudah kembali. Sparepart yang diminta lebih dari sekali dihitung dan disebut di atas, karena menemukannya di tengah daftar justru yang tidak terjadi saat sedang sibuk. Klaim uji tidak pernah tercampur ke riwayat sebenarnya.
+
+### Setiap baca dan tulis terlihat
+
+Satu perjalanan bolak-balik ke Apps Script memakan hitungan detik. Tanpa sesuatu yang bergerak di layar, halamannya tampak macet — dan klik kedua yang menyusul adalah permintaan ganda yang tidak diinginkan siapa pun.
+
+Seluruh pembacaan dan penulisan aplikasi ini melewati satu fungsi, `api()`, jadi di situlah penandanya dipasang: sebuah bilah tipis di puncak halaman selama masih ada permintaan berjalan, plus `aria-busy` pada `body` untuk pembaca layar. Penandanya **menghitung**, bukan sekadar menyala-mati: unggahan dan lookup bisa tumpang tindih, dan bilahnya harus bertahan sampai yang terakhir selesai.
+
+### Klaim tidak tertutup sebelum part rusak kembali
+
+Part pengganti dikirim, dan part rusaknya seharusnya kembali. Menutup klaim begitu part barunya terkirim menghapus satu-satunya catatan bahwa masih ada yang terutang — dan part yang dikirim tanpa penggantinya kembali justru itulah yang biasanya hilang.
+
+`recomputeClaimStatus_` karena itu menahan klaim di `In Fulfilment` selama masih ada item berstatus `Shipped` yang `PartReturnAt`-nya kosong. Satu item saja cukup menahan seluruh klaim. Administrator mencatatnya lewat tombol **Record part return** di panel — jalurnya (`claims.partReturn`) sudah ada sejak awal, tetapi tidak pernah ada layar yang memanggilnya — dan pencatatan itulah yang menutup klaimnya.
+
+Klaim yang seluruh partnya ditolak tetap tertutup seperti biasa: tidak ada yang pernah dikirim, jadi tidak ada yang terutang.
+
+Penandanya (`↩ to return`) tampil di tabel dan di panel untuk semua peran; item yang sudah kembali menampilkan tanggalnya. `tools/verify-closing.js` menguji aturan ini.
+
+### Tab pada layar klaim
+
+Tiga tab membagi habis pekerjaan, dan sisanya ada di **All**:
+
+| Tab | Isinya |
+|---|---|
+| Needs Action | klaim yang menunggu peran yang sedang melihat |
+| In Progress | sudah diajukan, belum selesai, dan masih ada yang dikerjakan — termasuk isi Needs Action |
+| Internal Verification | `Internal Verification` — hanya Administrator, karena hanya mereka yang memutuskan di jalur itu |
+| **Completed** | garansinya sudah beres, **tetapi part rusaknya belum kembali** |
+| **Closed** | part rusaknya sudah kembali; perkaranya benar-benar selesai |
+| All | semuanya, termasuk draft milik orang lain |
+
+**Selesai dan berakhir bukan hal yang sama.** Sebuah klaim bisa tuntas dari sisi garansi — setiap sparepart sudah diputuskan, yang disetujui sudah dikirim — sementara part rusaknya masih di luar sana. Klaim itu belum `Closed`: masih ada yang terutang, dan justru daftar itulah yang perlu terus terlihat oleh Administrator. Karena punya tab sendiri, klaim semacam itu tidak lagi ikut terdaftar di In Progress — kalau ikut, In Progress terbaca lebih panjang daripada pekerjaan yang sebenarnya tersisa.
+
+Needs Action adalah **jalan pintas ke dalam** In Progress, bukan potongan yang diambil darinya; keduanya memang beririsan. Sebelumnya sebuah klaim keluar dari In Progress begitu ia mulai menunggu orang yang sedang melihatnya — dari sisi pembaca klaim itu sekadar lenyap, dan begitulah pekerjaan berhenti terlacak.
+
+`Draft` satu-satunya yang di luar tab kerja kecuali bagi pemiliknya: klaim yang belum diajukan tidak sedang berjalan dan tidak menunggu siapa pun selain penulisnya. Bagi Administrator draft hanya muncul di **All**.
+
+`tools/verify-tabs.js` menguji seluruh kombinasi peran × status × status item terhadap satu aturan: klaim yang hidup selalu ada di **setidaknya satu** tab kerja, dan tidak pernah sekaligus terbaca hidup dan selesai.
+
+### Apa yang dilihat tiap peran
+
+Requester dan Production berada di lapangan: mereka meminta sparepart, dan mekanisme di dalam portal bukan sesuatu yang bisa mereka tindaklanjuti. Karena itu bagi keduanya:
+
+| Yang disembunyikan | Alasan |
+|---|---|
+| Jenis garansi | Ditampilkan satu kata, **Warranty**. Perbedaan Principal / Out of Principal / Internal adalah cara Administrator merutekan klaim, bukan sesuatu yang diputuskan pemohon |
+| Perhitungan garansi (`WarrantyBasis`) | Perhitungan yang bukan mereka buat dan tidak bisa mereka ubah |
+| “overridden by administrator” dan alasannya | Sama |
+| Bagian **History** | Jejak audit menjawab “siapa mengubah apa” — pertanyaan Administrator |
+| Baris **Principal** | Unit ini milik principal mana, dan fakta bahwa belum terpetakan, adalah pekerjaan Administrator |
+| Filter garansi | Menyaring berdasarkan pembedaan yang tidak mereka lihat |
+| Cara menghitung garansi saat cek serial number | Hasilnya saja — *UNDER WARRANTY* atau *OUT OF WARRANTY* beserta tanggalnya. Perhitungannya milik Administrator; bagi requester itu hitungan yang bukan mereka buat dan tidak bisa mereka ubah |
+
+Satu hal justru ditambahkan untuk mereka: status `Returned to Requester` terbaca **“Revised!”**. Kalimat alur kerjanya menggambarkan perpindahannya; yang berguna bagi orang yang sedang memegang klaim itu adalah apa yang terjadi pada klaimnya. Statusnya sendiri tidak berubah — hanya kata yang ditampilkan, jadi filter dan penyaringan tetap mencocokkan nilai yang tersimpan.
+
+Principal tetap melihat penilaian garansi dan History — itu dasar keputusan mereka. Yang **tidak** mereka lihat adalah penanda sparepart talangan (*issued in advance* dan catatan stoknya): itu stok Administrator, bukan urusan principal. Filter garansi juga ditiadakan, karena mereka hanya pernah melihat klaim garansi principal.
+
+### Pemenuhan di luar garansi principal
+
+Unit yang masih garansi principal dipesan ke principal — dan itu satu-satunya jalur yang melibatkan mereka. Begitu unitnya di luar garansi principal, principal tidak memasok apa pun, jadi partnya harus datang dari tempat lain. Layar **Orders** karena itu dibagi dua:
+
+| Bagian | Isinya | Tindakan Administrator |
+|---|---|---|
+| Principal orders | klaim dengan `WarrantyType = Principal Warranty` | *Set Availability & Document Ref*, *Forward Order* |
+| Purchase request or stock | selebihnya (`Internal Warranty`, `Out of Principal Warranty`) | *Raise purchase request*, *Fulfil from stock* |
+
+- **Purchase request** bentuknya sama persis dengan penjadwalan order principal — sebuah nomor untuk dirujuk dan tanggal untuk ditunggu — jadi transisinya pun sama: `Awaiting Part Availability`, lalu `Shipped`.
+- **Fulfil from stock** dicatat lebih dulu dan dikirim belakangan. Partnya memang ada di rak, tetapi belum berpindah; tanggal pengiriman seharusnya menyebut hari barangnya benar-benar keluar.
+
+Rutenya disimpan di kolom baru `ClaimItems!FulfilmentRoute` (`Principal order` · `Purchase request` · `From stock`). Pemisahannya tidak hanya di layar: `forwardOrder_` menolak meneruskan part yang klaimnya bukan garansi principal — satu part internal di dalam satu batch membatalkan seluruh penerusan, karena meneruskan sebagian diam-diam lebih buruk daripada menolak seluruhnya. `tools/verify-fulfilment.js` menguji ketiga transisi ini.
 
 ## 12. Matriks hak akses
 
@@ -392,9 +513,9 @@ Kolom Status pada tabel menampilkan **posisi alur**; hasil keputusan tampil terp
 | Baris sparepart & qty | ✓ | ✓ | ✓ | ○ |
 | Foto part per baris | ✓ | ✓ | ✓ | ○ |
 | Foto kerusakan · Service Report | ✓ | ✓ | ✓ | ○ |
-| **Advance issue** | ✓ (Draft/Returned) | ✓ | ✓ (s/d Closed) | ○ |
+| **Advance issue** | — | — | ✓ (s/d Closed) | ○ |
 | **Principal klaim** | ○ | ○ | ✓ | ○ |
-| Status garansi | ○ | ○ | ✓ **R** | ○ |
+| Status garansi | — ² | — ² | ✓ **R** | ○ |
 | Work Order | — | — | ✓ **R** | ○ |
 | Keputusan per sparepart | ○ | ○ | ○ ¹ | ✓ **R** |
 | Availability Date · Document Ref | ○ | ○ | ✓ | ○ |
@@ -402,6 +523,8 @@ Kolom Status pada tabel menampilkan **posisi alur**; hasil keputusan tampil terp
 | Master data | — | — | ✓ | — |
 
 ¹ Administrator memutuskan hanya di jalur garansi internal.
+
+² Requester dan Production melihat satu kata, **Warranty** — bukan jenisnya. Lihat *Apa yang dilihat tiap peran* di bagian 11.
 
 Untuk Requester dan Production, kolom bertanda ✓ hanya dapat diubah selama status `Draft` atau `Returned to Requester`.
 
@@ -425,6 +548,18 @@ Untuk Requester dan Production, kolom bertanda ✓ hanya dapat diubah selama sta
 | Klaim uji | `TEST-260830-0002` / `CWT300826` | Seri terpisah agar tidak pernah masuk bulk sungguhan |
 
 > **Draft dan penomoran bulk.** Draft yang dibuat 30 Agustus tetapi baru diajukan 2 September masuk bulk `CW020926`, bukan `CW300826`.
+
+### Kelengkapan diperiksa sebelum disimpan
+
+`submitClaim_` menolak klaim yang belum lengkap — foto kerusakan, service report, dan satu foto per baris sparepart — dan memang seharusnya begitu: principal tidak bisa menilai kerusakan yang tidak bisa mereka lihat. Tetapi penolakannya terjadi **di akhir**, setelah klaim tersimpan dan berkasnya terunggah. Akibatnya klaim itu ada, berhenti di `Draft`, dan satu-satunya keterangan hanyalah toast yang lewat di balik panel.
+
+Formulir kini memeriksa hal yang sama lebih dulu, sebelum apa pun disimpan, dan menuliskan kekurangannya di bagian atas formulir itu sendiri — bukan sebagai toast. Tombol **Save Draft** tetap menyimpan semuanya. Aturan di server tidak berubah; yang berubah hanyalah kapan pengguna diberi tahu.
+
+### Yang terlihat di panel klaim
+
+Bagian **Evidence** selalu tampil, berisi setiap berkas yang seharusnya ada — foto kerusakan, service report, dan satu foto per baris sparepart — beserta berkas yang sudah terunggah atau penanda *not attached*. Menampilkan hanya yang sudah terunggah menyembunyikan separuh yang lebih berguna: klaim tanpa lampiran tidak memunculkan bagian apa pun, dan itu terbaca sebagai "layar ini tidak menampilkan berkas", bukan "belum ada berkas". Lampiran yang tidak cocok dengan slot mana pun — misalnya foto milik baris sparepart yang sudah dihapus — tetap ikut terdaftar.
+
+Unggahan yang gagal tidak menghentikan berkas berikutnya dan tidak pernah senyap: klaimnya tetap tersimpan, jadi berkas yang hilang tanpa pemberitahuan akan meninggalkan klaim yang tampak lengkap tetapi tidak bisa di-submit. Nama berkas yang gagal disebutkan, dan langkahnya ditandai merah di jendela penyimpanan.
 
 ## 14. Berkas Drive
 
@@ -499,6 +634,16 @@ Perulangan: `{{#Items}}…{{/Items}}` untuk daftar sparepart, `{{#Claims}}…{{/
 
 **Rekap harian dipecah per principal per nomor referensi.** Klaim yang principal-nya belum terpetakan tidak ikut terkirim dan dilaporkan sebagai *skipped*.
 
+### Notifikasi email bisa dimatikan
+
+Ada saklar **Send email notifications** di layar Email Log (Administrator). Saat dimatikan, alur klaim berjalan seperti biasa dan setiap pesan tetap dicatat — statusnya `Not sent` dengan alasan yang tertulis, bukan seolah-olah terkirim. Nilainya disimpan di `Settings!EmailNotifications`, dan perubahannya tercatat di `AuditLog`.
+
+### Layar Email Log
+
+Setiap pesan yang dicoba dikirim portal ini dicatat di sheet `EmailLog` — terkirim maupun tidak, lengkap dengan alasan kegagalannya. Catatan itu sudah ada sejak awal, tetapi tidak pernah ada layar yang menampilkannya, sehingga pertanyaan "apakah Administrator sudah diberi tahu?" tidak punya jawaban selain membuka spreadsheet. Kini ada di menu **Email Log** (Administrator).
+
+Yang paling sering membingungkan dan sekarang terlihat jelas di sana: **dalam mode uji tidak ada pesan yang sampai ke penerima sebenarnya.** Pesannya dialihkan ke alamat Tester itu sendiri dan diberi awalan `[TEST]`.
+
 ## 16. Audit
 
 Tiga lapis jejak, masing-masing menjawab pertanyaan berbeda.
@@ -551,15 +696,24 @@ Empat hal yang menopang ketiganya:
 
 ## 19. Pengujian
 
-Tiga penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
+Sepuluh penguji berjalan di Node tanpa perlu Google, dan menjalankan kode aslinya:
 
 ```bash
 node tools/verify-warranty.js units.json    # mesin garansi, 2.610 unit asli
 node tools/verify-access.js                 # pemisahan antar principal
 node tools/verify-templates.js              # perender template email
+node tools/verify-sheets.js                 # baris data tidak dibaca sebagai judul kolom
+node tools/verify-payload.js                # tidak ada Date yang lolos ke browser
+node tools/verify-tabs.js                   # tidak ada klaim yang lolos dari semua tab
+node tools/verify-cache.js                  # sheet unit dibaca sekali, bukan tiap pertanyaan
+node tools/verify-fulfilment.js             # part tidak pernah salah jalur
+node tools/verify-closing.js                # klaim tidak tertutup selama part masih terutang
+node tools/verify-unit.js                   # penggabungan klaim dan riwayat per unit
 ```
 
-Hasil terakhir: **22 · 22 · 18 pemeriksaan, seluruhnya lolos.**
+Hasil terakhir: **22 · 27 · 18 · 25 · 13 · 180 · 11 · 18 pemeriksaan, seluruhnya lolos.**
+
+Penguji payload menjaga satu kegagalan yang sangat mudah terulang. `google.script.run` menolak `Date` di mana pun dalam nilai kembalian — panggilannya gagal dan halaman menerima `null`, tanpa pesan kesalahan apa pun. Aplikasi ini menulis stempel waktunya sebagai teks `2026-08-30T11:53:50`, dan Sheets berhak menyimpannya sebagai date-time sungguhan lalu mengembalikannya sebagai `Date`. Karena itu `readAll_` mengubah setiap sel `Date` menjadi teks ISO saat dibaca (`cellValue_`), dan `api()` memeriksa sekali lagi sebelum nilainya menyeberang ke browser (`jsonSafe_`). Konversi saat baca sekaligus memperbaiki urutan dan filter tanggal, yang membandingkan stempel waktu sebagai teks.
 
 ## 20. Masih terbuka
 

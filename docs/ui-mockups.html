@@ -208,10 +208,6 @@ a{color:inherit}
 
 /* toolbar */
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.seg{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
-.seg span{padding:5px 11px;font-size:12.5px;color:var(--ink-3);background:var(--surface)}
-.seg span.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
-.seg span+span{border-left:1px solid var(--line)}
 .field{
   display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:5px;
   padding:5px 10px;font-size:12.5px;color:var(--ink-3);background:var(--surface);
@@ -259,7 +255,20 @@ a{color:inherit}
 }
 .tbl td{padding:10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
 .tbl tr.sub td{background:var(--surface-2)}
-.tbl tr.sub td:first-child{padding-left:34px}
+.tbl tr.sub td.part{padding-left:26px;position:relative}
+.tbl tr.sub td.part::before{content:"";position:absolute;left:12px;top:-10px;bottom:50%;
+  width:7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);
+  border-bottom-left-radius:3px}
+.tbl tr.sub+tr:not(.sub) td{border-top:1px solid var(--line)}
+.tbl tr.ref-header td{background:var(--surface);color:var(--ink-2);font-size:12px;
+  padding:9px 10px 7px 22px;border-bottom:1px solid var(--line-soft);position:relative}
+.tbl tr.ref-header td::before{content:"";position:absolute;left:11px;top:9px;bottom:7px;
+  width:2px;border-radius:1px;background:var(--accent)}
+.tbl tr.group-header td{background:var(--surface-2);color:var(--ink-2);font-weight:600;
+  font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:11px 10px 8px;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.group-n{display:inline-block;margin-left:7px;padding:0 6px;border-radius:9px;
+  background:var(--mute-soft);color:var(--ink-3);font-size:10.5px;letter-spacing:0}
 .mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;font-variant-numeric:tabular-nums}
 .num{font-variant-numeric:tabular-nums}
 .dim{color:var(--ink-3)}
@@ -686,8 +695,8 @@ a{color:inherit}
     <!-- 04 STATUS REQUESTER -->
     <section class="shot" id="s4">
       <div class="shot-label">Screen 04 — Requester</div>
-      <h2>Claim Status · grouped by claim</h2>
-      <p class="shot-note">Tab <em>Needs Action</em> jadi tab pertama, isinya berbeda per peran — untuk Requester berarti draft yang belum diajukan dan klaim yang dikembalikan Admin. Kolom Status memuat dua baris sesuai keputusan Anda: posisi alur di atas, ringkasan hasil per sparepart di bawah. Kolom <em>Age</em> menghitung berapa lama klaim mengendap di status sekarang — berubah oranye setelah tiga hari. Baris kedua sedang dibuka agar terlihat bentuk dua tingkatnya. Kolom Customer tetap tampil, karena satu Requester menangani banyak rumah sakit.</p>
+      <h2>Claim Status · Requester</h2>
+      <p class="shot-note">Satu tabel, bukan dua. Baris claim di atas, sparepart-nya langsung di bawahnya — sebelumnya keduanya dipisah sakelar <em>By claim / By spare part</em>, dan masing-masing membuang apa yang jadi guna yang lain. Requester membuka portal untuk tahu klaimnya sudah sampai mana, bukan untuk mengerjakan antrean, jadi tab <em>All</em> yang terbuka lebih dulu dan isinya dipecah per status mengikuti urutan alur klaim. Satu referensi menaungi beberapa klaim, jadi RefNo naik menjadi judul dan tidak lagi diulang tiap baris — empat tingkat: status, RefNo, ClaimID, sparepart. RefNo yang cuma menaungi satu klaim tetap dibuatkan judul; daftar dengan dua bentuk lebih mahal bagi pembaca daripada satu baris yang dihemat. Klaim yang belum diajukan belum punya RefNo sama sekali dan berkumpul di bawah judulnya sendiri, di akhir blok. Caret melipat sparepart sebuah klaim, bukan membukanya. Potongan teratasnya bisa diganti lewat <em>Group by</em> — <em>status</em> seperti di sini, atau <em>customer</em>; saat dipotong per customer kolom Customer ikut hilang, karena judulnya sudah menyebutkannya. Filter customer sendiri kini kotak yang bisa dicari, bukan daftar 1.386 nama yang hanya bisa digulung.</p>
       <div class="frame frame-scroll">
         <div class="frame-inner">
           <div class="app-top">
@@ -697,70 +706,97 @@ a{color:inherit}
           </div>
           <div class="app-body">
             <div class="tabs">
-              <button class="on">Needs Action <span class="count">2</span></button>
+              <button>Needs Action <span class="count">2</span></button>
               <button>In Progress</button>
               <button>Completed</button>
-              <button>All</button>
+              <button>Closed</button>
+              <button class="on">All</button>
             </div>
             <div class="toolbar">
-              <div class="seg"><span class="on">By claim</span><span>By spare part</span></div>
               <div class="field grow">⌕ Search claim ID, reference, serial number, customer…</div>
-              <div class="field">Last 30 days ▾</div>
-              <div class="field">Customer ▾</div>
+              <div class="field">All statuses ▾</div>
+              <div class="field">⌕ All customers</div>
+              <div class="field">Group by status ▾</div>
               <span class="spacer"></span>
               <button class="btn">Export to Excel</button>
               <button class="btn pri">New Claim</button>
             </div>
-            <div class="toolbar"><span class="chip"><b>Status</b> Submitted, In Review <u>✕</u></span></div>
             <table class="tbl">
               <thead><tr>
                 <th style="width:32px"></th><th>Claim</th><th>Date</th><th>Customer</th>
                 <th>Serial number</th><th>Parts</th><th>Status</th><th style="width:64px">Age</th>
               </tr></thead>
               <tbody>
-                <tr>
-                  <td class="caret">▸</td>
-                  <td class="twoline"><span class="mono">CLM-260826-0004</span><span class="mono tiny">CW260826</span></td>
-                  <td>26 Aug 2026</td>
-                  <td>RSUD Koja</td>
-                  <td class="twoline"><span class="mono">XT2410090</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Principal Warranty</span></td>
-                  <td>2 items</td>
-                  <td class="twoline"><span class="pill p-rev" style="align-self:flex-start">In Review</span><span class="tiny">1 approved · 1 rejected</span></td>
-                  <td class="num">4 d</td>
-                </tr>
+                <tr class="group-header"><td colspan="8">Draft<span class="group-n">1</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="dimmer">No reference yet</span><span class="group-n">1</span></td></tr>
                 <tr>
                   <td class="caret">▾</td>
-                  <td class="twoline"><span class="mono">CLM-260826-0003</span><span class="mono tiny">CW260826</span></td>
-                  <td>26 Aug 2026</td>
-                  <td>Mitra Kasih Cimahi</td>
-                  <td class="twoline"><span class="mono">XT2411194</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Principal Warranty</span></td>
-                  <td>3 items</td>
-                  <td class="twoline"><span class="pill p-sub" style="align-self:flex-start">Submitted</span><span class="tiny">awaiting verification</span></td>
-                  <td class="num">4 d</td>
-                </tr>
-                <tr class="sub"><td colspan="5">Electrical Mainboard</td><td class="mono">1 pcs</td><td class="dim">Pending decision</td><td></td></tr>
-                <tr class="sub"><td colspan="5">Power supply</td><td class="mono">1 pcs</td><td class="dim">Pending decision</td><td></td></tr>
-                <tr class="sub"><td colspan="5">Blood pump rotor</td><td class="mono">2 pcs</td><td class="dim">Pending decision</td><td></td></tr>
-                <tr>
-                  <td class="caret">▸</td>
-                  <td class="twoline"><span class="mono">CLM-260830-0011</span><span class="mono tiny dimmer">not submitted</span></td>
+                  <td class="twoline"><span class="mono">CLM-260830-0011</span></td>
                   <td>30 Aug 2026</td>
                   <td>RSUD Tarakan Jakarta</td>
-                  <td class="twoline"><span class="mono">XT2411116</span><span class="pill p-wait flat tiny" style="align-self:flex-start">Manual Verification</span></td>
+                  <td class="twoline"><span class="mono">XT2411116</span><span class="pill p-wait flat tiny" style="align-self:flex-start">Being checked</span></td>
                   <td>1 item</td>
                   <td class="twoline"><span class="pill p-draft" style="align-self:flex-start">Draft</span><span class="tiny">service report missing</span></td>
                   <td class="num">—</td>
                 </tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Air Detector</td><td class="mono">1 pcs</td><td><span class="pill p-draft">Pending</span></td><td></td></tr>
+
+                <tr class="group-header"><td colspan="8">Revised!<span class="group-n">1</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="mono">CW280826</span><span class="group-n">1</span></td></tr>
                 <tr>
-                  <td class="caret">▸</td>
-                  <td class="twoline"><span class="mono">CLM-260828-0009</span><span class="mono tiny">CW280826</span></td>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CLM-260828-0009</span></td>
                   <td>28 Aug 2026</td>
                   <td>RS TK. II M. Ridwan Meuraksa</td>
-                  <td class="twoline"><span class="mono">XT2411090</span><span class="pill p-no flat tiny" style="align-self:flex-start">Out of Principal Warranty</span></td>
+                  <td class="twoline"><span class="mono">XT2411090</span><span class="pill p-no flat tiny" style="align-self:flex-start">Out of warranty</span></td>
                   <td>1 item</td>
-                  <td class="twoline"><span class="pill p-sub" style="align-self:flex-start">Returned to Requester</span><span class="tiny">fault photo unclear</span></td>
+                  <td class="twoline"><span class="pill p-sub" style="align-self:flex-start">Revised!</span><span class="tiny">fault photo unclear</span></td>
                   <td class="num" style="color:var(--warn)">3 d</td>
                 </tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Blood pump rotor</td><td class="mono">2 pcs</td><td><span class="pill p-draft">Pending</span></td><td></td></tr>
+
+                <tr class="group-header"><td colspan="8">In Fulfilment<span class="group-n">1</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="mono">CW260826</span><span class="group-n">1</span></td></tr>
+                <tr>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CLM-260826-0003</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>Mitra Kasih Cimahi</td>
+                  <td class="twoline"><span class="mono">XT2411194</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Warranty</span></td>
+                  <td>3 items</td>
+                  <td class="twoline"><span class="pill p-wait" style="align-self:flex-start">In Fulfilment</span><span class="tiny">2 approved · 1 rejected</span></td>
+                  <td class="num">4 d</td>
+                </tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Electrical Mainboard</td><td class="mono">1 pcs</td>
+                  <td class="twoline"><span class="pill p-ok" style="align-self:flex-start">Shipped</span><span class="pill p-sub flat tiny" style="align-self:flex-start">↩ to return</span></td><td></td></tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Power supply</td><td class="mono">1 pcs</td><td><span class="pill p-ok">Approved</span></td><td></td></tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Blood pump rotor</td><td class="mono">2 pcs</td>
+                  <td class="twoline"><span class="pill p-no" style="align-self:flex-start">Rejected</span><span class="tiny">damage caused by mishandling</span></td><td></td></tr>
+
+                <tr class="group-header"><td colspan="8">Closed<span class="group-n">2</span></td></tr>
+                <tr class="ref-header"><td colspan="8"><span class="mono">CW260826</span><span class="group-n">2</span></td></tr>
+                <tr>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CLM-260826-0004</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>RSUD Koja</td>
+                  <td class="twoline"><span class="mono">XT2410090</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Warranty</span></td>
+                  <td>1 item</td>
+                  <td class="twoline"><span class="pill p-ok" style="align-self:flex-start">Closed</span><span class="tiny">1 approved</span></td>
+                  <td class="num">—</td>
+                </tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Dialysate Filter</td><td class="mono">3 pcs</td><td><span class="pill p-ok">Shipped</span></td><td></td></tr>
+                <tr>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CLM-260826-0006</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>RSUD Koja</td>
+                  <td class="twoline"><span class="mono">XT2410090</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Warranty</span></td>
+                  <td>1 item</td>
+                  <td class="twoline"><span class="pill p-ok" style="align-self:flex-start">Closed</span><span class="tiny">1 approved</span></td>
+                  <td class="num">—</td>
+                </tr>
+                <tr class="sub"><td></td><td class="part" colspan="4">Air pump</td><td class="mono">1 pcs</td><td><span class="pill p-ok">Shipped</span></td><td></td></tr>
               </tbody>
             </table>
           </div>
@@ -771,64 +807,90 @@ a{color:inherit}
     <!-- 05 STATUS ADMIN -->
     <section class="shot" id="s5">
       <div class="shot-label">Screen 05 — Administrator</div>
-      <h2>Claim Status · flattened by spare part</h2>
-      <p class="shot-note">Sakelar yang sama, mode lain. Satu baris kini sama dengan satu sparepart — format yang persis sama dengan sheet <code>Log</code> lama Anda, sehingga ekspor Excel bisa langsung dipakai untuk laporan. Nilai yang berulang dipudarkan mulai baris kedua supaya mata tetap menangkap batas antar klaim tanpa kehilangan kemampuan menyalin. Admin mendapat kolom tambahan yang tidak dimiliki Requester: <em>Requested by</em> dan <em>Work order</em>.</p>
+      <h2>Claim Status · Administrator</h2>
+      <p class="shot-note">Tabel yang sama, kolom yang lebih banyak: <em>Principal</em>, <em>Requested by</em>, dan <em>Work order</em> yang tidak dimiliki Requester. Semua peran kini membuka pada tab <em>All</em> dan mendapat potongan yang sama: yang memilih potongannya pembacanya, bukan perannya. Baris sparepart membawa apa yang dulu hanya ada di tabel sparepart tersendiri: penanda talangan, penanda part rusak yang masih terutang, dan alasan sebuah part diputuskan. Klaim yang belum punya sparepart tetap punya barisnya sendiri — di tabel sparepart yang lama klaim seperti itu hilang sama sekali.</p>
       <div class="frame frame-scroll">
         <div class="frame-inner">
           <div class="app-top">
             <div class="brand"><i></i> Warranty Claim Portal</div>
-            <nav class="app-nav"><a href="#s5" class="on">Claims</a><a href="#s5">Master Data</a><a href="#s5">Audit Log</a></nav>
+            <nav class="app-nav"><a href="#s5" class="on">Claims</a><a href="#s5">Advance Issue <span class="count">3</span></a><a href="#s5">Master Data</a><a href="#s5">Audit Log</a></nav>
             <div class="app-user"><span>Yayan Arifin · Administrator</span><span class="avatar">YA</span></div>
           </div>
           <div class="app-body">
             <div class="tabs">
               <button class="on">Needs Action <span class="count">5</span></button>
               <button>In Progress</button>
+              <button>Warranty Principal</button>
+              <button>Internal Verification</button>
               <button>Completed</button>
+              <button>Closed</button>
               <button>All</button>
             </div>
             <div class="toolbar">
-              <div class="seg"><span>By claim</span><span class="on">By spare part</span></div>
               <div class="field grow">⌕ Search…</div>
-              <div class="field">Warranty ▾</div>
-              <div class="field">Customer ▾</div>
+              <div class="field">All statuses ▾</div>
+              <div class="field">All warranties ▾</div>
+              <div class="field">⌕ All customers</div>
+              <div class="field">Group by status ▾</div>
               <span class="spacer"></span>
               <button class="btn">Send Digest Now</button>
               <button class="btn">Export to Excel</button>
             </div>
             <table class="tbl">
               <thead><tr>
-                <th>Claim</th><th>Serial number</th><th>Customer</th><th>Spare part</th>
-                <th style="width:56px">Qty</th><th>Requested by</th><th>Work order</th><th>Status</th>
+                <th style="width:32px"></th><th>Claim</th><th>Date</th><th>Principal</th><th>Customer</th>
+                <th>Serial number</th><th>Parts</th><th>Requested by</th><th>Work order</th>
+                <th>Status</th><th style="width:64px">Age</th>
               </tr></thead>
               <tbody>
                 <tr>
-                  <td class="mono">CLM-260826-0004</td><td class="mono">XT2410090</td><td>RSUD Koja</td>
-                  <td>Electrical Mainboard</td><td class="mono">1</td><td class="dim">Rian Pratama</td>
-                  <td class="mono">WO-2608-0041</td><td><span class="pill p-ok">Approved</span></td>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CW260826</span><span class="mono tiny">CLM-260826-0004</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>Sansin</td>
+                  <td>RSUD Koja</td>
+                  <td class="twoline"><span class="mono">XT2410090</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Principal Warranty</span></td>
+                  <td>2 items</td>
+                  <td class="dim">Rian Pratama</td>
+                  <td class="mono">WO-2608-0041</td>
+                  <td class="twoline"><span class="pill p-rev" style="align-self:flex-start">In Review</span><span class="tiny">1 approved · 1 rejected · 1 issued in advance</span></td>
+                  <td class="num">4 d</td>
                 </tr>
+                <tr class="sub"><td></td><td class="part" colspan="7">Electrical Mainboard</td><td class="mono">1 pcs</td>
+                  <td class="twoline"><span class="pill p-ok" style="align-self:flex-start">Approved</span><span class="pill p-sub flat tiny" style="align-self:flex-start">issued in advance</span></td><td></td></tr>
+                <tr class="sub"><td></td><td class="part" colspan="7">Power supply</td><td class="mono">1 pcs</td>
+                  <td class="twoline"><span class="pill p-no" style="align-self:flex-start">Rejected</span><span class="tiny">not covered under warranty</span></td><td></td></tr>
+
                 <tr>
-                  <td class="mono dimmer">CLM-260826-0004</td><td class="mono dimmer">XT2410090</td><td class="dimmer">RSUD Koja</td>
-                  <td>Power supply</td><td class="mono">1</td><td class="dimmer">Rian Pratama</td>
-                  <td class="mono dimmer">WO-2608-0041</td>
-                  <td class="twoline"><span class="pill p-no" style="align-self:flex-start">Rejected</span><span class="tiny">not covered under warranty</span></td>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CW260826</span><span class="mono tiny">CLM-260826-0005</span></td>
+                  <td>26 Aug 2026</td>
+                  <td>Sansin</td>
+                  <td>Mitra Kasih Cimahi</td>
+                  <td class="twoline"><span class="mono">XT2411194</span><span class="pill p-ok flat tiny" style="align-self:flex-start">Principal Warranty</span></td>
+                  <td>1 item</td>
+                  <td class="dim">Rian Pratama</td>
+                  <td class="mono">WO-2608-0042</td>
+                  <td class="twoline"><span class="pill p-wait" style="align-self:flex-start">In Fulfilment</span><span class="tiny">1 approved</span></td>
+                  <td class="num">4 d</td>
                 </tr>
+                <tr class="sub"><td></td><td class="part" colspan="7">Blood pump rotor</td><td class="mono">2 pcs</td>
+                  <td class="twoline"><span class="pill p-ok" style="align-self:flex-start">Shipped</span><span class="pill p-sub flat tiny" style="align-self:flex-start">↩ to return</span></td><td></td></tr>
+
                 <tr>
-                  <td class="mono">CLM-260826-0005</td><td class="mono">XT2411194</td><td>Mitra Kasih Cimahi</td>
-                  <td>Blood pump rotor</td><td class="mono">2</td><td class="dim">Rian Pratama</td>
-                  <td class="mono">WO-2608-0042</td><td><span class="pill p-wait">Awaiting Part Availability</span></td>
+                  <td class="caret">▾</td>
+                  <td class="twoline"><span class="mono">CLM-260826-0007</span><span class="mono tiny dimmer">not submitted</span></td>
+                  <td>26 Aug 2026</td>
+                  <td class="dimmer">unattributed</td>
+                  <td>RSUD dr. Yulidin Away Tapaktuan</td>
+                  <td class="twoline"><span class="mono">XT2410057</span><span class="pill p-wait flat tiny" style="align-self:flex-start">Manual Verification</span></td>
+                  <td>0 items</td>
+                  <td class="dim">Dewi Anggraini</td>
+                  <td class="mono dimmer">— required</td>
+                  <td class="twoline"><span class="pill p-draft" style="align-self:flex-start">Draft</span></td>
+                  <td class="num">—</td>
                 </tr>
-                <tr>
-                  <td class="mono">CLM-260826-0007</td><td class="mono">XT2410057</td><td>RSUD dr. Yulidin Away Tapaktuan</td>
-                  <td>Air Detector</td><td class="mono">1</td><td class="dim">Dewi Anggraini</td>
-                  <td class="mono dimmer">— required</td><td><span class="pill p-sub">Submitted</span></td>
-                </tr>
-                <tr>
-                  <td class="mono">CLM-260830-0013</td><td class="mono">C25GPA011</td><td>Internal — Production</td>
-                  <td>Solenoid Valve (imported)</td><td class="mono">1</td><td class="dim">Agus Setiawan</td>
-                  <td class="mono dimmer">optional</td>
-                  <td class="twoline"><span class="pill p-wait" style="align-self:flex-start">Manual Verification</span><span class="tiny">locally assembled unit</span></td>
-                </tr>
+                <tr class="sub"><td></td><td class="part dimmer" colspan="10">No spare part on this claim yet</td></tr>
               </tbody>
             </table>
             <div class="legend">
@@ -1078,7 +1140,6 @@ a{color:inherit}
           </div>
           <div class="app-body">
             <div class="toolbar">
-              <div class="seg"><span class="on">By claim</span><span>By spare part</span></div>
               <div class="field">☑ Show test claims</div>
               <span class="spacer"></span>
             </div>
