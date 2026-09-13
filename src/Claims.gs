@@ -341,7 +341,11 @@ function advanceQueue_(session) {
  * for anything built after this was written.
  */
 const CUSTOMER_SIDE_FIELDS = ['customerWarrantyType', 'customerWarrantyExpiry',
-  'customerWarrantyBasis', 'costBorne', 'customerWarranty', 'customerWarrantyTypes'];
+  'customerWarrantyBasis', 'costBorne', 'customerWarranty', 'customerWarrantyTypes',
+  // Who sold the machine is our trade route, not theirs. It went out on the
+  // claim list for two commits because the Excel export was written to hide it
+  // and the payload was not — one of them was tested and the other was not.
+  'distributorId', 'distributorName', 'distributors'];
 
 function redactForViewer_(session, row) {
   if (!row || session.role !== ROLE.PRINCIPAL) return row;

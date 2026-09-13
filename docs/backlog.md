@@ -857,6 +857,55 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
+## O · Akun distributor: satu perusahaan satu akun
+
+> Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh J dan L.
+> Baca `docs/business-context.md` bagian "Akses".
+>
+> Hari ini akses requester dibatasi **per alamat email**: `visibleClaims_`
+> membandingkan `RequesterEmail` dengan alamat penandatangan. Kolom
+> `users.Distributor` sudah ada di skema sejak butir J dan **tidak pernah
+> dibaca oleh apa pun**. Itu bukan keadaan yang disengaja.
+>
+> Aturannya, dari pemilik repo 13 Sep 2026, dan dua sisinya berbeda:
+>
+> - **Requester atas nama distributor: satu akun per perusahaan distributor.**
+>   Akunnya milik perusahaan, bukan milik orang; siapa pun di baliknya boleh
+>   berganti dan riwayat klaimnya tetap di tempat.
+> - **Requester dari perusahaan kita: satu akun per field service.** Orangnya
+>   yang bertanggung jawab, jadi akunnya per orang seperti sekarang.
+>
+> Yang harus dikerjakan:
+>
+> 1. `users.Distributor` dibaca dan divalidasi: akun dengan `Distributor` terisi
+>    adalah akun distributor, dan `DistributorID`-nya harus ada di master
+>    `Distributors`. Layar Users memberinya dropdown, bukan kotak teks.
+> 2. **Satu akun aktif per `DistributorID`.** Menyimpan akun kedua untuk
+>    distributor yang sudah punya satu ditolak dengan menyebut akun mana yang
+>    sudah ada — bukan diterima lalu membuat dua orang saling tidak melihat
+>    klaim satu sama lain.
+> 3. `visibleClaims_` untuk requester: kalau akunnya akun distributor, ia
+>    melihat klaim yang **`Claims.DistributorID`-nya sama dengan miliknya**;
+>    kalau bukan, tetap per alamat email seperti sekarang.
+>
+> **Hati-hati pada yang ini, karena bisa memperluas akses tanpa terlihat:**
+> `Claims.DistributorID` datang dari **unitnya**, bukan dari akun yang mengajukan
+> — jadi klaim atas unit yang terdaftar milik distributor lain akan tiba-tiba
+> terlihat oleh distributor itu. Sudah diputuskan bahwa distributor tidak boleh
+> melihat klaim requestor lain walau di rumah sakit yang sama; keputusan yang
+> sama berlaku di sini. Aman: **`DistributorID` cocok DAN klaimnya diajukan oleh
+> akun distributor** (bukan oleh field service kita atas unit yang sama).
+> Pertimbangkan juga menolak submit ketika akun distributor mengklaim unit yang
+> terdaftar milik distributor lain — tapi tanyakan dulu, itu keputusan bisnis.
+>
+> Penguji baru `tools/verify-distributor-access.js`: akun kedua untuk satu
+> distributor ditolak, akun distributor melihat klaim perusahaannya dan **tidak**
+> melihat klaim distributor lain di rumah sakit yang sama, field service kita
+> tetap per orang, dan klaim atas unit distributor lain tidak bocor. Buktikan
+> menangkap bugnya. Suite, `dist/`, commit, push.
+
+---
+
 ## Yang sudah ditimbang dan tidak disarankan
 
 Dashboard/grafik, notifikasi realtime, dan aplikasi mobile terpisah. Ketiganya

@@ -139,6 +139,20 @@ function seesInternals() {
   return S.session.role !== ROLE.REQUESTER && S.session.role !== ROLE.PRODUCTION;
 }
 
+/**
+ * Our side of the business, which a principal is not part of.
+ *
+ * seesInternals() is the wrong test for this: a principal is very much an
+ * internal reader of their own claims — the warranty working, the history, the
+ * decisions — but our warranty to the buyer and who sold the machine are our
+ * position in a negotiation they are the other party to. The server does not
+ * send them those fields at all; this keeps the page from drawing a space for
+ * something that will never arrive.
+ */
+function seesOurSide() {
+  return seesInternals() && S.session.role !== ROLE.PRINCIPAL;
+}
+
 /** The advance-issue markers belong to whoever owns the stock. */
 function seesAdvanceIssue() {
   return S.session.role === ROLE.ADMIN;
@@ -152,7 +166,7 @@ function seesAdvanceIssue() {
  * engineer it is an accounting question they cannot act on at the machine.
  */
 function ourWarrantyPill(c) {
-  if (!seesInternals() || S.session.role === ROLE.PRINCIPAL) return '';
+  if (!seesOurSide()) return '';
   const out = [];
   if (c.customerWarrantyType === OUR_WARRANTY.IN) {
     out.push('<span class="pill flat p-ok">Ours to ' +
@@ -1331,7 +1345,7 @@ function claimTable() {
     // distributors, and one of them may be ours.
     if (showCustomer) {
       cells.push('<td class="stack c-cust">' + h(c.customerName) +
-        (c.distributorName && seesInternals()
+        (c.distributorName && seesOurSide()
           ? '<span class="tiny dim">via ' + h(c.distributorName) + '</span>' : '') + '</td>');
     }
     cells.push(
@@ -2811,7 +2825,7 @@ function runLookup(serial) {
           ? '<div class="tiny" style="color:inherit">Principal: ' +
             (data.principal ? h(data.principal) : 'not attributed — the administrator will assign one') +
             '</div>' +
-            (data.distributorName
+            (data.distributorName && seesOurSide()
               ? '<div class="tiny" style="color:inherit">Sold through: ' +
                 h(data.distributorName) + '</div>' : '') +
             '<div class="tiny" style="color:inherit">' + h(w.basis) + '</div>'

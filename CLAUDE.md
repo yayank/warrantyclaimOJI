@@ -126,7 +126,8 @@ Aturan yang sudah berlaku:
   menghapus semuanya, diam-diam, setiap kali impor.
 - **`WarrantyType` berarti sisi principal**, bukan sisi pembeli. Garansi kita ke
   pembeli ada di `CustomerWarranty*`. Jangan tumpangkan artinya.
-- **Principal tidak boleh menerima satu pun field sisi customer.** Daftar
+- **Principal tidak boleh menerima satu pun field sisi customer, termasuk nama
+  distributornya** — itu jalur dagang kita, bukan urusan mereka. Daftar
   fieldnya di `CUSTOMER_SIDE_FIELDS` (`Claims.gs`), disaring dua kali:
   `listClaims_`/`getClaim_` — karena **ekspor Excel ditulis di server dan tidak
   pernah lewat dispatcher** — dan sekali lagi di `api()` untuk apa pun yang
@@ -141,7 +142,8 @@ Aturan yang sudah berlaku:
 
 ## Kalau diminta mengerjakan butir backlog
 
-`docs/backlog.md` berisi prompt siap-tempel. **A–N semuanya sudah selesai.**
+`docs/backlog.md` berisi prompt siap-tempel. **A–N selesai; O belum** (akun
+distributor satu per perusahaan).
 Gelombang H–N adalah model garansi dua tingkat; rancangannya di
 `docs/warranty-model.md`, latar belakangnya di `docs/business-context.md`.
 Setiap butir mencatat koreksi terhadap promptnya sendiri kalau promptnya keliru
@@ -153,5 +155,6 @@ bila menemukan promptnya salah.
 `README.md` (ikhtisar + daftar penguji), `docs/business-context.md` (latar
 belakang bisnis — baca lebih dulu), `docs/warranty-model.md` (rancangan model
 garansi dua tingkat, usulan), `docs/specification.md` (aturan bisnis),
-`docs/deployment.md`, `docs/architecture.md`, `docs/ui-mockups.html`. Perbarui
+`docs/deployment.md`, `docs/architecture.md`, `docs/ui-mockups.html`,
+`docs/test-plan.md` (uji terima di data asli dengan akun Tester). Perbarui
 daftar penguji di README saat menambah penguji.

@@ -455,6 +455,17 @@ function leaked(objects) {
 check('but not one field of our side of them, in the list',
   leaked(theirRows).length === 0, leaked(theirRows).join(', '));
 
+// Named literally rather than read off CUSTOMER_SIDE_FIELDS: a check that asks
+// the list what is on the list agrees with itself even when a field is dropped
+// from it, which is exactly how these two went out unredacted for two commits.
+check('and specifically not who sold the machine, which is our trade route',
+  theirRows.every(function (r) {
+    return r.distributorName === undefined && r.distributorId === undefined;
+  }), JSON.stringify(theirRows.map(function (r) { return r.distributorName; })));
+check('while the administrator still gets it',
+  adminRows.every(function (r) { return r.distributorName === 'PT Sinar Medika'; }),
+  JSON.stringify(adminRows.map(function (r) { return r.distributorName; })));
+
 const theirDetail = api.getClaim_(SANSIN, all[0].claimId);
 check('nor in the claim they open',
   leaked([theirDetail]).length === 0, leaked([theirDetail]).join(', '));
@@ -609,6 +620,11 @@ check('a field engineer is not shown our accounting position',
 C.S.session = { email: 'order@sansin.co.jp', role: C.ROLE.PRINCIPAL, isTester: false };
 check('and neither is the principal, even if a row somehow carried it',
   C.ourWarrantyPill(shaped()) === '');
+const principalHtml = C.claimTable();
+check('nor is the distributor drawn on a principal\'s row',
+  !/via PT Sinar Medika/.test(principalHtml));
+check('though the hospital still is — that is their claim',
+  /RSUD Koja/.test(principalHtml));
 
 check('the saved-view fields carry the new filters',
   C.VIEW_FIELDS.indexOf('costBorne') !== -1 && C.VIEW_FIELDS.indexOf('distributorId') !== -1,
