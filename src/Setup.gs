@@ -14,6 +14,7 @@ function setUp() {
   assignMasterIds_();
   const summaries = backfillClaimSummaries_();
   const units = backfillUnitWarranty_();
+  const scoped = backfillRequesterDistributor_();
   const folder = rootFolder_();
   return [
     'Sheets ready.',
@@ -25,6 +26,7 @@ function setUp() {
       summaries.corrected + ' corrected.',
     'Unit warranty columns: ' + units.units + ' units worked out, ' +
       units.changed + ' changed.',
+    'Claims attributed to a distributor account: ' + scoped.claims + '.',
     'Drive root: ' + folder.getName() + ' (' + folder.getId() + ')',
     'Next: put your OAuth Client ID in Settings!GoogleClientId, add yourself to the users sheet',
     'as Administrator, deploy the web app, paste its URL into Settings!AppUrl, then run',
@@ -88,6 +90,51 @@ function backfillClaimSummaries_() {
     s.getRange(2, cols[n] + 1, columns[n].length, 1).setValues(columns[n]);
   });
   return { claims: counted, corrected: corrected };
+}
+
+/**
+ * Says which claims were raised on a distributor's behalf.
+ *
+ * A distributor account sees its company's claims by this column, and claims
+ * filed before the column existed have nothing in it — so on the morning after
+ * a deploy that distributor would open the portal and find their whole history
+ * gone. This reads it back off the account that filed each one.
+ *
+ * Only ever fills a blank: a claim already attributed keeps what it has, so
+ * running this again cannot move a claim between distributors after somebody
+ * has reassigned an account.
+ */
+function backfillRequesterDistributor_() {
+  const s = sheet_(SHEET.CLAIMS);
+  const last = s.getLastRow();
+  if (last < 2) return { claims: 0 };
+
+  const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const col = head.indexOf('RequesterDistributorID');
+  const emailAt = head.indexOf('RequesterEmail');
+  if (col === -1 || emailAt === -1) {
+    throw new Error('The Claims sheet has no RequesterDistributorID column yet.');
+  }
+
+  const byEmail = {};
+  readAll_(SHEET.USERS).forEach(function (u) {
+    const d = String(u.Distributor || '').trim();
+    if (d) byEmail[String(u.Email || '').toLowerCase()] = d;
+  });
+
+  const rows = s.getRange(2, 1, last - 1, head.length).getValues();
+  let claims = 0;
+  const column = rows.map(function (row) {
+    const already = String(row[col] === undefined ? '' : row[col]).trim();
+    if (already) return [already];
+    const owner = byEmail[String(row[emailAt] || '').toLowerCase()];
+    if (!owner) return [row[col]];
+    claims++;
+    return [owner];
+  });
+
+  s.getRange(2, col + 1, column.length, 1).setValues(column);
+  return { claims: claims };
 }
 
 /**

@@ -52,6 +52,13 @@ SCHEMA[SHEET.CLAIMS] = [
   'WarrantyOverridden', 'WarrantyOverrideReason',
   'ProblemDescription', 'WorkOrderNo', 'Status',
   'RequesterEmail', 'RequesterName',
+
+  // Which distributor raised it, taken from the account that filed it — not
+  // from the unit. DistributorID above says who sold the machine; this says on
+  // whose behalf the claim was made, and only this one may decide who sees it.
+  // The two differ exactly when our own field service claims on a machine a
+  // distributor sold, which is the case that would otherwise leak.
+  'RequesterDistributorID',
   'CreatedAt', 'SubmittedAt', 'ForwardedAt', 'PrincipalNotifiedAt', 'ClosedAt',
   'ReturnReason', 'DriveFolderId',
 
@@ -927,6 +934,10 @@ function resolveSession_(idToken, simulatedRole) {
     // Which principal this account belongs to. Only meaningful for the
     // Principal role, where it decides which claims exist at all.
     principal: String(user.Principal || '').trim(),
+    // Which distributor company this account belongs to, blank for our own
+    // people. An account with one is the company's, not a person's: whoever
+    // sits behind it may change and the claim history stays where it is.
+    distributor: String(user.Distributor || '').trim(),
     isTester: actualRole === ROLE.TESTER,
     simulatedRole: null
   };
@@ -1075,6 +1086,17 @@ function visibleClaims_(session) {
 
       case ROLE.REQUESTER:
       case ROLE.PRODUCTION:
+        // A distributor account is the company's, so it sees what the company
+        // filed rather than what one address filed.
+        //
+        // Matched on who RAISED the claim, never on who sold the unit. Those
+        // are different columns and they disagree precisely when our own field
+        // service attends a machine a distributor sold — matching the unit's
+        // distributor would hand that claim to them, which is the one thing
+        // the access rule exists to prevent.
+        if (session.distributor) {
+          return String(c.RequesterDistributorID || '') === session.distributor;
+        }
         return String(c.RequesterEmail || '').toLowerCase() === session.email;
 
       default:
@@ -4418,6 +4440,11 @@ function saveClaim_(session, payload) {
         Status: STATUS.DRAFT,
         RequesterEmail: session.email,
         RequesterName: session.name,
+        // Stamped once, when the claim is created, and never rewritten: an
+        // administrator correcting a claim later must not quietly move it into
+        // their own scope, and a distributor's history must not follow an
+        // account that was reassigned.
+        RequesterDistributorID: session.distributor || '',
         CreatedAt: nowIso_(),
         SubmittedAt: '', ForwardedAt: '', PrincipalNotifiedAt: '', ClosedAt: '',
         ReturnReason: '', DriveFolderId: '',
@@ -6153,6 +6180,34 @@ function validateUsers_(record, existing) {
     }
   }
 
+  // A distributor account belongs to the company, not to a person, and there
+  // is exactly one of them. Two accounts for one distributor would each see
+  // only what it filed itself — the company's history split down the middle,
+  // with nothing on any screen to say why.
+  const distributor = String(record.Distributor || '').trim();
+  record.Distributor = distributor;
+  if (distributor) {
+    if (record.Role !== ROLE.REQUESTER) {
+      throw new Error('Only a Requester account can belong to a distributor. ' +
+        'Clear the distributor, or set the role to ' + ROLE.REQUESTER + '.');
+    }
+    if (!distributorsIndex_()[distributor]) {
+      throw new Error('"' + distributor + '" is not on the distributor list.');
+    }
+    if (isTrue_(record.Active)) {
+      const taken = readAll_(SHEET.USERS).filter(function (u) {
+        return String(u.Distributor || '').trim() === distributor &&
+          isTrue_(u.Active) &&
+          String(u.Email || '').toLowerCase() !== email;
+      })[0];
+      if (taken) {
+        throw new Error(distributorName_(distributor) + ' already has an account: ' +
+          taken.Email + '. Deactivate that one first — a distributor has one ' +
+          'account, and it is the company\'s rather than a person\'s.');
+      }
+    }
+  }
+
   // Losing the last administrator would lock everyone out of master data.
   const admins = readAll_(SHEET.USERS).filter(function (u) {
     return u.Role === ROLE.ADMIN && isTrue_(u.Active);
@@ -7087,6 +7142,7 @@ function setUp() {
   assignMasterIds_();
   const summaries = backfillClaimSummaries_();
   const units = backfillUnitWarranty_();
+  const scoped = backfillRequesterDistributor_();
   const folder = rootFolder_();
   return [
     'Sheets ready.',
@@ -7098,6 +7154,7 @@ function setUp() {
       summaries.corrected + ' corrected.',
     'Unit warranty columns: ' + units.units + ' units worked out, ' +
       units.changed + ' changed.',
+    'Claims attributed to a distributor account: ' + scoped.claims + '.',
     'Drive root: ' + folder.getName() + ' (' + folder.getId() + ')',
     'Next: put your OAuth Client ID in Settings!GoogleClientId, add yourself to the users sheet',
     'as Administrator, deploy the web app, paste its URL into Settings!AppUrl, then run',
@@ -7161,6 +7218,51 @@ function backfillClaimSummaries_() {
     s.getRange(2, cols[n] + 1, columns[n].length, 1).setValues(columns[n]);
   });
   return { claims: counted, corrected: corrected };
+}
+
+/**
+ * Says which claims were raised on a distributor's behalf.
+ *
+ * A distributor account sees its company's claims by this column, and claims
+ * filed before the column existed have nothing in it — so on the morning after
+ * a deploy that distributor would open the portal and find their whole history
+ * gone. This reads it back off the account that filed each one.
+ *
+ * Only ever fills a blank: a claim already attributed keeps what it has, so
+ * running this again cannot move a claim between distributors after somebody
+ * has reassigned an account.
+ */
+function backfillRequesterDistributor_() {
+  const s = sheet_(SHEET.CLAIMS);
+  const last = s.getLastRow();
+  if (last < 2) return { claims: 0 };
+
+  const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const col = head.indexOf('RequesterDistributorID');
+  const emailAt = head.indexOf('RequesterEmail');
+  if (col === -1 || emailAt === -1) {
+    throw new Error('The Claims sheet has no RequesterDistributorID column yet.');
+  }
+
+  const byEmail = {};
+  readAll_(SHEET.USERS).forEach(function (u) {
+    const d = String(u.Distributor || '').trim();
+    if (d) byEmail[String(u.Email || '').toLowerCase()] = d;
+  });
+
+  const rows = s.getRange(2, 1, last - 1, head.length).getValues();
+  let claims = 0;
+  const column = rows.map(function (row) {
+    const already = String(row[col] === undefined ? '' : row[col]).trim();
+    if (already) return [already];
+    const owner = byEmail[String(row[emailAt] || '').toLowerCase()];
+    if (!owner) return [row[col]];
+    claims++;
+    return [owner];
+  });
+
+  s.getRange(2, col + 1, column.length, 1).setValues(column);
+  return { claims: claims };
 }
 
 /**

@@ -4646,7 +4646,7 @@ function renderMaster(total) {
   const active = rows.filter(function (r) { return r.Active !== false; }).length;
 
   const head = {
-    users: ['Email', 'Name', 'Role', 'Principal', 'Active', 'Claims', ''],
+    users: ['Email', 'Name', 'Role', 'Belongs to', 'Active', 'Claims', ''],
     principals: ['ID', 'Name', 'Active', 'Claims', ''],
     customers: ['ID', 'Name', 'Active', 'Claims', ''],
     parts: ['ID', 'Name', 'Active', 'Used in claims', ''],
@@ -4710,8 +4710,11 @@ function renderMaster(total) {
     if (kind === 'users') {
       cells.push('<td class="mono">' + h(r.Email) + '</td>', '<td>' + h(r.Name) + '</td>',
         '<td>' + h(r.Role) + '</td>',
-        '<td' + (r.Principal ? '' : ' class="dimmer"') + '>' +
-          h(r.Principal || (r.Role === ROLE.PRINCIPAL ? 'required' : '—')) + '</td>');
+        '<td' + (r.Principal || r.Distributor ? '' : ' class="dimmer"') + '>' +
+          h(r.Distributor
+            ? (distributorLabel(r.Distributor) + ' · distributor')
+            : (r.Principal || (r.Role === ROLE.PRINCIPAL ? 'required' : 'our own staff'))) +
+          '</td>');
     } else if (kind === 'rules') {
       // Everything that decides which rule applies, on one line: a collision is
       // spotted by reading down the column, not by opening each one.
@@ -5277,6 +5280,12 @@ function writeUnitUpdate(close) {
   wave();
 }
 
+/** A distributor's name for a stored id, falling back to the id itself. */
+function distributorLabel(id) {
+  const hit = (S.reference.distributors || []).filter(function (d) { return d.id === id; })[0];
+  return hit ? hit.name : id;
+}
+
 function masterKey(kind, r) {
   return kind === 'users' ? r.Email
     : kind === 'parts' ? r.PartID
@@ -5323,6 +5332,18 @@ function openMasterForm(kind, record) {
         principalSelect('mPrincipal', record ? record.Principal : '', true) + '</label>' +
       '<p class="tiny">Required for a Principal account — it decides which claims that account ' +
         'can see and which digests it receives. Ignored for every other role.</p>' +
+      '<label class="field"><span>Distributor</span><select id="mDistributor">' +
+        '<option value="">\u2014 our own staff \u2014</option>' +
+        (S.reference.distributors || []).map(function (d) {
+          return '<option value="' + h(d.id) + '"' +
+            (record && record.Distributor === d.id ? ' selected' : '') + '>' +
+            h(d.name) + '</option>';
+        }).join('') + '</select></label>' +
+      // Two rules that are easy to get wrong from the form alone, so the form
+      // says them rather than waiting for the save to refuse.
+      '<p class="tiny">A distributor gets <b>one</b> account, and it belongs to the company ' +
+        'rather than to a person — it sees everything that company filed, whoever filed it. ' +
+        'Our own field service keeps one account each.</p>' +
       activeToggle(record);
   } else if (kind === 'products') {
     body =
@@ -5441,6 +5462,7 @@ function openMasterForm(kind, record) {
           payload.Name = el('mName').value.trim();
           payload.Role = el('mRole').value;
           payload.Principal = el('mPrincipal').value;
+          payload.Distributor = el('mDistributor').value;
         } else if (kind === 'products') {
           payload.Material = el('mMaterial').value.trim().toUpperCase();
           payload.Name = el('mName').value.trim();

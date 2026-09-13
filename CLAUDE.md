@@ -124,6 +124,14 @@ Aturan yang sudah berlaku:
   Berkas itu tidak tahu apa-apa tentang `Channel`, `InstalledAt`, atau kolom
   garansi terhitung; mengosongkan seluruh baris sebelum menulis balik akan
   menghapus semuanya, diam-diam, setiap kali impor.
+- **`Claims.DistributorID` dan `Claims.RequesterDistributorID` dua hal berbeda.**
+  Yang pertama dari unitnya (siapa menjual mesinnya), yang kedua dari akun yang
+  mengajukan (atas nama siapa klaimnya dibuat). **Hanya yang kedua boleh
+  menentukan siapa melihat apa** — keduanya berbeda persis ketika field service
+  kita menangani mesin yang dijual distributor, dan menyaring pakai yang pertama
+  membocorkan klaim itu ke distributornya.
+- **Satu akun aktif per distributor**, dan akun itu milik perusahaan. Field
+  service kita tetap satu akun per orang. Divalidasi di `validateUsers_`.
 - **`WarrantyType` berarti sisi principal**, bukan sisi pembeli. Garansi kita ke
   pembeli ada di `CustomerWarranty*`. Jangan tumpangkan artinya.
 - **Principal tidak boleh menerima satu pun field sisi customer, termasuk nama
@@ -142,8 +150,7 @@ Aturan yang sudah berlaku:
 
 ## Kalau diminta mengerjakan butir backlog
 
-`docs/backlog.md` berisi prompt siap-tempel. **A–N selesai; O belum** (akun
-distributor satu per perusahaan).
+`docs/backlog.md` berisi prompt siap-tempel. **A–O semuanya sudah selesai.**
 Gelombang H–N adalah model garansi dua tingkat; rancangannya di
 `docs/warranty-model.md`, latar belakangnya di `docs/business-context.md`.
 Setiap butir mencatat koreksi terhadap promptnya sendiri kalau promptnya keliru

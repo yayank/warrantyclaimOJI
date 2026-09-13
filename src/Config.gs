@@ -38,6 +38,13 @@ SCHEMA[SHEET.CLAIMS] = [
   'WarrantyOverridden', 'WarrantyOverrideReason',
   'ProblemDescription', 'WorkOrderNo', 'Status',
   'RequesterEmail', 'RequesterName',
+
+  // Which distributor raised it, taken from the account that filed it — not
+  // from the unit. DistributorID above says who sold the machine; this says on
+  // whose behalf the claim was made, and only this one may decide who sees it.
+  // The two differ exactly when our own field service claims on a machine a
+  // distributor sold, which is the case that would otherwise leak.
+  'RequesterDistributorID',
   'CreatedAt', 'SubmittedAt', 'ForwardedAt', 'PrincipalNotifiedAt', 'ClosedAt',
   'ReturnReason', 'DriveFolderId',
 

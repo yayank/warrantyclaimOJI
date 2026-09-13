@@ -623,6 +623,11 @@ function saveClaim_(session, payload) {
         Status: STATUS.DRAFT,
         RequesterEmail: session.email,
         RequesterName: session.name,
+        // Stamped once, when the claim is created, and never rewritten: an
+        // administrator correcting a claim later must not quietly move it into
+        // their own scope, and a distributor's history must not follow an
+        // account that was reassigned.
+        RequesterDistributorID: session.distributor || '',
         CreatedAt: nowIso_(),
         SubmittedAt: '', ForwardedAt: '', PrincipalNotifiedAt: '', ClosedAt: '',
         ReturnReason: '', DriveFolderId: '',

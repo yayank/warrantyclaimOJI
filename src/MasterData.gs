@@ -453,6 +453,34 @@ function validateUsers_(record, existing) {
     }
   }
 
+  // A distributor account belongs to the company, not to a person, and there
+  // is exactly one of them. Two accounts for one distributor would each see
+  // only what it filed itself — the company's history split down the middle,
+  // with nothing on any screen to say why.
+  const distributor = String(record.Distributor || '').trim();
+  record.Distributor = distributor;
+  if (distributor) {
+    if (record.Role !== ROLE.REQUESTER) {
+      throw new Error('Only a Requester account can belong to a distributor. ' +
+        'Clear the distributor, or set the role to ' + ROLE.REQUESTER + '.');
+    }
+    if (!distributorsIndex_()[distributor]) {
+      throw new Error('"' + distributor + '" is not on the distributor list.');
+    }
+    if (isTrue_(record.Active)) {
+      const taken = readAll_(SHEET.USERS).filter(function (u) {
+        return String(u.Distributor || '').trim() === distributor &&
+          isTrue_(u.Active) &&
+          String(u.Email || '').toLowerCase() !== email;
+      })[0];
+      if (taken) {
+        throw new Error(distributorName_(distributor) + ' already has an account: ' +
+          taken.Email + '. Deactivate that one first — a distributor has one ' +
+          'account, and it is the company\'s rather than a person\'s.');
+      }
+    }
+  }
+
   // Losing the last administrator would lock everyone out of master data.
   const admins = readAll_(SHEET.USERS).filter(function (u) {
     return u.Role === ROLE.ADMIN && isTrue_(u.Active);

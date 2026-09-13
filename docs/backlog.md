@@ -857,7 +857,29 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## O · Akun distributor: satu perusahaan satu akun
+## O · Akun distributor: satu perusahaan satu akun — ✅ SELESAI (13 Sep 2026)
+
+> Catatan koreksi, dua hal:
+>
+> 1. **Aturan yang ditulis prompt masih membocorkan, dan jalan keluarnya kolom
+>    baru.** Prompt bilang aman kalau "`DistributorID` cocok DAN klaimnya
+>    diajukan oleh akun distributor" — benar, tapi bagian kedua itu berarti
+>    menengok sheet `users` untuk **tiap baris klaim**, pada fungsi yang dipanggil
+>    setiap kali daftar digambar. Yang dikerjakan: `Claims` dapat kolom
+>    `RequesterDistributorID`, dicap **sekali saat klaim dibuat** dari akun yang
+>    membuatnya. Penyaringannya jadi perbandingan satu kolom, tanpa join, dan
+>    jebakannya hilang dengan sendirinya — klaim yang dibuat field service kita
+>    kolomnya kosong, jadi tidak ada distributor yang melihatnya betapa pun
+>    unitnya milik siapa.
+> 2. **Butuh backfill, dan prompt tidak menyebutnya.** Klaim yang dibuat sebelum
+>    kolom itu ada isinya kosong — tanpa `backfillRequesterDistributor_()`,
+>    pagi setelah deploy distributor membuka portal dan seluruh riwayatnya
+>    hilang. Backfill-nya **hanya mengisi yang kosong**, jadi menjalankannya lagi
+>    setelah sebuah akun dipindahtangankan tidak menyeret klaim lama ikut pindah.
+>
+> Satu keputusan bisnis **belum diambil dan sengaja tidak dikerjakan**: apakah
+> akun distributor boleh mengajukan klaim atas unit yang terdaftar milik
+> distributor lain. Sekarang boleh. Kalau harus ditolak, itu butir tersendiri.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh J dan L.
 > Baca `docs/business-context.md` bagian "Akses".

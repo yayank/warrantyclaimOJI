@@ -46,6 +46,10 @@ function resolveSession_(idToken, simulatedRole) {
     // Which principal this account belongs to. Only meaningful for the
     // Principal role, where it decides which claims exist at all.
     principal: String(user.Principal || '').trim(),
+    // Which distributor company this account belongs to, blank for our own
+    // people. An account with one is the company's, not a person's: whoever
+    // sits behind it may change and the claim history stays where it is.
+    distributor: String(user.Distributor || '').trim(),
     isTester: actualRole === ROLE.TESTER,
     simulatedRole: null
   };
@@ -194,6 +198,17 @@ function visibleClaims_(session) {
 
       case ROLE.REQUESTER:
       case ROLE.PRODUCTION:
+        // A distributor account is the company's, so it sees what the company
+        // filed rather than what one address filed.
+        //
+        // Matched on who RAISED the claim, never on who sold the unit. Those
+        // are different columns and they disagree precisely when our own field
+        // service attends a machine a distributor sold — matching the unit's
+        // distributor would hand that claim to them, which is the one thing
+        // the access rule exists to prevent.
+        if (session.distributor) {
+          return String(c.RequesterDistributorID || '') === session.distributor;
+        }
         return String(c.RequesterEmail || '').toLowerCase() === session.email;
 
       default:
