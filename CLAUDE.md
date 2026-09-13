@@ -45,6 +45,11 @@ membuat daftar berkas yang disentuh kecuali diminta.
 
 1. **Sunting `src/`, lalu `node tools/bundle.js`.** Bundler menolak berkas `.gs`
    baru yang belum didaftarkan di `ORDER` — daftarkan.
+   **Hati-hati memotong blok dari sebuah berkas.** Pernah terjadi: memotong satu
+   fungsi ikut membawa empat fungsi lain, dan suite tetap hijau karena tidak ada
+   penguji yang memanggil rutenya. `verify-sheets.js` sekarang memeriksa bahwa
+   setiap fungsi yang dirutekan `route_` benar-benar ada; jalankan itu setelah
+   menghapus apa pun.
 2. **Jalankan seluruh suite sebelum commit.** Semua penguji di `tools/`, kecuali
    `verify-warranty.js` yang butuh `units.json` (tidak ada di repo).
 3. **Setiap penguji baru harus dibuktikan menangkap bug-nya** — kembalikan

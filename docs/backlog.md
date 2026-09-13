@@ -633,7 +633,32 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## K · Layar aturan garansi
+## K · Layar aturan garansi — ✅ SELESAI (12 Sep 2026)
+
+> Catatan koreksi, tiga hal:
+>
+> 1. **Butir L merusak `MasterData.gs` dan itu ketahuan saat mengerjakan K.**
+>    Penghapusan `listUnits_` di butir L ikut menghapus `listMaster_`,
+>    `masterUsage_`, `saveMaster_`, `validateUsers_` dan `nextMasterId_` —
+>    seluruh layar master data mati, dan **suite tetap hijau** karena tidak ada
+>    penguji yang memanggil rute-rute itu. Sudah dikembalikan. `verify-sheets.js`
+>    sekarang membaca `route_` dan memastikan **setiap fungsi yang dirutekan
+>    benar-benar ada**; revert-nya dibuktikan menangkap persis kesalahan itu.
+> 2. **Aturan `*` tidak bertabrakan dengan aturan yang menyebut channel.**
+>    Prompt bilang tolak yang tumpang tindih untuk "Material + Scope + Channel
+>    yang sama"; itu benar, dan penting untuk dinyatakan: `pickRule_` memang
+>    sengaja mendahulukan yang spesifik, jadi "aturan umum + satu pengecualian"
+>    adalah bentuk yang wajar dan **harus** diterima. Menolaknya akan membuat
+>    layar ini tidak bisa dipakai untuk kasus yang paling sering.
+> 3. **Menyimpan aturan langsung menghitung ulang seluruh unit.** Tidak diminta
+>    prompt, tapi tanpa itu admin mengubah 12 bulan jadi 24, tidak melihat satu
+>    unit pun bergerak, dan tidak punya cara apa pun mencari tahu kenapa —
+>    tanggalnya ada di baris unit dan dihitung di bawah aturan yang lama.
+>
+> Dua hal kecil di luar prompt: aturan non-aktif boleh ditulis lebih dulu
+> sebagai draf sementara aturan lama masih hidup (menyalakannya baru ditolak),
+> dan `Products` dapat penjaga duplikat karena kuncinya diketik orang —
+> satu-satunya master data yang begitu.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh H.
 >

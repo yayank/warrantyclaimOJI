@@ -5429,7 +5429,12 @@ const MASTER = {
   customers: { sheet: SHEET.CUSTOMER, key: 'CustomerID', label: 'Name', prefix: 'CUS' },
   parts: { sheet: SHEET.PART, key: 'PartID', label: 'Name', prefix: 'PART' },
   recipients: { sheet: SHEET.RECIPIENTS, key: 'RecipientID', label: 'Name', prefix: 'RCP' },
-  principals: { sheet: SHEET.PRINCIPALS, key: 'PrincipalID', label: 'Name', prefix: 'PRN' }
+  principals: { sheet: SHEET.PRINCIPALS, key: 'PrincipalID', label: 'Name', prefix: 'PRN' },
+  // The product list is keyed by the material code the principal's own file
+  // uses, so there is no id to generate: the key is the thing being named.
+  products: { sheet: SHEET.PRODUCTS, key: 'Material', label: 'Name' },
+  rules: { sheet: SHEET.RULES, key: 'RuleID', label: 'Material', prefix: 'RULE' },
+  distributors: { sheet: SHEET.DISTRIBUTORS, key: 'DistributorID', label: 'Name', prefix: 'DST' }
 };
 
 /**
@@ -5579,6 +5584,309 @@ function referenceData_(session) {
     // principal is a partner outside the office and has no such screen.
     administrators: session.role === ROLE.PRINCIPAL ? [] : administrators_()
   };
+}
+
+/** Administrator view: every row including inactive ones, plus usage counts. */
+function listMaster_(session, kind) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const def = MASTER[kind];
+  if (!def) throw new Error('Unknown master data set.');
+
+  const rows = readAll_(def.sheet);
+  const usage = masterUsage_(kind);
+
+  return rows.map(function (r) {
+    const out = {};
+    SCHEMA[def.sheet].forEach(function (h) { out[h] = r[h]; });
+    out.Active = isTrue_(r.Active);
+    out.__used = usage[String(r[def.key])] || 0;
+    return out;
+  });
+}
+
+function masterUsage_(kind) {
+  const counts = {};
+  if (kind === 'parts') {
+    readLive_(SHEET.ITEMS).forEach(function (i) {
+      counts[i.PartID] = (counts[i.PartID] || 0) + 1;
+    });
+  } else if (kind === 'customers') {
+    readLive_(SHEET.CLAIMS).forEach(function (c) {
+      counts[c.CustomerID] = (counts[c.CustomerID] || 0) + 1;
+    });
+  } else if (kind === 'users') {
+    readLive_(SHEET.CLAIMS).forEach(function (c) {
+      const e = String(c.RequesterEmail || '').toLowerCase();
+      counts[e] = (counts[e] || 0) + 1;
+    });
+  } else if (kind === 'recipients') {
+    readLive_(SHEET.ITEMS).forEach(function (i) {
+      if (i.ForwardedTo) counts[i.ForwardedTo] = (counts[i.ForwardedTo] || 0) + 1;
+    });
+  } else if (kind === 'products') {
+    readAll_(SHEET.POPULATION).forEach(function (u) {
+      const m = String(u.Material || '').trim().toUpperCase();
+      if (m) counts[m] = (counts[m] || 0) + 1;
+    });
+  } else if (kind === 'rules') {
+    // How many units the rule stands over. Not how many it currently answers —
+    // a rule whose date nobody has filled in yet still governs those units, and
+    // showing zero would read as "safe to change".
+    const byMaterial = {};
+    readAll_(SHEET.POPULATION).forEach(function (u) {
+      const m = String(u.Material || '').trim().toUpperCase();
+      if (m) byMaterial[m] = (byMaterial[m] || 0) + 1;
+    });
+    readSheetRows_(SHEET.RULES).forEach(function (r) {
+      counts[r.RuleID] = byMaterial[String(r.Material || '').trim().toUpperCase()] || 0;
+    });
+  } else if (kind === 'distributors') {
+    readLive_(SHEET.CLAIMS).forEach(function (c) {
+      const d = String(c.DistributorID || '').trim();
+      if (d) counts[d] = (counts[d] || 0) + 1;
+    });
+  } else if (kind === 'principals') {
+    const byName = {};
+    readLive_(SHEET.CLAIMS).forEach(function (c) {
+      const n = String(c.Principal || '').trim();
+      if (n) byName[n] = (byName[n] || 0) + 1;
+    });
+    readAll_(SHEET.PRINCIPALS).forEach(function (p) {
+      counts[p.PrincipalID] = byName[String(p.Name).trim()] || 0;
+    });
+  }
+  return counts;
+}
+
+function saveMaster_(session, kind, record) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const def = MASTER[kind];
+  if (!def) throw new Error('Unknown master data set.');
+
+  return withLock_(function () {
+    const keyValue = record[def.key];
+    const existing = keyValue ? findBy_(def.sheet, def.key, keyValue) : null;
+
+    // Most of these sets generate their own ids, so an "add" can never land on
+    // an existing row. The product list is the exception: its key is the
+    // material code a person types, and adding one that is already there would
+    // silently overwrite the product rather than refusing.
+    if (record.__isNew && existing) {
+      throw new Error('"' + keyValue + '" is already on the list.');
+    }
+
+    if (kind === 'users') validateUsers_(record, existing);
+    if (kind === 'products') validateProduct_(record, existing);
+    if (kind === 'rules') validateRule_(record, existing);
+    if (kind === 'distributors') validateDistributor_(record, existing);
+
+    if (!existing) {
+      const row = {};
+      SCHEMA[def.sheet].forEach(function (h) { row[h] = record[h] === undefined ? '' : record[h]; });
+      if (def.prefix && !row[def.key]) row[def.key] = nextMasterId_(def);
+      if (row.Active === '') row.Active = true;
+      if (SCHEMA[def.sheet].indexOf('CreatedAt') !== -1) row.CreatedAt = nowIso_();
+      insert_(def.sheet, row);
+      audit_(session, 'MasterDataChange', {
+        field: kind + '.' + row[def.key], oldValue: '', newValue: row[def.label] || ''
+      });
+      clearReferenceCache_();
+      afterRuleChange_(kind);
+      return row;
+    }
+
+    const changes = [];
+    const patch = {};
+    SCHEMA[def.sheet].forEach(function (h) {
+      if (record[h] === undefined || h === def.key) return;
+      if (String(existing[h]) !== String(record[h])) {
+        changes.push({ field: h, oldValue: existing[h], newValue: record[h] });
+      }
+      patch[h] = record[h];
+    });
+    const updated = update_(def.sheet, def.key, keyValue, patch);
+    auditChanges_(session, 'MasterDataChange', '', changes.map(function (c) {
+      return { field: kind + '.' + keyValue + '.' + c.field, oldValue: c.oldValue, newValue: c.newValue };
+    }), record.__reason || '', false);
+    clearReferenceCache_();
+    afterRuleChange_(kind);
+    return updated;
+  });
+}
+
+/**
+ * A changed rule changes nothing until the units are worked out again.
+ *
+ * The dates on a unit row are what every screen reads, and they were worked out
+ * under the rule as it stood. Without this, an administrator corrects a term
+ * from 12 months to 24, sees no unit move, and has no way at all to find out
+ * why. One pass over the register, which is what recomputing a single unit
+ * costs anyway.
+ */
+function afterRuleChange_(kind) {
+  if (kind !== 'rules' && kind !== 'products') return;
+  recomputeUnitWarranty_(null);
+}
+
+/** A product row is the key to every rule, so its code has to be real. */
+function validateProduct_(record, existing) {
+  const material = String(record.Material || '').trim().toUpperCase();
+  if (!material) throw new Error('A product needs a material code.');
+  record.Material = material;
+  if (!String(record.Name || '').trim()) throw new Error('A product needs a name.');
+  const reg = String(record.Regulation || '').trim().toUpperCase();
+  if (reg && ['AKD', 'AKL'].indexOf(reg) === -1) {
+    throw new Error('Regulation is either AKD or AKL.');
+  }
+  record.Regulation = reg;
+}
+
+function validateDistributor_(record) {
+  if (!String(record.Name || '').trim()) throw new Error('A distributor needs a name.');
+  const email = String(record.Email || '').trim();
+  if (email && email.indexOf('@') === -1) {
+    throw new Error('"' + email + '" is not an email address.');
+  }
+  record.Email = email.toLowerCase();
+}
+
+/**
+ * A warranty rule, checked before it can start answering for anybody.
+ *
+ * The last check is the one that matters and the reason this screen exists.
+ * Two rules covering the same model, the same side and the same channel over
+ * overlapping periods are not a preference the portal can settle: pickRule_
+ * will choose one of them, deterministically and invisibly, and the other will
+ * appear to have been ignored. So the overlap is refused here, naming the rule
+ * it collides with, rather than accepted and resolved in silence.
+ *
+ * A rule taking either channel does NOT collide with one naming a channel:
+ * pickRule_ prefers the specific one on purpose, and that is how a general term
+ * with one exception is meant to be written.
+ */
+function validateRule_(record, existing) {
+  const material = String(record.Material || '').trim().toUpperCase();
+  if (!material) throw new Error('A rule has to say which model it is for.');
+  if (!productsIndex_()[material]) {
+    throw new Error('"' + material + '" is not on the product list. Add the product first.');
+  }
+  record.Material = material;
+
+  const scope = String(record.Scope || '').trim().toLowerCase();
+  if ([WARRANTY_SCOPE.PRINCIPAL, WARRANTY_SCOPE.CUSTOMER].indexOf(scope) === -1) {
+    throw new Error('Scope is either "principal" or "customer".');
+  }
+  record.Scope = scope;
+
+  const basis = String(record.Basis || '').trim().toLowerCase();
+  const bases = [WARRANTY_BASIS.ASSEMBLY, WARRANTY_BASIS.SELLING_IN,
+    WARRANTY_BASIS.RECEIVED, WARRANTY_BASIS.INSTALLATION];
+  if (bases.indexOf(basis) === -1) {
+    throw new Error('Basis is one of: ' + bases.join(', ') + '.');
+  }
+  record.Basis = basis;
+
+  let channel = String(record.Channel || '').trim().toLowerCase();
+  if (!channel) channel = SALES_CHANNEL.ANY;
+  if ([SALES_CHANNEL.DIRECT, SALES_CHANNEL.DISTRIBUTOR, SALES_CHANNEL.ANY]
+    .indexOf(channel) === -1) {
+    throw new Error('Channel is "direct", "distributor", or blank for either.');
+  }
+  record.Channel = channel;
+
+  const months = Number(record.Months);
+  if (!isFinite(months) || months <= 0 || months !== Math.floor(months)) {
+    throw new Error('Months has to be a whole number above zero.');
+  }
+  record.Months = months;
+
+  const from = parseLocalDate_(record.EffectiveFrom);
+  if (from.error) throw new Error('Effective from: ' + from.error);
+  const to = parseLocalDate_(record.EffectiveTo);
+  if (to.error) throw new Error('Effective to: ' + to.error);
+  if (from.iso && to.iso && from.iso > to.iso) {
+    throw new Error('The rule cannot stop being effective before it starts.');
+  }
+  record.EffectiveFrom = from.iso;
+  record.EffectiveTo = to.iso;
+
+  if (record.Active === '' || record.Active === undefined) record.Active = true;
+  if (!isTrue_(record.Active)) return;              // a retired rule answers nobody
+
+  const clash = overlappingRule_(record, existing);
+  if (clash) {
+    throw new Error('This overlaps ' + clash.RuleID + ' (' + clash.Material + ', ' +
+      clash.Scope + ', ' + (clash.Channel || '*') + ', ' +
+      describeWindow_(clash.EffectiveFrom, clash.EffectiveTo) +
+      '). Two rules covering the same period would leave the portal choosing ' +
+      'between them without saying so — close one of them off first.');
+  }
+}
+
+function describeWindow_(from, to) {
+  if (!from && !to) return 'no end dates';
+  if (!from) return 'up to ' + to;
+  if (!to) return 'from ' + from;
+  return from + ' to ' + to;
+}
+
+/** The active rule this one would compete with, or null. */
+function overlappingRule_(record, existing) {
+  const mine = {
+    from: record.EffectiveFrom || '0000-01-01',
+    to: record.EffectiveTo || '9999-12-31'
+  };
+  const hits = readSheetRows_(SHEET.RULES).filter(function (r) {
+    if (existing && String(r.RuleID) === String(existing.RuleID)) return false;
+    if (!isTrue_(r.Active)) return false;
+    if (String(r.Material || '').trim().toUpperCase() !== record.Material) return false;
+    if (String(r.Scope || '').trim().toLowerCase() !== record.Scope) return false;
+    const channel = String(r.Channel || '').trim().toLowerCase() || SALES_CHANNEL.ANY;
+    if (channel !== record.Channel) return false;
+
+    const theirs = {
+      from: dateKey_(r.EffectiveFrom) || '0000-01-01',
+      to: dateKey_(r.EffectiveTo) || '9999-12-31'
+    };
+    return mine.from <= theirs.to && theirs.from <= mine.to;
+  });
+  return hits[0] || null;
+}
+
+function validateUsers_(record, existing) {
+  const email = String(record.Email || '').trim().toLowerCase();
+  if (!email || email.indexOf('@') === -1) throw new Error('Enter a valid email address.');
+  const roles = [ROLE.REQUESTER, ROLE.PRODUCTION, ROLE.ADMIN, ROLE.PRINCIPAL, ROLE.TESTER];
+  if (roles.indexOf(record.Role) === -1) throw new Error('Choose a valid role.');
+
+  // Without a principal, a Principal account has no claims to see and no digest
+  // to receive, so the account would simply not work.
+  if (record.Role === ROLE.PRINCIPAL) {
+    const principal = String(record.Principal || '').trim();
+    if (!principal) throw new Error('A Principal account must be assigned to a principal.');
+    if (principalNames_().indexOf(principal) === -1) {
+      throw new Error('"' + principal + '" is not an active principal.');
+    }
+  }
+
+  // Losing the last administrator would lock everyone out of master data.
+  const admins = readAll_(SHEET.USERS).filter(function (u) {
+    return u.Role === ROLE.ADMIN && isTrue_(u.Active);
+  });
+  const wasAdmin = existing && existing.Role === ROLE.ADMIN && isTrue_(existing.Active);
+  const willBeAdmin = record.Role === ROLE.ADMIN && isTrue_(record.Active);
+  if (wasAdmin && !willBeAdmin && admins.length <= 1) {
+    throw new Error('At least one active administrator must remain.');
+  }
+}
+
+function nextMasterId_(def) {
+  let max = 0;
+  readAll_(def.sheet).forEach(function (r) {
+    const m = new RegExp('^' + def.prefix + '-(\\d+)$').exec(String(r[def.key] || ''));
+    if (m) max = Math.max(max, Number(m[1]));
+  });
+  return def.prefix + '-' + padLeft_(max + 1, 3);
 }
 
 /**

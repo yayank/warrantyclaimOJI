@@ -3935,6 +3935,9 @@ const MASTER_TABS = [
   { id: 'customers', label: 'Customers' },
   { id: 'parts', label: 'Spare Parts' },
   { id: 'recipients', label: 'Recipients' },
+  { id: 'products', label: 'Products' },
+  { id: 'rules', label: 'Warranty Rules' },
+  { id: 'distributors', label: 'Distributors' },
   { id: 'units', label: 'Units' }
 ];
 
@@ -3949,6 +3952,10 @@ function renderMaster(total) {
     customers: ['ID', 'Name', 'Active', 'Claims', ''],
     parts: ['ID', 'Name', 'Active', 'Used in claims', ''],
     recipients: ['ID', 'Name', 'Email', 'Company', 'Principal', 'Active', ''],
+    products: ['Material', 'Name', 'Principal', 'AKD/AKL', 'Active', 'Units', ''],
+    rules: ['Rule', 'Model', 'Side', 'Channel', 'Counted from', 'Months',
+      'Effective', 'Active', 'Units', ''],
+    distributors: ['ID', 'Name', 'Email', 'Active', 'Claims', ''],
     units: ['Serial number', 'Product', 'Sold through', 'Principal warranty',
       'Our warranty', 'Still needed', '']
   }[kind];
@@ -3984,6 +3991,32 @@ function renderMaster(total) {
         '<td>' + h(r.Role) + '</td>',
         '<td' + (r.Principal ? '' : ' class="dimmer"') + '>' +
           h(r.Principal || (r.Role === ROLE.PRINCIPAL ? 'required' : '—')) + '</td>');
+    } else if (kind === 'rules') {
+      // Everything that decides which rule applies, on one line: a collision is
+      // spotted by reading down the column, not by opening each one.
+      return '<tr><td class="mono' + (r.Active ? '' : ' dimmer') + '">' + h(r.RuleID) + '</td>' +
+        '<td class="mono">' + h(r.Material) + '</td>' +
+        '<td>' + h(r.Scope === 'customer' ? 'ours to the buyer' : 'principal to us') + '</td>' +
+        '<td' + (r.Channel === '*' || !r.Channel ? ' class="dim"' : '') + '>' +
+          h(!r.Channel || r.Channel === '*' ? 'either' : r.Channel) + '</td>' +
+        '<td>' + h(r.Basis) + '</td>' +
+        '<td class="num">' + h(r.Months) + '</td>' +
+        '<td class="tiny">' + h(effectiveLabel(r)) + '</td>' +
+        '<td>' + (r.Active ? '<span class="pill p-ok">Active</span>'
+          : '<span class="pill p-draft">Retired</span>') + '</td>' +
+        '<td class="num">' + (r.__used || 0) + '</td>' +
+        '<td><button class="btn sm" data-edit="' + h(r.RuleID) + '" type="button">Edit</button></td>' +
+        '</tr>';
+    } else if (kind === 'products') {
+      cells.push('<td class="mono' + (r.Active ? '' : ' dimmer') + '">' + h(r.Material) + '</td>',
+        '<td>' + h(r.Name) + '</td>',
+        '<td' + (r.Principal ? '' : ' class="dimmer"') + '>' + h(r.Principal || '—') + '</td>',
+        '<td class="dim">' + h(r.Regulation || '—') + '</td>');
+    } else if (kind === 'distributors') {
+      cells.push('<td class="mono' + (r.Active ? '' : ' dimmer') + '">' +
+        h(r.DistributorID) + '</td>',
+        '<td>' + h(r.Name) + '</td>',
+        '<td class="mono dim">' + h(r.Email || '—') + '</td>');
     } else if (kind === 'recipients') {
       cells.push('<td class="mono">' + h(r.RecipientID) + '</td>', '<td>' + h(r.Name) + '</td>',
         '<td class="mono">' + h(r.Email) + '</td>', '<td>' + h(r.Company) + '</td>',
@@ -4479,7 +4512,18 @@ function masterKey(kind, r) {
   return kind === 'users' ? r.Email
     : kind === 'parts' ? r.PartID
       : kind === 'customers' ? r.CustomerID
-        : kind === 'principals' ? r.PrincipalID : r.RecipientID;
+        : kind === 'principals' ? r.PrincipalID
+          : kind === 'products' ? r.Material
+            : kind === 'rules' ? r.RuleID
+              : kind === 'distributors' ? r.DistributorID : r.RecipientID;
+}
+
+/** The period a rule covers, matched against the unit's own basis date. */
+function effectiveLabel(r) {
+  if (!r.EffectiveFrom && !r.EffectiveTo) return 'always';
+  if (!r.EffectiveFrom) return 'up to ' + r.EffectiveTo;
+  if (!r.EffectiveTo) return 'from ' + r.EffectiveFrom;
+  return r.EffectiveFrom + ' → ' + r.EffectiveTo;
 }
 
 function principalSelect(id, value, includeBlank) {
@@ -4511,6 +4555,81 @@ function openMasterForm(kind, record) {
       '<p class="tiny">Required for a Principal account — it decides which claims that account ' +
         'can see and which digests it receives. Ignored for every other role.</p>' +
       activeToggle(record);
+  } else if (kind === 'products') {
+    body =
+      '<label class="field"><span>Material code</span><input type="text" id="mMaterial" ' +
+        'class="mono" value="' + h(record ? record.Material : '') + '"' +
+        (record ? ' readonly' : '') + '></label>' +
+      '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
+        h(record ? record.Name : '') + '"></label>' +
+      '<label class="field"><span>Principal</span>' +
+        principalSelect('mPrincipal', record ? record.Principal : '', true) + '</label>' +
+      '<label class="field"><span>Regulation</span><select id="mRegulation">' +
+        ['', 'AKD', 'AKL'].map(function (o) {
+          return '<option value="' + h(o) + '"' +
+            (record && record.Regulation === o ? ' selected' : '') + '>' +
+            h(o || '\u2014 not set \u2014') + '</option>';
+        }).join('') + '</select></label>' +
+      '<label class="field"><span>Serial pattern</span><input type="text" id="mSerialPattern" ' +
+        'class="mono" value="' + h(record ? record.SerialPattern : '') + '"></label>' +
+      '<label class="field"><span>Notes</span><input type="text" id="mNotes" value="' +
+        h(record ? record.Notes : '') + '"></label>' +
+      activeToggle(record) +
+      '<p class="tiny">The material code is the key every warranty rule hangs off, and it is what ' +
+        'the principal\u2019s own file calls the model. It cannot be changed once units refer to it.</p>';
+  } else if (kind === 'rules') {
+    const opt = function (id, values, current, labels) {
+      return '<select id="' + id + '">' + values.map(function (v, i) {
+        return '<option value="' + h(v) + '"' + (String(current) === v ? ' selected' : '') +
+          '>' + h(labels ? labels[i] : v) + '</option>';
+      }).join('') + '</select>';
+    };
+    body =
+      '<label class="field"><span>Model</span><input type="text" id="mMaterial" class="mono" ' +
+        'value="' + h(record ? record.Material : '') + '"></label>' +
+      '<label class="field"><span>Which side</span>' +
+        opt('mScope', ['principal', 'customer'], record ? record.Scope : 'principal',
+          ['What the principal covers for us', 'What we cover for the buyer']) + '</label>' +
+      '<label class="field"><span>Sales channel</span>' +
+        opt('mChannel', ['*', 'direct', 'distributor'],
+          record ? (record.Channel || '*') : '*',
+          ['Either way', 'Sold direct', 'Sold through a distributor']) + '</label>' +
+      '<label class="field"><span>Counted from</span>' +
+        opt('mBasis', ['assembly', 'selling-in', 'received', 'installation'],
+          record ? record.Basis : 'assembly',
+          ['The assembly month in the serial number', 'The selling-in date',
+            'The date the distributor received it', 'The installation (BAST) date']) + '</label>' +
+      '<label class="field"><span>Months</span><input type="number" id="mMonths" min="1" ' +
+        'step="1" value="' + h(record ? record.Months : '') + '"></label>' +
+      '<label class="field"><span>Effective from</span><input type="text" id="mFrom" ' +
+        'placeholder="dd/mm/yyyy" value="' + h(record ? record.EffectiveFrom : '') + '"></label>' +
+      '<label class="field"><span>Effective to</span><input type="text" id="mTo" ' +
+        'placeholder="dd/mm/yyyy" value="' + h(record ? record.EffectiveTo : '') + '"></label>' +
+      '<label class="field"><span>Notes</span><input type="text" id="mNotes" value="' +
+        h(record ? record.Notes : '') + '"></label>' +
+      activeToggle(record) +
+      // Two things nobody guesses right the first time, so the form says them.
+      '<p class="tiny">The effective dates are matched against <b>the unit\u2019s own</b> starting ' +
+        'date, never against today \u2014 entering next year\u2019s terms leaves every unit already ' +
+        'sold exactly where it is. Leave both blank for a rule with no end dates.</p>' +
+      '<p class="tiny">Saving works every unit\u2019s warranty out again, so the change shows up ' +
+        'on the claims immediately.</p>' +
+      (record && record.__used
+        ? '<div class="notice">\u26a0 ' + record.__used + ' unit' +
+          (record.__used === 1 ? '' : 's') + ' of this model are governed by rules like this one. ' +
+          'Retiring it rather than editing it keeps what past claims decided readable.</div>'
+        : '');
+  } else if (kind === 'distributors') {
+    body =
+      '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
+        h(record ? record.Name : '') + '"></label>' +
+      '<label class="field"><span>Account email</span><input type="email" id="mEmail" value="' +
+        h(record ? record.Email : '') + '"></label>' +
+      '<label class="field"><span>Notes</span><input type="text" id="mNotes" value="' +
+        h(record ? record.Notes : '') + '"></label>' +
+      activeToggle(record) +
+      '<p class="tiny">One account per distributor company, not per person. Whoever sits behind ' +
+        'it may change; the claim history stays where it is.</p>';
   } else if (kind === 'recipients') {
     body =
       '<label class="field"><span>Name</span><input type="text" id="mName" value="' +
@@ -4544,12 +4663,37 @@ function openMasterForm(kind, record) {
     actions: [
       { label: 'Cancel', close: true },
       { label: 'Save', primary: true, onClick: function (close) {
-        const payload = { Active: el('mActive').checked };
+        // The product list is keyed by a code somebody types, so the server has
+        // to be told this is an add rather than an edit of whatever is already
+        // under that code.
+        const payload = { Active: el('mActive').checked, __isNew: isNew };
         if (kind === 'users') {
           payload.Email = el('mEmail').value.trim().toLowerCase();
           payload.Name = el('mName').value.trim();
           payload.Role = el('mRole').value;
           payload.Principal = el('mPrincipal').value;
+        } else if (kind === 'products') {
+          payload.Material = el('mMaterial').value.trim().toUpperCase();
+          payload.Name = el('mName').value.trim();
+          payload.Principal = el('mPrincipal').value;
+          payload.Regulation = el('mRegulation').value;
+          payload.SerialPattern = el('mSerialPattern').value.trim();
+          payload.Notes = el('mNotes').value.trim();
+        } else if (kind === 'rules') {
+          payload.RuleID = record ? record.RuleID : '';
+          payload.Material = el('mMaterial').value.trim().toUpperCase();
+          payload.Scope = el('mScope').value;
+          payload.Channel = el('mChannel').value;
+          payload.Basis = el('mBasis').value;
+          payload.Months = el('mMonths').value.trim();
+          payload.EffectiveFrom = el('mFrom').value.trim();
+          payload.EffectiveTo = el('mTo').value.trim();
+          payload.Notes = el('mNotes').value.trim();
+        } else if (kind === 'distributors') {
+          payload.DistributorID = record ? record.DistributorID : '';
+          payload.Name = el('mName').value.trim();
+          payload.Email = el('mEmail').value.trim();
+          payload.Notes = el('mNotes').value.trim();
         } else if (kind === 'recipients') {
           payload.RecipientID = record ? record.RecipientID : '';
           payload.Name = el('mName').value.trim();
