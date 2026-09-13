@@ -85,13 +85,29 @@ function exportClaims_(session, filter) {
     }
   });
 
-  const name = exportFileName_(filter);
+  return writeWorkbook_(exportFileName_(filter), 'Claims', rows);
+}
+
+/**
+ * Rows to an .xlsx in Drive, and a link to it.
+ *
+ * Apps Script cannot start a download from inside its own iframe, so the file
+ * is built as a spreadsheet, fetched back as xlsx, and dropped in the export
+ * folder. Shared here rather than copied because there is more than one report
+ * now, and two copies of this would eventually disagree about the cleanup.
+ */
+function writeWorkbook_(name, sheetName, rows) {
+  const width = rows.reduce(function (w, r) { return Math.max(w, r.length); }, 0);
   const temp = SpreadsheetApp.create(name);
   try {
     const sheet = temp.getSheets()[0];
-    sheet.setName('Claims');
-    sheet.getRange(1, 1, rows.length, header.length).setValues(rows);
-    sheet.getRange(1, 1, 1, header.length).setFontWeight('bold');
+    sheet.setName(sheetName);
+    sheet.getRange(1, 1, rows.length, width).setValues(rows.map(function (r) {
+      const line = r.slice();
+      while (line.length < width) line.push('');
+      return line;
+    }));
+    sheet.getRange(1, 1, 1, width).setFontWeight('bold');
     sheet.setFrozenRows(1);
     SpreadsheetApp.flush();
 

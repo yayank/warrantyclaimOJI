@@ -204,6 +204,8 @@ function route_(session, action, payload) {
     case 'claims.unitHistory': return unitHistory_(session, payload.serialNumber);
     case 'claims.attachment': return attachmentData_(session, payload.attachmentId);
     case 'claims.export': return exportClaims_(session, payload);
+    case 'reports.cost': return costReport_(session, payload);
+    case 'reports.costExport': return exportCostReport_(session, payload);
 
     /* master data */
     case 'master.list': return listMaster_(session, payload.kind);

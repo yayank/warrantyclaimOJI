@@ -36,6 +36,7 @@ membuat daftar berkas yang disentuh kecuali diminta.
 | `src/Audit.gs` | jejak audit + arsip per tahun |
 | `src/Visits.gs` | stempel kunjungan, penanda "baru sejak terakhir dilihat" |
 | `src/Views.gs` | saved views per orang |
+| `src/Reports.gs` | laporan biaya garansi yang kita serap — `costReport_`, `exportCostReport_` |
 | `src/Mailer.gs` · `Files.gs` · `Export.gs` · `Triggers.gs` · `MasterData.gs` · `Setup.gs` | sesuai namanya |
 | `src/Script.html` | **seluruh klien**, 4.300 baris, satu `<script>` |
 | `src/Styles.html` | CSS, terang dan gelap, kartu di bawah 700px |
@@ -132,14 +133,17 @@ Aturan yang sudah berlaku:
   ditulis nanti. Menambah field sisi customer berarti menambahnya ke daftar itu.
 - **Antarmuka tetap Bahasa Inggris.** Ditanyakan 12 Sep 2026, dijawab tidak
   perlu diterjemahkan. Jangan usulkan lagi.
+- **Laporan menghitung jumlah, bukan rupiah.** Tidak ada harga di portal ini.
+  Menambahkan nilai uang dimulai dari master `sparepart`, dan itu butir
+  tersendiri — jangan diselundupkan ke laporan mana pun.
 - Dashboard, grafik, notifikasi realtime, aplikasi mobile terpisah: sudah
   ditimbang dan tidak disarankan.
 
 ## Kalau diminta mengerjakan butir backlog
 
-`docs/backlog.md` berisi prompt siap-tempel. **A–G sudah selesai. H–N belum
-dikerjakan** — itu gelombang model garansi dua tingkat, urutannya mengikat, dan
-rancangannya ada di `docs/warranty-model.md` (sudah disetujui pemilik repo).
+`docs/backlog.md` berisi prompt siap-tempel. **A–N semuanya sudah selesai.**
+Gelombang H–N adalah model garansi dua tingkat; rancangannya di
+`docs/warranty-model.md`, latar belakangnya di `docs/business-context.md`.
 Setiap butir mencatat koreksi terhadap promptnya sendiri kalau promptnya keliru
 — beberapa memang keliru. Kalau ada butir baru, tulis catatan koreksi yang sama
 bila menemukan promptnya salah.

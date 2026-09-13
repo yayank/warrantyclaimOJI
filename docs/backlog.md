@@ -812,7 +812,29 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## N · Laporan biaya garansi yang kita serap
+## N · Laporan biaya garansi yang kita serap — ✅ SELESAI (13 Sep 2026)
+
+> Catatan koreksi, dua hal:
+>
+> 1. **Satu definisi, bukan dua.** Percobaan pertama menyaring `costBorne` di
+>    `listClaims_` **dan** memeriksanya lagi di `countsAsCost_`. Keduanya benar,
+>    jadi menghapus salah satunya tidak mengubah apa pun — dan revert-nya lolos.
+>    Yang menyaring sekarang hanya `countsAsCost_`; dua definisi untuk hal yang
+>    sama akan bergeser, dan yang bergeser adalah yang tidak diuji siapa pun.
+> 2. **Penulis workbook diangkat keluar dari `exportClaims_`** jadi
+>    `writeWorkbook_`, karena sekarang ada dua laporan. Sekalian ia meratakan
+>    baris yang panjangnya berbeda — laporan ini punya baris ringkasan yang
+>    lebih pendek dari baris klaimnya, dan `setValues` menolak larik yang tidak
+>    rata.
+>
+> Lima cara memotong (bulan, produk, principal, distributor, rumah sakit)
+> dihitung dalam satu lintasan dan dikirim sekaligus: himpunannya sudah dibaca
+> untuk membuat salah satunya, dan meminta ulang per potongan berarti empat
+> pembacaan sheet `Claims` lagi untuk pertanyaan yang sudah dijawab.
+>
+> Tiga hal yang **tidak** dihitung, masing-masing dengan pemeriksaannya: part
+> yang ditolak (tidak ada biaya), klaim yang masih draft (belum jadi apa-apa),
+> dan klaim yang principal-nya masih menanggung.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh J.
 >

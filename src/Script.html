@@ -405,6 +405,7 @@ function renderChrome() {
     // queue that grows.
     pages.push({ id: 'advance', label: 'Advance Issue', count: S.counts.advance });
     pages.push({ id: 'orders', label: 'Orders' });
+    pages.push({ id: 'cost', label: 'Cost Borne' });
     pages.push({ id: 'master', label: 'Master Data' });
     pages.push({ id: 'templates', label: 'Email Templates' });
     pages.push({ id: 'email', label: 'Email Log' });
@@ -466,6 +467,7 @@ function navigate(page) {
   if (page === 'batch') return loadBatches();
   if (page === 'orders') return loadOrders();
   if (page === 'advance') return loadAdvance();
+  if (page === 'cost') return loadCostReport();
   if (page === 'master') return loadMaster(S.master.kind);
   if (page === 'templates') return loadTemplates();
   if (page === 'email') return loadEmailLog();
@@ -3940,6 +3942,103 @@ function promptAdvanceBulk() {
           }).catch(fail);
       } }
     ]
+  });
+}
+
+/* ==================================================== cost borne by us */
+
+const COST = { from: '', to: '', cut: 'month', data: null };
+
+function loadCostReport() {
+  el('view').innerHTML = skeleton(4);
+  api('reports.cost', { from: COST.from, to: COST.to }).then(function (data) {
+    COST.data = data;
+    renderCostReport();
+  }).catch(fail);
+}
+
+/**
+ * One number, then the ways of cutting it, then the claims behind it.
+ *
+ * The top line is the answer to the question actually asked; everything below
+ * exists so that the answer can be argued with. A total nobody can trace back
+ * to a list of claim numbers does not survive its first meeting.
+ */
+function renderCostReport() {
+  const d = COST.data;
+  const t = d.totals;
+  const cut = d.cuts[COST.cut] || [];
+
+  el('view').innerHTML = [
+    '<div class="toolbar">',
+      '<label class="inline">From <input type="date" id="costFrom" value="' +
+        h(COST.from) + '"></label>',
+      '<label class="inline">To <input type="date" id="costTo" value="' +
+        h(COST.to) + '"></label>',
+      '<span class="spacer"></span>',
+      '<button class="btn" id="costExport" type="button">Export to Excel</button>',
+    '</div>',
+    '<div class="notice' + (t.claims ? '' : ' ok') + '">',
+      t.claims
+        ? 'The principal has stopped covering <b>' + t.units + '</b> unit' +
+          (t.units === 1 ? '' : 's') + ' that we still do: <b>' + t.claims + '</b> claim' +
+          (t.claims === 1 ? '' : 's') + ', <b>' + t.parts + '</b> part' +
+          (t.parts === 1 ? '' : 's') + ' on us, ' + t.shipped + ' already sent.'
+        : 'Nothing in this period is being absorbed by us.',
+    '</div>',
+    // Counts, not money. Saying so on the screen is cheaper than being asked in
+    // the meeting where the number is first used.
+    '<p class="tiny">Counts, not value — the portal holds no spare-part prices.</p>',
+    '<div class="tabs">' + d.groups.map(function (g) {
+      return '<button type="button" data-cut="' + h(g.key) + '"' +
+        (COST.cut === g.key ? ' class="on"' : '') + '>' + h(g.label) + '</button>';
+    }).join('') + '</div>',
+    '<div class="tablewrap"><table class="data"><thead><tr>' +
+      ['', 'Claims', 'Units', 'Parts', 'Shipped'].map(function (x) {
+        return '<th>' + h(x) + '</th>';
+      }).join('') + '</tr></thead><tbody>' +
+      (cut.length ? cut.map(function (b) {
+        return '<tr><td>' + h(b.key) + '</td><td class="num">' + b.claims +
+          '</td><td class="num">' + b.units + '</td><td class="num">' + b.parts +
+          '</td><td class="num">' + b.shipped + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="empty">Nothing to show.</td></tr>') +
+      '</tbody></table></div>',
+    '<h3 class="tiny" style="margin:16px 0 6px">The claims behind it</h3>',
+    '<div class="tablewrap"><table class="data"><thead><tr>' +
+      ['Claim', 'Date', 'Product', 'Serial number', 'Hospital', 'Distributor',
+        'Parts', 'Their cover ended', 'Ours ends'].map(function (x) {
+        return '<th>' + h(x) + '</th>';
+      }).join('') + '</tr></thead><tbody>' +
+      (d.rows.length ? d.rows.map(function (r) {
+        return '<tr><td class="stack"><span class="mono">' + h(r.refNo || r.claimId) +
+          '</span><span class="mono tiny">' + h(r.claimId) + '</span></td>' +
+          '<td>' + h(fmtDate(r.date)) + '</td>' +
+          '<td>' + h(r.productName) + '</td>' +
+          '<td class="mono">' + h(r.serialNumber) + '</td>' +
+          '<td>' + h(r.customerName) + '</td>' +
+          '<td' + (r.distributorName ? '' : ' class="dimmer"') + '>' +
+            h(r.distributorName || 'direct') + '</td>' +
+          '<td class="num">' + r.parts + '</td>' +
+          '<td class="tiny">' + h(monthLabel(r.warrantyExpiry)) + '</td>' +
+          '<td class="tiny">' + h(monthLabel(r.customerWarrantyExpiry)) + '</td></tr>';
+      }).join('') : '<tr><td colspan="9" class="empty">Nothing to show.</td></tr>') +
+      '</tbody></table></div>'
+  ].join('');
+
+  el('view').querySelectorAll('[data-cut]').forEach(function (b) {
+    b.addEventListener('click', function () { COST.cut = b.dataset.cut; renderCostReport(); });
+  });
+  const from = el('costFrom');
+  if (from) from.addEventListener('change', function () { COST.from = this.value; loadCostReport(); });
+  const to = el('costTo');
+  if (to) to.addEventListener('change', function () { COST.to = this.value; loadCostReport(); });
+  const ex = el('costExport');
+  if (ex) ex.addEventListener('click', function () {
+    toast('Building the report…', 'info');
+    api('reports.costExport', { from: COST.from, to: COST.to }).then(function (r) {
+      toast(r.rows + ' row(s) exported.', 'ok');
+      window.open(r.url, '_blank');
+    }).catch(fail);
   });
 }
 
