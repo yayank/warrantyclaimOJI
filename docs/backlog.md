@@ -755,7 +755,28 @@ Semua sesi memakai branch `claude/warranty-claim-searchable-dropdowns-2v0b4k`.
 
 ---
 
-## M · Unit tak terdaftar: tolak, simpan draft, minta pendaftaran
+## M · Unit tak terdaftar: tolak, simpan draft, minta pendaftaran — ✅ SELESAI (13 Sep 2026)
+
+> Catatan koreksi, tiga hal:
+>
+> 1. **Penolakannya bukan `throw`.** Prompt bilang "submit ditolak"; kalau itu
+>    dikerjakan sebagai error, orang yang tidak melakukan kesalahan apa pun
+>    mendapat kotak merah. `submitClaim_` mengembalikan draftnya beserta
+>    `unitRequest`, dan layarnya menjelaskan apa yang terjadi dan siapa yang
+>    sedang mengerjakannya.
+> 2. **Diperiksa SETELAH aturan kelengkapan, bukan sebelumnya.** Draft yang
+>    menunggu harus yang bisa langsung jalan begitu unitnya ada, dan draft
+>    setengah jadi tidak bisa. Form klaim sudah memperingatkan begitu serial
+>    diketik, jadi tidak ada yang mengisi seluruh formulir tanpa diberi tahu.
+> 3. **`resolveUnitRequests_` bertanya ke register, bukan percaya pemanggilnya.**
+>    Unit bisa masuk lewat empat jalur — form unit, impor CSV, workbook
+>    principal, atau sudah ada sejak awal — dan permintaan yang tertinggal
+>    terbuka di belakang salah satunya adalah draft yang tidak pernah terdengar
+>    lagi. Jadi ketiga jalur yang bisa menambah unit memanggilnya.
+>
+> Satu hal di luar prompt: `verify-templates.js` dulu memeriksa "ada tujuh
+> template". Angka itu basi tiap kali ada template baru; sekarang ia memeriksa
+> **setiap kode punya bawaannya dan tidak ada bawaan tanpa kode**.
 
 > Branch: `claude/warranty-claim-searchable-dropdowns-2v0b4k`. Butuh L.
 > Baca `docs/business-context.md` bagian "Unit yang tidak terdaftar".

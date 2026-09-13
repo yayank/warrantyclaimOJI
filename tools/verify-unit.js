@@ -101,6 +101,9 @@ const sandbox = {
   claimMailData_: function () { return {}; },
   formatDate_: function (v) { return String(v); },
   productName_: function () { return 'SWS-4000'; },
+  // Every unit in this fixture is on the register; what is being checked here
+  // is the merge, not the registration gate.
+  isRegisteredUnit_: function () { return true; },
   TEMPLATE: { CLAIM_SUBMIT: 'CLAIM_SUBMIT' }
 };
 vm.createContext(sandbox);

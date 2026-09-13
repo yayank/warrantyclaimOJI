@@ -542,6 +542,9 @@ function importUnits_(session, payload) {
     // and until this runs their warranty columns are blank or belong to the
     // unit that used to sit on that row.
     const recomputed = recomputeUnitWarranty_(null);
+    // Units arriving in the principal's own file close the requests waiting on
+    // them just as surely as ones typed in by hand.
+    resolveUnitRequests_(session);
     audit_(session, 'MasterDataChange', {
       field: 'units.import',
       newValue: result.warranty + ' warranty rows, ' + result.population + ' population rows'

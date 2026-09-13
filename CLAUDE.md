@@ -109,12 +109,12 @@ Aturan yang sudah berlaku:
   daftar tetap membaca `ClaimItems` (−46% sel tersedia kalau tidak). Pemilik repo
   memilih begitu, 12 Sep 2026.
 - **Tahap 3 butir D (`gviz/tq`) ditolak.** Alasannya di `docs/backlog.md`.
-- **Unit di luar `Population` sekarang DITOLAK saat submit** — membatalkan
-  bagian 2 deskripsi PR #1, yang menerimanya dan menandainya untuk pemeriksaan
-  manual. Diputuskan 12 Sep 2026: ada sistem pencatatan instalasi di luar portal
-  yang harus diperbarui lebih dulu. Klaimnya tetap tersimpan sebagai draft dan
-  memicu permintaan pendaftaran unit ke Administrator — pekerjaan lapangan tidak
-  boleh hilang.
+- **Unit di luar `Population` DITOLAK saat submit** — membatalkan bagian 2
+  deskripsi PR #1. Sudah dikerjakan (butir M): klaimnya tetap tersimpan sebagai
+  draft lengkap dengan lampirannya, satu baris masuk `UnitRequests`, dan
+  Administrator diberi tahu lewat email **dan** antrean. `resolveUnitRequests_`
+  menutup permintaan itu dari **keempat** jalur unit bisa masuk — jangan
+  gantungkan ke satu pemanggil saja.
 - **Tanggal impor selalu `dd/mm/yyyy`.** Lewat `parseLocalDate_` di `Units.gs`,
   tidak pernah lewat `new Date()`. `03/09/2025` adalah 3 September, dan
   `new Date()` membacanya 9 Maret. Yang tersimpan di sheet adalah ISO —

@@ -2819,11 +2819,14 @@ function runLookup(serial) {
       '</div>' +
       (data.registered === false
         ? '<div class="notice" style="margin-top:8px">⚠ <b class="mono">' + h(data.serial) +
-          '</b> is not on the unit list' + (seesInternals() ? ' the Population sheet supplies' : '') +
-          '. ' + (seesInternals()
-            ? 'This claim cannot be attributed to a principal on its own — an administrator will ' +
-              'have to assign one, or register the unit. '
-            : 'The claim can still be filed, but an administrator will have to check the unit. ') +
+          '</b> is not on the unit register' +
+          (seesInternals() ? ' the Population sheet supplies' : '') + '. ' +
+          // Said here, at the serial number, rather than after the whole form
+          // has been filled in: the answer is the same either way, and knowing
+          // it now is worth more than knowing it in five minutes.
+          'You can still fill this claim in and it will be <b>saved as a draft</b>, but it ' +
+          'cannot be submitted until the unit is registered — the administrator is asked ' +
+          'automatically, and you are emailed when it is done. ' +
           'Worth checking the serial number against the machine first. ' +
           adminContactHtml() + '</div>'
         : '') +
@@ -3001,11 +3004,17 @@ function saveForm(thenSubmit) {
     })
     .then(function (result) {
       closeModal();
-      toast(thenSubmit
-        ? result.claim.claimId + ' submitted.'
-        : 'Draft saved as ' + result.claim.claimId + '.', 'ok');
+      // Submitting a claim on a unit nobody has registered comes back as the
+      // draft it stayed, with the request that was raised for it.
+      const held = thenSubmit && result.claim && result.claim.unitRequest;
+      toast(held
+        ? 'Saved as a draft — the unit has to be registered first.'
+        : thenSubmit
+          ? result.claim.claimId + ' submitted.'
+          : 'Draft saved as ' + result.claim.claimId + '.', held ? 'info' : 'ok');
       reportUploadFailures();
-      if (thenSubmit) showSubmitted(result.claim);
+      if (held) showUnitHeld(result.claim);
+      else if (thenSubmit) showSubmitted(result.claim);
       loadClaims();
     })
     .catch(function (e) {
@@ -3207,6 +3216,34 @@ function prepareFile(file, onProgress, maxBytes) {
       img.src = String(reader.result);
     };
     reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * The claim could not be submitted, and that is not a failure.
+ *
+ * Everything the engineer typed and photographed is saved and safe; what is
+ * missing is the unit, which is somebody else's job. So this says what happens
+ * next and who is doing it, rather than reporting an error at somebody who did
+ * nothing wrong.
+ */
+function showUnitHeld(claim) {
+  openModal({
+    title: 'Saved — waiting for the unit to be registered',
+    size: 'narrow',
+    body: '<p><span class="mono">' + h(claim.serialNumber) + '</span> is not on the unit ' +
+      'register, so the claim cannot be submitted yet.</p>' +
+      '<p><b>Nothing you entered is lost.</b> <span class="mono">' + h(claim.claimId) +
+      '</span> is saved as a draft with its photos, and the administrator has been asked ' +
+      'to register the unit.</p>' +
+      '<p class="tiny">You will be emailed when it is done. The draft can then be ' +
+      'submitted exactly as it stands.</p>' +
+      '<p class="tiny">If the serial number is wrong, open the draft and correct it.</p>',
+    actions: [
+      { label: 'Close', close: true },
+      { label: 'Open the draft', primary: true,
+        onClick: function (close) { close(); openClaimPanel(claim.claimId); } }
+    ]
   });
 }
 
@@ -3911,6 +3948,15 @@ function promptAdvanceBulk() {
 function loadMaster(kind) {
   S.master.kind = kind;
   el('view').innerHTML = skeleton(5);
+  if (kind === 'requests') {
+    api('master.unitRequests', { all: S.master.allRequests || false })
+      .then(function (data) {
+        S.master.rows = data.rows;
+        S.master.requestsOpen = data.open;
+        renderMaster(data.rows.length);
+      }).catch(fail);
+    return;
+  }
   if (kind === 'units') {
     const f = unitFilters();
     api('master.units', {
@@ -3938,7 +3984,8 @@ const MASTER_TABS = [
   { id: 'products', label: 'Products' },
   { id: 'rules', label: 'Warranty Rules' },
   { id: 'distributors', label: 'Distributors' },
-  { id: 'units', label: 'Units' }
+  { id: 'units', label: 'Units' },
+  { id: 'requests', label: 'Registration Requests' }
 ];
 
 function renderMaster(total) {
@@ -3961,6 +4008,28 @@ function renderMaster(total) {
   }[kind];
 
   const body = rows.map(function (r) {
+    if (kind === 'requests') {
+      const open = r.status === 'Open';
+      return '<tr><td class="mono">' + h(r.serialNumber) + '</td>' +
+        '<td' + (r.productGuess ? '' : ' class="dimmer"') + '>' +
+          h(r.productGuess || 'not known') + '</td>' +
+        '<td class="stack">' + h(r.customerName || '—') +
+          (r.distributorName
+            ? '<span class="tiny dim">via ' + h(r.distributorName) + '</span>' : '') + '</td>' +
+        '<td class="dim">' + h(r.requestedByName || r.requestedBy) + '</td>' +
+        '<td class="tiny">' + h(fmtDate(r.requestedAt)) + '</td>' +
+        '<td><button class="btn sm" data-draft="' + h(r.claimId) + '" type="button">' +
+          h(r.claimId) + '</button></td>' +
+        '<td>' + (open ? '<span class="pill p-wait">Waiting</span>'
+          : r.status === 'Registered' ? '<span class="pill p-ok">Registered</span>'
+            : '<span class="pill p-no">Turned down</span>') + '</td>' +
+        '<td>' + (open
+          ? '<button class="btn sm" data-register="' + h(r.serialNumber) + '" type="button">' +
+            'Register</button> <button class="btn sm" data-reject="' + h(r.requestId) +
+            '" type="button">Turn down</button>'
+          : '<span class="tiny dim">' + h(r.outcome || '') + '</span>') + '</td>' +
+        '</tr>';
+    }
     if (kind === 'units') {
       return '<tr><td class="mono">' + h(r.serialNumber) + '</td>' +
         '<td class="stack">' + h(r.product) +
@@ -4043,7 +4112,10 @@ function renderMaster(total) {
       '<span class="tiny">' + total + ' item' + (total === 1 ? '' : 's') +
         (kind === 'units' ? '' : ' · ' + active + ' active') + '</span>',
       '<span class="spacer"></span>',
-      kind === 'units'
+      kind === 'requests'
+        ? '<label class="inline"><input type="checkbox" id="allRequests"' +
+          (S.master.allRequests ? ' checked' : '') + '> Show ones already handled</label>'
+        : kind === 'units'
         ? '<button class="btn" id="updateUnits" type="button">Update from CSV</button>' +
           '<button class="btn" id="importUnits" type="button">Import from Excel</button>' +
           '<button class="btn pri" id="addUnit" type="button">Register unit</button>'
@@ -4053,7 +4125,12 @@ function renderMaster(total) {
     '<div class="tablewrap"><table class="data"><thead><tr>' +
       head.map(function (x) { return '<th>' + h(x) + '</th>'; }).join('') +
       '</tr></thead><tbody>' + body + '</tbody></table></div>',
-    kind === 'units'
+    kind === 'requests'
+      ? '<p class="tiny">A claim on a unit the register does not carry is held as a draft and ' +
+        'lands here. Registering the unit \u2014 from this row, from the Units tab, from a CSV, or ' +
+        'in the principal\u2019s own file \u2014 closes the request and emails whoever raised it, ' +
+        'and their draft goes through untouched. Turning one down leaves the draft with them.</p>'
+      : kind === 'units'
       ? '<div id="principalHealth"></div>' +
         '<p class="tiny">The principal\u2019s file brings the serial numbers and what they are. ' +
         'How the unit reached the hospital \u2014 direct or through a distributor, when it was ' +
@@ -4081,6 +4158,23 @@ function renderMaster(total) {
   if (addU) addU.addEventListener('click', function () { openUnitForm(null); });
   const upd = el('updateUnits');
   if (upd) upd.addEventListener('click', promptUnitUpdate);
+  const allReq = el('allRequests');
+  if (allReq) allReq.addEventListener('change', function () {
+    S.master.allRequests = this.checked; loadMaster('requests');
+  });
+  el('view').querySelectorAll('[data-register]').forEach(function (b) {
+    // Straight into the unit form with the serial already in it: the whole
+    // point of the queue is that nobody retypes anything.
+    b.addEventListener('click', function () {
+      openUnitForm(null, b.dataset.register);
+    });
+  });
+  el('view').querySelectorAll('[data-reject]').forEach(function (b) {
+    b.addEventListener('click', function () { rejectUnitRequest(b.dataset.reject); });
+  });
+  el('view').querySelectorAll('[data-draft]').forEach(function (b) {
+    b.addEventListener('click', function () { openClaimPanel(b.dataset.draft); });
+  });
   el('view').querySelectorAll('[data-unit]').forEach(function (b) {
     b.addEventListener('click', function () {
       openUnitForm(rows.filter(function (r) {
@@ -4194,7 +4288,29 @@ const UNIT_FORM = [
   { key: 'WarrantyNote', label: 'Note', from: 'warrantyNote' }
 ];
 
-function openUnitForm(record) {
+function rejectUnitRequest(requestId) {
+  openModal({
+    title: 'Turn down this request',
+    size: 'narrow',
+    body: '<p class="tiny">The draft stays with whoever wrote it \u2014 correcting the serial ' +
+      'number or abandoning the claim is their decision, not yours. They are emailed the ' +
+      'reason you give here.</p>' +
+      '<label class="field"><span>Reason <b class="req">*</b></span>' +
+      '<textarea id="rejReason"></textarea></label>',
+    actions: [
+      { label: 'Cancel', close: true },
+      { label: 'Turn down', danger: true, onClick: function (close) {
+        const reason = el('rejReason').value.trim();
+        if (!reason) { toast('Say why, so the requester knows what to do.', 'err'); return; }
+        api('master.rejectUnitRequest', { requestId: requestId, reason: reason })
+          .then(function () { close(); toast('Request turned down.', 'ok'); loadMaster('requests'); })
+          .catch(fail);
+      } }
+    ]
+  });
+}
+
+function openUnitForm(record, prefillSerial) {
   const isNew = !record;
   const field = function (spec) {
     const value = record ? (record[spec.from] === undefined ? '' : record[spec.from]) : '';
@@ -4223,7 +4339,8 @@ function openUnitForm(record) {
     body:
       (isNew
         ? '<label class="field"><span>Serial number</span>' +
-          '<input type="text" id="u_Batch" class="mono"></label>'
+          '<input type="text" id="u_Batch" class="mono" value="' +
+          h(prefillSerial || '') + '"></label>'
         : '<p class="tiny">Warranty dates are worked out from the rules when this is saved. ' +
           'They are not editable here.</p>') +
       UNIT_FORM.map(field).join('') +
@@ -4242,7 +4359,7 @@ function openUnitForm(record) {
         api('master.saveUnit', payload).then(function () {
           close();
           toast(isNew ? payload.Batch + ' registered.' : payload.Batch + ' saved.', 'ok');
-          loadMaster('units');
+          loadMaster(prefillSerial ? 'requests' : 'units');
         }).catch(fail);
       } }
     ]

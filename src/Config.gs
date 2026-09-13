@@ -24,7 +24,8 @@ const SHEET = {
   POPULATION: 'Population',
   PRODUCTS: 'Products',
   RULES: 'WarrantyRules',
-  DISTRIBUTORS: 'Distributors'
+  DISTRIBUTORS: 'Distributors',
+  UNIT_REQUESTS: 'UnitRequests'
 };
 
 const SCHEMA = {};
@@ -157,6 +158,30 @@ SCHEMA[SHEET.RULES] = [
 ];
 
 SCHEMA[SHEET.DISTRIBUTORS] = ['DistributorID', 'Name', 'Email', 'Active', 'Notes'];
+
+/**
+ * A unit somebody found in a hospital that the register has never heard of.
+ *
+ * The portal refuses to file a claim on it, because there is a separate system
+ * of record for installations that has to be updated first and because a
+ * distributor who can claim on an unreported unit never reports one. But the
+ * engineer standing in front of the broken machine has already typed the fault
+ * and photographed the part, and none of that may be thrown away — so the claim
+ * waits as a draft and this row is what gets the unit registered.
+ */
+SCHEMA[SHEET.UNIT_REQUESTS] = [
+  'RequestID', 'SerialNumber', 'ProductGuess',
+  'CustomerID', 'CustomerName', 'DistributorID',
+  'Note', 'DriveFolderId', 'ClaimID', 'Status',
+  'RequestedBy', 'RequestedByName', 'RequestedAt',
+  'HandledBy', 'HandledAt', 'Outcome'
+];
+
+const UNIT_REQUEST_STATUS = {
+  OPEN: 'Open',
+  REGISTERED: 'Registered',
+  REJECTED: 'Rejected'
+};
 
 /**
  * Sheets that arrive from the old workbook as a bare list with no header row.

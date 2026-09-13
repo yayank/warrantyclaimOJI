@@ -19,7 +19,9 @@ const TEMPLATE = {
   DECISION_ADM: 'DECISION_ADM',
   ORDER_FORWARD: 'ORDER_FORWARD',
   CLAIM_RETURN: 'CLAIM_RETURN',
-  CLAIM_AMEND: 'CLAIM_AMEND'
+  CLAIM_AMEND: 'CLAIM_AMEND',
+  UNIT_REQUEST: 'UNIT_REQUEST',
+  UNIT_REQUEST_DONE: 'UNIT_REQUEST_DONE'
 };
 
 /**
@@ -161,6 +163,45 @@ const DEFAULT_TEMPLATES = [
       '{{/Changes}}',
       'Amended by {{AmendedBy}} on {{AmendedAt}}.',
       '{{Reason}}'
+    ].join('\n')
+  },
+  {
+    code: TEMPLATE.UNIT_REQUEST,
+    name: 'Unit Registration Request',
+    title: 'UNIT NOT ON THE REGISTER',
+    subject: '[Warranty Claim] Register unit {{SerialNumber}} — {{Customer}}',
+    required: ['{{SerialNumber}}'],
+    body: [
+      'A claim was raised on a unit the register does not carry, so it could not',
+      'be submitted. The claim is waiting as a draft and will go through as soon',
+      'as the unit exists.',
+      '',
+      'Serial no.  {{SerialNumber}}',
+      'Product     {{ProductGuess}}',
+      'Customer    {{Customer}}',
+      'Distributor {{Distributor}}',
+      'Draft       {{ClaimID}}',
+      '',
+      'Reported by {{RequesterName}} on {{RequestedAt}}.',
+      '{{Note}}',
+      '',
+      'Register the unit under Master data → Units, or reject the request if the',
+      'serial number is wrong.'
+    ].join('\n')
+  },
+  {
+    code: TEMPLATE.UNIT_REQUEST_DONE,
+    name: 'Unit Registration Answered',
+    title: 'UNIT REGISTRATION',
+    subject: '[Warranty Claim] Unit {{SerialNumber}} — {{Outcome}}',
+    required: ['{{SerialNumber}}', '{{Outcome}}'],
+    body: [
+      '{{Message}}',
+      '',
+      'Serial no. {{SerialNumber}}',
+      'Draft      {{ClaimID}}',
+      '',
+      'Handled by {{HandledBy}} on {{HandledAt}}.'
     ].join('\n')
   }
 ];

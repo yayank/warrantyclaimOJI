@@ -51,7 +51,7 @@ Yang disunting tetap `src/`. Setelah berubah, jalankan `node tools/bundle.js` un
 ```bash
 node tools/verify-warranty.js units.json    # 22 pemeriksaan
 node tools/verify-access.js                 # 27 pemeriksaan
-node tools/verify-templates.js              # 18 pemeriksaan
+node tools/verify-templates.js              # 19 pemeriksaan
 node tools/verify-sheets.js                 # 27 pemeriksaan
 node tools/verify-payload.js                # 13 pemeriksaan
 node tools/verify-tabs.js                   # 364 pemeriksaan
@@ -75,6 +75,7 @@ node tools/verify-unit-warranty.js          # 54 pemeriksaan
 node tools/verify-two-tier.js               # 57 pemeriksaan
 node tools/verify-unit-admin.js             # 56 pemeriksaan
 node tools/verify-rules-admin.js            # 57 pemeriksaan
+node tools/verify-unit-requests.js          # 50 pemeriksaan
 ```
 
 Penguji garansi menjalankan `Warranty.gs` apa adanya terhadap seluruh 2.610 unit di berkas Anda. Hasilnya: rumus 22 bulan cocok dengan sheet pada **1.112 dari 1.112 unit `XT` (100%)**, seluruh 1.497 unit `C` dilempar ke pemeriksaan manual, dan satu serial number salah ketik (`XF2407094`) ikut dilempar ke manual alih-alih ditebak.

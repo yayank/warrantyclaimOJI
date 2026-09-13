@@ -938,6 +938,26 @@ function submitClaim_(session, payload) {
       throw new Error('This claim still needs ' + problems.join(', ') + '.');
     }
 
+    // A unit the register has never heard of cannot be claimed on: there is a
+    // separate system of record for installations that has to be updated first,
+    // and a distributor who can claim on an unreported unit never reports one.
+    //
+    // Checked here rather than before the completeness rules above, on purpose.
+    // The draft that waits has to be one that can go through untouched the
+    // moment the unit exists, and a half-filled one cannot. The claim form warns
+    // about the unit as soon as the serial number is typed, so nobody reaches
+    // this having filled the whole thing in unwarned.
+    if (!isRegisteredUnit_(claim.SerialNumber)) {
+      const request = openUnitRequest_(session, claim);
+      const held = getClaim_(session, claim.ClaimID);
+      held.unitRequest = {
+        requestId: request.RequestID,
+        serialNumber: request.SerialNumber,
+        requestedAt: request.RequestedAt
+      };
+      return held;
+    }
+
     // The reference number belongs to the day of submission, not the day the
     // draft was started, or the principal's daily batch would contain claims
     // that were not submitted that day.

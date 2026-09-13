@@ -462,6 +462,7 @@ function saveUnit_(session, payload) {
 
     clearReferenceCache_();
     recomputeUnitWarranty_([serial]);
+    resolveUnitRequests_(session);
     return unitAdminRow_(findBy_(SHEET.POPULATION, 'Batch', serial));
   });
 }
@@ -616,11 +617,204 @@ function applyUnitUpdate_(session, payload) {
 
     clearReferenceCache_();
     const recomputed = recomputeUnitWarranty_(Object.keys(accepted));
+    resolveUnitRequests_(session);
     return {
       written: written,
       columns: Object.keys(touched),
       recomputed: recomputed.changed,
       remaining: Math.max(0, (p.rows || []).length - rows.length)
     };
+  });
+}
+
+/* ============================================ units the register has never seen */
+
+/**
+ * Opens — or refreshes — the request to register a unit.
+ *
+ * One row per draft, not one per serial number: two engineers finding the same
+ * unregistered machine each have a claim waiting, and each has to be told when
+ * it can go through. Pressing Submit again on the same draft updates the row it
+ * already has rather than filling the queue with copies of one request.
+ */
+function openUnitRequest_(session, claim) {
+  const serial = String(claim.SerialNumber || '').trim().toUpperCase();
+  const existing = readSheetRows_(SHEET.UNIT_REQUESTS).filter(function (r) {
+    return String(r.ClaimID) === String(claim.ClaimID) &&
+      r.Status === UNIT_REQUEST_STATUS.OPEN;
+  })[0];
+
+  const fields = {
+    SerialNumber: serial,
+    ProductGuess: String(claim.ProductName || ''),
+    CustomerID: String(claim.CustomerID || ''),
+    CustomerName: String(claim.CustomerName || ''),
+    DistributorID: String(claim.DistributorID || ''),
+    Note: String(claim.ProblemDescription || '').slice(0, 500),
+    DriveFolderId: String(claim.DriveFolderId || ''),
+    ClaimID: String(claim.ClaimID),
+    Status: UNIT_REQUEST_STATUS.OPEN,
+    RequestedBy: session.email,
+    RequestedByName: session.name || session.email,
+    RequestedAt: nowIso_()
+  };
+
+  let row;
+  if (existing) {
+    setCells_(SHEET.UNIT_REQUESTS, 'RequestID', existing.RequestID, fields);
+    row = Object.assign({}, existing, fields);
+  } else {
+    row = Object.assign({ RequestID: nextId_(SHEET.UNIT_REQUESTS, 'RequestID', 'UR') },
+      fields, { HandledBy: '', HandledAt: '', Outcome: '' });
+    insert_(SHEET.UNIT_REQUESTS, row);
+  }
+
+  audit_(session, 'UnitRequest', {
+    claimId: claim.ClaimID, field: 'unit.' + serial,
+    newValue: 'registration requested', isTest: isTrue_(claim.IsTest)
+  });
+
+  // Both, and the owner asked for both: the queue is where it gets worked, the
+  // email is what stops it waiting a day for somebody to open that screen.
+  // Somebody is standing in front of a broken machine.
+  sendMail_({
+    code: TEMPLATE.UNIT_REQUEST,
+    to: adminEmails_(),
+    claimIds: [claim.ClaimID],
+    isTest: isTrue_(claim.IsTest),
+    testRedirectTo: session.email,
+    linkQuery: 'page=master&kind=requests',
+    linkLabel: 'Open the registration queue',
+    data: {
+      SerialNumber: serial,
+      ProductGuess: row.ProductGuess || 'not known',
+      Customer: row.CustomerName,
+      Distributor: distributorName_(row.DistributorID) || 'sold direct, or not recorded',
+      ClaimID: row.ClaimID,
+      RequesterName: row.RequestedByName,
+      RequestedAt: formatDate_(row.RequestedAt),
+      Note: row.Note
+    }
+  });
+
+  return row;
+}
+
+/** The queue, and by default only what is still waiting. */
+function listUnitRequests_(session, filter) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const f = filter || {};
+  const rows = readSheetRows_(SHEET.UNIT_REQUESTS).filter(function (r) {
+    return f.all ? true : r.Status === UNIT_REQUEST_STATUS.OPEN;
+  });
+  return {
+    open: readSheetRows_(SHEET.UNIT_REQUESTS).filter(function (r) {
+      return r.Status === UNIT_REQUEST_STATUS.OPEN;
+    }).length,
+    rows: rows.map(function (r) {
+      return {
+        requestId: r.RequestID,
+        serialNumber: r.SerialNumber,
+        productGuess: r.ProductGuess,
+        customerName: r.CustomerName,
+        distributorName: distributorName_(r.DistributorID),
+        note: r.Note,
+        claimId: r.ClaimID,
+        status: r.Status,
+        requestedBy: r.RequestedBy,
+        requestedByName: r.RequestedByName,
+        requestedAt: r.RequestedAt,
+        handledBy: r.HandledBy,
+        handledAt: r.HandledAt,
+        outcome: r.Outcome
+      };
+    }).sort(function (a, b) {
+      return String(a.requestedAt).localeCompare(String(b.requestedAt));
+    })
+  };
+}
+
+/** How many are waiting, for the badge, without building the list. */
+function openUnitRequestCount_() {
+  return readSheetRows_(SHEET.UNIT_REQUESTS).filter(function (r) {
+    return r.Status === UNIT_REQUEST_STATUS.OPEN;
+  }).length;
+}
+
+function closeUnitRequest_(session, request, status, outcome, message) {
+  const stamp = nowIso_();
+  setCells_(SHEET.UNIT_REQUESTS, 'RequestID', request.RequestID, {
+    Status: status, HandledBy: session.email, HandledAt: stamp, Outcome: outcome
+  });
+  audit_(session, 'UnitRequest', {
+    claimId: request.ClaimID, field: 'unit.' + request.SerialNumber,
+    oldValue: UNIT_REQUEST_STATUS.OPEN, newValue: status
+  });
+  sendMail_({
+    code: TEMPLATE.UNIT_REQUEST_DONE,
+    to: [request.RequestedBy],
+    claimIds: [request.ClaimID],
+    testRedirectTo: session.email,
+    linkQuery: 'page=claim&id=' + request.ClaimID,
+    linkLabel: 'Open the draft',
+    data: {
+      SerialNumber: request.SerialNumber,
+      ClaimID: request.ClaimID,
+      Outcome: outcome,
+      Message: message,
+      HandledBy: session.email,
+      HandledAt: formatDate_(stamp)
+    }
+  });
+}
+
+/**
+ * Closes every open request whose unit now exists.
+ *
+ * Deliberately not tied to the unit form: a unit can arrive through the form,
+ * through the CSV update, or in the principal's own workbook, and a request
+ * left open behind any one of those routes is a draft nobody ever hears about
+ * again. So this asks the register rather than trusting the caller, and every
+ * path that can add a unit calls it.
+ */
+function resolveUnitRequests_(session) {
+  const open = readSheetRows_(SHEET.UNIT_REQUESTS).filter(function (r) {
+    return r.Status === UNIT_REQUEST_STATUS.OPEN;
+  });
+  if (!open.length) return { resolved: 0 };
+
+  let resolved = 0;
+  open.forEach(function (request) {
+    if (!isRegisteredUnit_(request.SerialNumber)) return;
+    resolved++;
+    closeUnitRequest_(session, request, UNIT_REQUEST_STATUS.REGISTERED, 'registered',
+      'The unit has been registered. Your draft can now be submitted as it stands — ' +
+      'nothing needs typing again.');
+  });
+  return { resolved: resolved };
+}
+
+/**
+ * Turns a request down: the serial number is wrong, or the unit is not ours.
+ *
+ * The draft is left exactly where it is. It belongs to whoever wrote it, and
+ * deciding what to do with it — correct the serial number, or abandon it — is
+ * theirs, not the administrator's.
+ */
+function rejectUnitRequest_(session, payload) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const reason = String((payload || {}).reason || '').trim();
+  if (!reason) throw new Error('Turning a request down has to say why.');
+
+  return withLock_(function () {
+    const request = findBy_(SHEET.UNIT_REQUESTS, 'RequestID', (payload || {}).requestId);
+    if (!request) throw new Error('Request not found.');
+    if (request.Status !== UNIT_REQUEST_STATUS.OPEN) {
+      throw new Error('That request has already been handled.');
+    }
+    closeUnitRequest_(session, request, UNIT_REQUEST_STATUS.REJECTED, 'not registered',
+      'This unit was not registered: ' + reason + ' Your draft is still there — ' +
+      'correct the serial number and submit it again.');
+    return listUnitRequests_(session, {});
   });
 }
